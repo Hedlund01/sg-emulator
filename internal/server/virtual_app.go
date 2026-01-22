@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"sg-emulator/internal/scalegraph"
@@ -20,16 +21,17 @@ type VirtualApp struct {
 
 // newVirtualApp creates a new VirtualApp without any transports.
 // This is internal - use Server.CreateVirtualApp() to create and register.
-func newVirtualApp(requestChan chan<- Request) (*VirtualApp, error) {
+func newVirtualApp(requestChan chan<- Request, logger *slog.Logger) (*VirtualApp, error) {
 	id, err := scalegraph.NewScalegraphId()
 	if err != nil {
 		return nil, err
 	}
 
+	logger.Debug("Creating virtual app", "id", id)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &VirtualApp{
 		id:         id,
-		client:     NewClient(requestChan),
+		client:     NewClient(requestChan, logger.With("vapp_id", id)),
 		transports: make([]Transport, 0),
 		ctx:        ctx,
 		cancel:     cancel,

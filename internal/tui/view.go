@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 
 	"sg-emulator/internal/scalegraph"
@@ -135,7 +136,7 @@ func (m Model) viewCreateAccount() string {
 
 func (m Model) viewListAccounts() string {
 	title := titleStyle.Render("All Accounts")
-	accounts, err := m.app.GetAccounts()
+	accounts, err := m.app.GetAccounts(context.Background())
 	if err != nil {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -174,7 +175,7 @@ func (m Model) viewListAccounts() string {
 
 func (m Model) viewAccountDetail() string {
 	title := titleStyle.Render("Account Details")
-	accounts, err := m.app.GetAccounts()
+	accounts, err := m.app.GetAccounts(context.Background())
 	if err != nil {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -219,7 +220,7 @@ func (m Model) viewAccountDetail() string {
 
 func (m Model) viewAccountDetailSingle() string {
 	title := titleStyle.Render("Account Details")
-	accounts, err := m.app.GetAccounts()
+	accounts, err := m.app.GetAccounts(context.Background())
 	if err != nil {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -372,7 +373,7 @@ func (m Model) viewAccountDetailSingle() string {
 
 func (m Model) viewTransactionDetail() string {
 	title := titleStyle.Render("Transaction Details")
-	accounts, err := m.app.GetAccounts()
+	accounts, err := m.app.GetAccounts(context.Background())
 	if err != nil {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -500,7 +501,7 @@ func (m Model) viewTransactionDetail() string {
 
 func (m Model) viewSendMoney() string {
 	title := titleStyle.Render("Send Money")
-	accounts, err := m.app.GetAccounts()
+	accounts, err := m.app.GetAccounts(context.Background())
 	if err != nil {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,

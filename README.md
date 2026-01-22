@@ -151,11 +151,14 @@ Run multiple transports simultaneously:
 ## Command-Line Flags
 
 | Flag | Type | Description | Example |
-|------|------|-------------|---------|
+|------|------|-------------|---------||
 | `-tui` | boolean | Run with terminal UI interface | `-tui` |
 | `-rest` | integer | Number of virtual apps with REST transport | `-rest 3` |
 | `-grpc` | integer | Number of virtual apps with gRPC transport | `-grpc 5` |
 | `-mcp` | string | MCP server HTTP address | `-mcp localhost:3000` |
+| `-log-level` | string | Log level: debug, info, warn, error | `-log-level debug` |
+| `-log-format` | string | Log format: text or json | `-log-format json` |
+| `-log-file` | string | Log file path (auto-set for TUI mode) | `-log-file ./app.log` |
 
 ## Development
 
@@ -192,6 +195,45 @@ sg-emulator/
 ```
 
 See [claude.md](claude.md) for detailed architecture documentation.
+
+## Logging
+
+The application uses structured logging with Go's `slog` package.
+
+### Logging Modes
+
+**Headless Mode** - Logs to stdout:
+```bash
+# Text format at info level (default)
+./bin/app -rest 2
+
+# JSON format for log aggregation
+./bin/app -rest 2 -log-format json
+
+# Debug logging for troubleshooting
+./bin/app -rest 2 -log-level debug
+
+# Error-only logging
+./bin/app -rest 2 -log-level error
+```
+
+**TUI Mode** - Logs automatically written to file:
+```bash
+# Logs go to /tmp/sg-emulator.log by default
+./bin/app -tui -log-level debug
+
+# Custom log file location
+./bin/app -tui -log-file ./my-app.log
+
+# Monitor logs in another terminal
+tail -f /tmp/sg-emulator.log
+
+# JSON logs for parsing
+./bin/app -tui -log-format json -log-level debug
+tail -f /tmp/sg-emulator.log | jq
+```
+
+**Why separate logging for TUI?** When TUI is active, logs are automatically redirected to a file to prevent visual conflicts between log output and the terminal UI rendering. This allows you to monitor logs in a separate terminal while using the TUI.
 
 ## Examples
 

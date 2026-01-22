@@ -1,6 +1,10 @@
 package server
 
-import "sg-emulator/internal/scalegraph"
+import (
+	"context"
+
+	"sg-emulator/internal/scalegraph"
+)
 
 // RequestType identifies the type of operation to perform
 type RequestType int
@@ -20,6 +24,7 @@ type Request struct {
 	Type         RequestType
 	ResponseChan chan<- Response
 	Payload      any
+	Context      context.Context
 }
 
 // Response is sent from Server back to clients

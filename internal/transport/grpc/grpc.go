@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"log/slog"
 
 	"sg-emulator/internal/server"
 )
@@ -11,13 +12,16 @@ import (
 type Transport struct {
 	address string
 	client  *server.Client
+	logger  *slog.Logger
 }
 
 // New creates a new gRPC transport with the given address and client
-func New(address string, client *server.Client) *Transport {
+func New(address string, client *server.Client, logger *slog.Logger) *Transport {
+	logger.Info("gRPC transport created", "address", address)
 	return &Transport{
 		address: address,
 		client:  client,
+		logger:  logger,
 	}
 }
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log/slog"
 	"math/big"
 	"sort"
 	"sync"
@@ -11,43 +12,54 @@ import (
 
 // Registry manages VirtualApps and provides lookup capabilities.
 type Registry struct {
-	mu   sync.RWMutex
-	byID map[scalegraph.ScalegraphId]*VirtualApp
+	mu     sync.RWMutex
+	byID   map[scalegraph.ScalegraphId]*VirtualApp
+	logger *slog.Logger
 }
 
 // NewRegistry creates a new empty Registry
-func NewRegistry() *Registry {
+func NewRegistry(logger *slog.Logger) *Registry {
 	return &Registry{
-		byID: make(map[scalegraph.ScalegraphId]*VirtualApp),
+		byID:   make(map[scalegraph.ScalegraphId]*VirtualApp),
+		logger: logger,
 	}
 }
 
 // Register adds a VirtualApp to the registry
 func (r *Registry) Register(vapp *VirtualApp) error {
+	r.logger.Debug("Registering virtual app", "id", vapp.ID())
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if _, exists := r.byID[vapp.ID()]; exists {
+		r.logger.Warn("Virtual app already registered", "id", vapp.ID())
 		return fmt.Errorf("virtual app with ID %s already registered", vapp.ID())
 	}
 
 	r.byID[vapp.ID()] = vapp
+	r.logger.Info("Virtual app registered", "id", vapp.ID(), "total_apps", len(r.byID))
 	return nil
 }
 
 // Unregister removes a VirtualApp from the registry
 func (r *Registry) Unregister(id scalegraph.ScalegraphId) {
+	r.logger.Debug("Unregistering virtual app", "id", id)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	delete(r.byID, id)
+	r.logger.Info("Virtual app unregistered", "id", id, "remaining_apps", len(r.byID))
 }
 
 // GetByID returns a VirtualApp by its ScalegraphId
 func (r *Registry) GetByID(id scalegraph.ScalegraphId) (*VirtualApp, bool) {
+	r.logger.Debug("Looking up virtual app", "id", id)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	vapp, exists := r.byID[id]
+	if !exists {
+		r.logger.Debug("Virtual app not found", "id", id)
+	}
 	return vapp, exists
 }
 

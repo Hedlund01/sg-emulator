@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"sg-emulator/internal/scalegraph"
@@ -36,8 +37,9 @@ type MintArgs struct {
 
 // RunHTTPServer starts an MCP server over HTTP with SSE transport.
 // This allows the MCP server to run alongside TUI since it doesn't use stdio.
-func RunHTTPServer(ctx context.Context, addr string, client *server.Client, srv *server.Server) error {
-	mcpServer := createServer(client, srv)
+func RunHTTPServer(ctx context.Context, addr string, client *server.Client, srv *server.Server, logger *slog.Logger) error {
+	logger.Info("MCP server starting", "address", addr)
+	mcpServer := createServer(client, srv, logger)
 
 	handler := mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
 		return mcpServer
@@ -51,13 +53,18 @@ func RunHTTPServer(ctx context.Context, addr string, client *server.Client, srv 
 	// Handle graceful shutdown
 	go func() {
 		<-ctx.Done()
+		logger.Info("MCP server shutting down")
 		httpServer.Shutdown(context.Background())
 	}()
 
-	return httpServer.ListenAndServe()
+	err := httpServer.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
+		logger.Error("MCP server error", "error", err)
+	}
+	return err
 }
 
-func createServer(client *server.Client, srv *server.Server) *mcp.Server {
+func createServer(client *server.Client, srv *server.Server, logger *slog.Logger) *mcp.Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "scalegraph-mcp",
 		Version: "0.1.0",
@@ -73,7 +80,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		Name:        "create_account",
 		Description: "Create a new account with an optional initial balance",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateAccountArgs) (*mcp.CallToolResult, any, error) {
-		acc, err := client.CreateAccount(args.Balance)
+		acc, err := client.CreateAccount(context.Background(), args.Balance)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -89,7 +96,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		Name:        "get_accounts",
 		Description: "List all accounts in the scalegraph with their IDs and balances",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args any) (*mcp.CallToolResult, any, error) {
-		accounts, err := client.GetAccounts()
+		accounts, err := client.GetAccounts(context.Background())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -120,7 +127,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("invalid account ID: %v", err)
 		}
 
-		acc, err := client.GetAccount(id)
+		acc, err := client.GetAccount(context.Background(), id)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -146,7 +153,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("invalid 'to' account ID: %v", err)
 		}
 
-		if err := client.Transfer(fromID, toID, args.Amount); err != nil {
+		if err := client.Transfer(context.Background(), fromID, toID, args.Amount); err != nil {
 			return nil, nil, err
 		}
 
@@ -166,7 +173,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("invalid account ID: %v", err)
 		}
 
-		if err := client.Mint(toID, args.Amount); err != nil {
+		if err := client.Mint(context.Background(), toID, args.Amount); err != nil {
 			return nil, nil, err
 		}
 

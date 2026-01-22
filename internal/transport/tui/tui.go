@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,13 +16,16 @@ import (
 type Transport struct {
 	client *server.Client
 	server *server.Server
+	logger *slog.Logger
 }
 
 // New creates a new TUI transport with the given client and server
-func New(client *server.Client, srv *server.Server) *Transport {
+func New(client *server.Client, srv *server.Server, logger *slog.Logger) *Transport {
+	logger.Info("TUI transport created")
 	return &Transport{
 		client: client,
 		server: srv,
+		logger: logger,
 	}
 }
 

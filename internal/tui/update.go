@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -115,21 +116,22 @@ func (m Model) updateCreateAccount(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		// Update focus and styles
-		if m.createAccountFocus == 0 {
+		switch m.createAccountFocus {
+		case 0:
 			cmd = m.balanceInput.Focus()
 			m.balanceInput.PromptStyle = focusedLabelStyle
 			m.balanceInput.TextStyle = focusedLabelStyle
 			m.nameInput.Blur()
 			m.nameInput.PromptStyle = blurredLabelStyle
 			m.nameInput.TextStyle = blurredLabelStyle
-		} else if m.createAccountFocus == 1 {
+		case 1:
 			m.balanceInput.Blur()
 			m.balanceInput.PromptStyle = blurredLabelStyle
 			m.balanceInput.TextStyle = blurredLabelStyle
 			cmd = m.nameInput.Focus()
 			m.nameInput.PromptStyle = focusedLabelStyle
 			m.nameInput.TextStyle = focusedLabelStyle
-		} else {
+		default:
 			m.balanceInput.Blur()
 			m.balanceInput.PromptStyle = blurredLabelStyle
 			m.balanceInput.TextStyle = blurredLabelStyle
@@ -147,7 +149,7 @@ func (m Model) updateCreateAccount(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Invalid balance"
 				return m, nil
 			}
-			acc, err := m.app.CreateAccount(balance)
+			acc, err := m.app.CreateAccount(context.Background(), balance)
 			if err != nil {
 				m.statusMsg = err.Error()
 				return m, nil
@@ -168,21 +170,22 @@ func (m Model) updateCreateAccount(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.createAccountFocus = 0
 			}
 			// Update focus and styles
-			if m.createAccountFocus == 0 {
+			switch m.createAccountFocus {
+			case 0:
 				cmd = m.balanceInput.Focus()
 				m.balanceInput.PromptStyle = focusedLabelStyle
 				m.balanceInput.TextStyle = focusedLabelStyle
 				m.nameInput.Blur()
 				m.nameInput.PromptStyle = blurredLabelStyle
 				m.nameInput.TextStyle = blurredLabelStyle
-			} else if m.createAccountFocus == 1 {
+			case 1:
 				m.balanceInput.Blur()
 				m.balanceInput.PromptStyle = blurredLabelStyle
 				m.balanceInput.TextStyle = blurredLabelStyle
 				cmd = m.nameInput.Focus()
 				m.nameInput.PromptStyle = focusedLabelStyle
 				m.nameInput.TextStyle = focusedLabelStyle
-			} else {
+			default:
 				m.balanceInput.Blur()
 				m.balanceInput.PromptStyle = blurredLabelStyle
 				m.balanceInput.TextStyle = blurredLabelStyle
@@ -195,9 +198,10 @@ func (m Model) updateCreateAccount(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Update the focused input
-	if m.createAccountFocus == 0 {
+	switch m.createAccountFocus {
+	case 0:
 		m.balanceInput, cmd = m.balanceInput.Update(msg)
-	} else if m.createAccountFocus == 1 {
+	case 1:
 		m.nameInput, cmd = m.nameInput.Update(msg)
 	}
 	return m, cmd
@@ -212,7 +216,7 @@ func (m Model) updateListAccounts(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateAccountDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	accountCount, err := m.app.AccountCount()
+	accountCount, err := m.app.AccountCount(context.Background())
 	if err != nil {
 		m.statusMsg = err.Error()
 		return m, nil
@@ -232,7 +236,7 @@ func (m Model) updateAccountDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if accountCount > 0 {
 			// Get transaction count to set default to latest transaction
-			accounts, err := m.app.GetAccounts()
+			accounts, err := m.app.GetAccounts(context.Background())
 			if err != nil {
 				m.statusMsg = err.Error()
 				return m, nil
@@ -259,7 +263,7 @@ func (m Model) updateAccountDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateAccountDetailSingle(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	accounts, err := m.app.GetAccounts()
+	accounts, err := m.app.GetAccounts(context.Background())
 	if err != nil {
 		m.statusMsg = err.Error()
 		return m, nil
@@ -314,7 +318,7 @@ func (m Model) updateTransactionDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateSendMoney(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	accountCount, err := m.app.AccountCount()
+	accountCount, err := m.app.AccountCount(context.Background())
 	if err != nil {
 		m.statusMsg = err.Error()
 		return m, nil
@@ -384,14 +388,14 @@ func (m Model) updateSendMoney(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			accounts, err := m.app.GetAccounts()
+			accounts, err := m.app.GetAccounts(context.Background())
 			if err != nil {
 				m.statusMsg = err.Error()
 				return m, nil
 			}
 			fromID := accounts[m.sendFromIndex].ID()
 			toID := accounts[m.sendToIndex].ID()
-			err = m.app.Transfer(fromID, toID, amount)
+			err = m.app.Transfer(context.Background(), fromID, toID, amount)
 			if err != nil {
 				m.statusMsg = err.Error()
 				return m, nil
