@@ -30,22 +30,22 @@ The SG Emulator is a scalegraph emulator built with Go that demonstrates a distr
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        Infrastructure Layer                         │
 │                                                                     │
-│                      ┌─────────────────────┐                       │
-│                      │       Server        │                       │
-│                      │   (Main Goroutine)  │                       │
-│                      │                     │                       │
-│                      │  ┌───────────────┐  │                       │
-│                      │  │   Registry    │  │                       │
-│                      │  │  (VirtualApps)│  │                       │
-│                      │  └───────────────┘  │                       │
-│                      │                     │                       │
-│                      │  Request Channel    │                       │
-│                      │  ◄────────────────  │                       │
-│                      └──────────┬──────────┘                       │
-│                                 │                                  │
-└─────────────────────────────────┼──────────────────────────────────┘
-                                  │
-                                  ▼
+│   ┌────────────────┐     ┌─────────────────────┐                  │
+│   │   MCP Server   │     │       Server        │                  │
+│   │  HTTP :3000    │     │   (Main Goroutine)  │                  │
+│   │  (Concurrent)  │────>│                     │                  │
+│   └────────────────┘     │  ┌───────────────┐  │                  │
+│                          │  │   Registry    │  │                  │
+│                          │  │  (VirtualApps)│  │                  │
+│                          │  └───────────────┘  │                  │
+│                          │                     │                  │
+│                          │  Request Channel    │                  │
+│                          │  ◄────────────────  │                  │
+│                          └──────────┬──────────┘                  │
+│                                     │                             │
+└─────────────────────────────────────┼─────────────────────────────┘
+                                      │
+                                      ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         Business Logic Layer                        │
 │                                                                     │
@@ -69,11 +69,11 @@ The architecture is split into three distinct packages:
 
 - **`internal/scalegraph`**: Pure business logic (accounts, transactions, blockchain)
 - **`internal/server`**: Infrastructure (Server, Client, VirtualApp, Registry, messaging)
-- **`internal/transport`**: Transport implementations (REST, gRPC, TUI)
+- **`internal/transport`**: Transport implementations (REST, gRPC, TUI, MCP)
 
 ### 2. Channel-Based Communication
 
-All communication between VirtualApps and the main Server happens through Go channels:
+All communication between VirtualApps, MCP Server, and the main Server happens through Go channels:
 
 ```go
 type Request struct {
@@ -114,6 +114,7 @@ Each VirtualApp can have one or more transports. Current implementations:
 - **REST** (`internal/transport/rest`): HTTP API (stub)
 - **gRPC** (`internal/transport/grpc`): gRPC server (stub)
 - **TUI** (`internal/transport/tui`): Terminal UI using BubbleTea
+- **MCP** (`internal/transport/mcp`): Model Context Protocol server via HTTP/SSE
 
 ### 4. VirtualApp Architecture
 
@@ -164,8 +165,10 @@ sg-emulator/
 │   │   │   └── rest.go             # REST transport (stub)
 │   │   ├── grpc/
 │   │   │   └── grpc.go             # gRPC transport (stub)
-│   │   └── tui/
-│   │       └── tui.go              # TUI transport
+│   │   ├── tui/
+│   │   │   └── tui.go              # TUI transport
+│   │   └── mcp/
+│   │       └── mcp.go              # MCP server transport
 │   │
 │   └── tui/                        # TUI Implementation
 │       ├── model.go                # BubbleTea model
@@ -347,6 +350,33 @@ Creates:
 - 1 VirtualApp with TUI transport
 
 All VirtualApps share the same underlying `scalegraph.App` state via the Server.
+
+### MCP Server
+
+```bash
+./bin/app -mcp localhost:3000
+```
+
+Starts an MCP (Model Context Protocol) server on port 3000. The MCP server provides LLM-accessible tools:
+- `create_account`: Create a new account
+- `get_accounts`: List all accounts
+- `get_account`: Get account details by ID
+- `transfer`: Transfer funds between accounts
+- `mint`: Mint new tokens to an account
+- `get_virtual_nodes`: List all virtual apps
+
+The MCP server uses HTTP/SSE transport (not stdio), allowing it to run concurrently with TUI:
+
+```bash
+./bin/app -mcp localhost:3000 -rest 2 -tui
+```
+
+This starts:
+- MCP server on port 3000 (for LLM interaction)
+- 2 REST virtual apps
+- TUI interface (for human interaction)
+
+All interfaces share the same state and can see each other's changes in real-time.
 
 ## Business Logic (`internal/scalegraph`)
 
