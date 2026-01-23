@@ -5,6 +5,14 @@ import (
 	"sync"
 )
 
+// IBlockchain defines the interface for blockchain operations
+type IBlockchain interface {
+	append(trx *Transaction) *Block
+	Head() *Block
+	Tail() *Block
+	GetBlocks() []*Block
+}
+
 // Blockchain represents a chain of blocks using a linked list structure.
 // The chain stores only head and tail pointers, allowing O(1) append
 // and supporting chains of arbitrary length.

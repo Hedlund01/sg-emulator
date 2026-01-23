@@ -1,4 +1,5 @@
 package scalegraph
+
 import "context"
 
 import (

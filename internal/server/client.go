@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,19 +25,20 @@ func generateRequestID() string {
 // Client communicates with a Server via channels.
 // It provides the same API as scalegraph.App but sends requests through channels.
 type Client struct {
-	requestChan  chan<- Request
-	responseChan chan Response
-	timeout      time.Duration
-	logger       *slog.Logger
+	requestChan     chan<- Request
+	pendingRequests map[string]chan Response
+	mu              sync.Mutex
+	timeout         time.Duration
+	logger          *slog.Logger
 }
 
 // NewClient creates a new Client that sends requests to the given channel
 func NewClient(requestChan chan<- Request, logger *slog.Logger) *Client {
 	return &Client{
-		requestChan:  requestChan,
-		responseChan: make(chan Response, 10),
-		timeout:      30 * time.Second,
-		logger:       logger,
+		requestChan:     requestChan,
+		pendingRequests: make(map[string]chan Response),
+		timeout:         30 * time.Second,
+		logger:          logger,
 	}
 }
 
@@ -48,10 +50,28 @@ func (c *Client) SetTimeout(d time.Duration) {
 // sendRequest sends a request and waits for the response
 func (c *Client) sendRequest(ctx context.Context, reqType RequestType, payload any) (Response, error) {
 	traceID := trace.GetTraceID(ctx)
+	reqID := generateRequestID()
+
+	// Create a unique response channel for this request
+	respChan := make(chan Response, 1)
+
+	// Register the response channel
+	c.mu.Lock()
+	c.pendingRequests[reqID] = respChan
+	c.mu.Unlock()
+
+	// Ensure cleanup of pending request on exit
+	defer func() {
+		c.mu.Lock()
+		delete(c.pendingRequests, reqID)
+		c.mu.Unlock()
+		close(respChan)
+	}()
+
 	req := Request{
-		ID:           generateRequestID(),
+		ID:           reqID,
 		Type:         reqType,
-		ResponseChan: c.responseChan,
+		ResponseChan: respChan,
 		Payload:      payload,
 		Context:      ctx,
 	}
@@ -60,14 +80,21 @@ func (c *Client) sendRequest(ctx context.Context, reqType RequestType, payload a
 	select {
 	case c.requestChan <- req:
 		// Request sent successfully
+	case <-ctx.Done():
+		return Response{}, ctx.Err()
 	case <-time.After(c.timeout):
 		return Response{}, errors.New("request send timeout")
 	}
 
 	// Wait for response
 	select {
-	case resp := <-c.responseChan:
+	case resp := <-respChan:
 		return resp, nil
+	case <-ctx.Done():
+		if traceID != "" {
+			c.logger.Error("Request cancelled", "trace_id", traceID)
+		}
+		return Response{}, ctx.Err()
 	case <-time.After(c.timeout):
 		if traceID != "" {
 			c.logger.Error("Response timeout", "trace_id", traceID)

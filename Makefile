@@ -33,11 +33,13 @@ run: build
 # Run tests
 test:
 	@echo "Running tests..."
+	mockery
 	$(GOTEST) -v ./...
 
 # Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
+	mockery
 	$(GOTEST) -v -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"

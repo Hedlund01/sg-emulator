@@ -9,25 +9,29 @@ type Account struct {
 	mu         sync.RWMutex
 	id         ScalegraphId
 	balance    float64
-	blockchain *Blockchain
+	blockchain IBlockchain
 	valuestore map[string]string
 }
 
 // newAccount creates a new account with a unique ID and initial balance
 func newAccount() (*Account, error) {
+	return newAccountWithBlockchain(newBlockchain())
+}
+
+// newAccountWithBlockchain creates a new account with a provided blockchain (for testing)
+func newAccountWithBlockchain(blockchain IBlockchain) (*Account, error) {
 	id, err := NewScalegraphId()
 	if err != nil {
 		return nil, err
 	}
 
-	// Create account first (without blockchain)
+	// Create account with provided blockchain
 	acc := &Account{
 		id:         id,
 		balance:    0,
+		blockchain: blockchain,
 		valuestore: make(map[string]string),
 	}
-
-	acc.blockchain = newBlockchain()
 
 	return acc, nil
 }
@@ -45,7 +49,7 @@ func (a *Account) Balance() float64 {
 }
 
 // Blockchain returns the account's blockchain
-func (a *Account) Blockchain() *Blockchain {
+func (a *Account) Blockchain() IBlockchain {
 	return a.blockchain
 }
 
@@ -53,7 +57,7 @@ func (a *Account) updateValue(key, value string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	tx, err := newTransaction(nil, a, 0, value)
+	tx, err := newTransaction(a, a, 0, value)
 	if err != nil {
 		return err
 	}

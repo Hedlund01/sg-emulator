@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestNewAccount(t *testing.T) {
+func TestNewAccount_Integration(t *testing.T) {
 	acc, err := newAccount()
 	if err != nil {
 		t.Fatalf("newAccount() failed: %v", err)
@@ -27,7 +27,7 @@ func TestNewAccount(t *testing.T) {
 	}
 }
 
-func TestAccountID(t *testing.T) {
+func TestAccountID_Integration(t *testing.T) {
 	acc1, _ := newAccount()
 	acc2, _ := newAccount()
 
@@ -43,7 +43,7 @@ func TestAccountID(t *testing.T) {
 	}
 }
 
-func TestAccountBalance(t *testing.T) {
+func TestAccountBalance_Integration(t *testing.T) {
 	acc, _ := newAccount()
 
 	// Test initial balance
@@ -70,7 +70,7 @@ func TestAccountBalance(t *testing.T) {
 	}
 }
 
-func TestAccountMint(t *testing.T) {
+func TestAccountMint_Integration(t *testing.T) {
 	acc, _ := newAccount()
 
 	// Test minting positive amount
@@ -97,7 +97,7 @@ func TestAccountMint(t *testing.T) {
 	}
 }
 
-func TestAccountMintZero(t *testing.T) {
+func TestAccountMintZero_Integration(t *testing.T) {
 	acc, _ := newAccount()
 
 	// Minting 0 should work
@@ -110,7 +110,7 @@ func TestAccountMintZero(t *testing.T) {
 	}
 }
 
-func TestAccountBlockchain(t *testing.T) {
+func TestAccountBlockchain_Integration(t *testing.T) {
 	acc, _ := newAccount()
 
 	blockchain := acc.Blockchain()
@@ -132,7 +132,7 @@ func TestAccountBlockchain(t *testing.T) {
 	}
 }
 
-func TestAccountString(t *testing.T) {
+func TestAccountString_Integration(t *testing.T) {
 	acc, _ := newAccount()
 	acc.mint(123.45)
 
@@ -148,7 +148,7 @@ func TestAccountString(t *testing.T) {
 	}
 }
 
-func TestAccountConcurrentMint(t *testing.T) {
+func TestAccountConcurrentMint_Integration(t *testing.T) {
 	acc, _ := newAccount()
 	done := make(chan bool)
 
@@ -174,7 +174,7 @@ func TestAccountConcurrentMint(t *testing.T) {
 	}
 }
 
-func TestAccountUpdateValue(t *testing.T) {
+func TestAccountUpdateValue_Integration(t *testing.T) {
 	acc, _ := newAccount()
 
 	// Test updating value

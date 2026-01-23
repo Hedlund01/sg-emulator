@@ -1,0 +1,11 @@
+template: testify
+template-data:
+  unroll-variadic: true
+packages:
+  sg-emulator/internal/server:
+    interfaces:
+      Transport:
+        config:
+          dir: '{{.InterfaceDir}}/mocks'
+          structname: Mock{{.InterfaceName}}
+          filename: "mock_{{.InterfaceName}}.go"
