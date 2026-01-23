@@ -576,8 +576,7 @@ func BenchmarkServer_HandleRequest(b *testing.B) {
 		Context: context.Background(),
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		srv.handleRequest(req)
 	}
 }

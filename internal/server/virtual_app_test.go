@@ -501,19 +501,20 @@ func BenchmarkVirtualApp_Start(b *testing.B) {
 	logger := newTestLogger()
 	srv := New(logger)
 
-	// Pre-create virtual apps
-	vapps := make([]*VirtualApp, b.N)
-	for i := 0; i < b.N; i++ {
+	// Pre-create virtual apps to exclude creation/mock setup from benchmark
+	vapps := make([]*VirtualApp, 0, 1000)
+	for i := 0; i < 1000; i++ {
 		vapp, _ := srv.CreateVirtualApp()
 		mockTransport := mocks.NewMockTransport(b)
 		mockTransport.EXPECT().Start(mock.Anything).Return(nil).Maybe()
 		mockTransport.EXPECT().Stop().Return(nil).Maybe()
 		vapp.AddTransport(mockTransport)
-		vapps[i] = vapp
+		vapps = append(vapps, vapp)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		vapps[i].Start()
+	idx := 0
+	for b.Loop() {
+		vapps[idx%len(vapps)].Start()
+		idx++
 	}
 }

@@ -704,8 +704,7 @@ func BenchmarkXORDistance(b *testing.B) {
 	id1 := idRandom1
 	id2 := idRandom2
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = xorDistance(id1, id2)
 	}
 }
@@ -730,8 +729,7 @@ func BenchmarkGetKClosest(b *testing.B) {
 					reg.Register(vapp)
 				}
 
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					_, _ = reg.GetKClosest(target, k)
 				}
 			})
@@ -743,17 +741,19 @@ func BenchmarkGetKClosest(b *testing.B) {
 func BenchmarkRegistry_Register(b *testing.B) {
 	logger := newTestLogger()
 	srv := New(logger)
+	reg := NewRegistry(logger)
 
-	// Pre-create apps
-	apps := make([]*VirtualApp, b.N)
-	for i := 0; i < b.N; i++ {
-		apps[i], _ = srv.CreateVirtualApp()
+	// Pre-create apps to exclude creation time from benchmark
+	apps := make([]*VirtualApp, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		vapp, _ := srv.CreateVirtualApp()
+		apps = append(apps, vapp)
 	}
 
-	b.ResetTimer()
-	reg := NewRegistry(logger)
-	for i := 0; i < b.N; i++ {
-		reg.Register(apps[i])
+	idx := 0
+	for b.Loop() {
+		reg.Register(apps[idx%len(apps)])
+		idx++
 	}
 }
 
@@ -769,8 +769,7 @@ func BenchmarkRegistry_List(b *testing.B) {
 		reg.Register(vapp)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = reg.List()
 	}
 }

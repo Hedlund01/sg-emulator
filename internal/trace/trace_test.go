@@ -219,8 +219,7 @@ func BenchmarkWithTraceID(b *testing.B) {
 	ctx := context.Background()
 	traceID := "bench-trace-id"
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = WithTraceID(ctx, traceID)
 	}
 }
@@ -228,8 +227,7 @@ func BenchmarkWithTraceID(b *testing.B) {
 func BenchmarkNewTraceID(b *testing.B) {
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = NewTraceID(ctx)
 	}
 }
@@ -238,8 +236,7 @@ func BenchmarkGetTraceID(b *testing.B) {
 	ctx := context.Background()
 	ctx = WithTraceID(ctx, "bench-trace")
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = GetTraceID(ctx)
 	}
 }
@@ -247,8 +244,7 @@ func BenchmarkGetTraceID(b *testing.B) {
 func BenchmarkGetTraceID_NotFound(b *testing.B) {
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = GetTraceID(ctx)
 	}
 }

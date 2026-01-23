@@ -769,8 +769,7 @@ func BenchmarkClient_CreateAccount(b *testing.B) {
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		client.CreateAccount(ctx, 100.0)
 	}
 }
@@ -788,8 +787,7 @@ func BenchmarkClient_GetAccount(b *testing.B) {
 	// Create an account to retrieve
 	acc, _ := client.CreateAccount(ctx, 100.0)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		client.GetAccount(ctx, acc.ID())
 	}
 }
@@ -808,16 +806,14 @@ func BenchmarkClient_Transfer(b *testing.B) {
 	from, _ := client.CreateAccount(ctx, 1000000.0)
 	to, _ := client.CreateAccount(ctx, 0.0)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		client.Transfer(ctx, from.ID(), to.ID(), 1.0)
 	}
 }
 
 // BenchmarkGenerateRequestID benchmarks ID generation
 func BenchmarkGenerateRequestID(b *testing.B) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = generateRequestID()
 	}
 }

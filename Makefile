@@ -18,6 +18,12 @@ MAIN_PACKAGE=./cmd/app
 # Default target
 all: fmt test build
 
+
+# Run benchmarks
+bench:
+	@echo "Running benchmarks..."
+	$(GOTEST) -bench=. -benchmem ./...
+
 # Build the application
 build:
 	@echo "Building..."
