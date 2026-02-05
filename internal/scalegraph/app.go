@@ -125,12 +125,12 @@ func (a *App) GetAccount(ctx context.Context, id ScalegraphId) (*Account, error)
 }
 
 // Transfer transfers funds between two accounts atomically
-func (a *App) Transfer(ctx context.Context, from, to ScalegraphId, amount float64) error {
+func (a *App) Transfer(ctx context.Context, from, to ScalegraphId, amount float64, nonce uint64) error {
 	logger := a.logger
 	if traceID := trace.GetTraceID(ctx); traceID != "" {
 		logger = logger.With("trace_id", traceID)
 	}
-	logger.Debug("Transfer initiated", "from", from, "to", to, "amount", amount)
+	logger.Debug("Transfer initiated", "from", from, "to", to, "amount", amount, "nonce", nonce)
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -146,9 +146,24 @@ func (a *App) Transfer(ctx context.Context, from, to ScalegraphId, amount float6
 		return fmt.Errorf("destination account not found: %s", to)
 	}
 
+	// Reject self-transfers
+	if from == to {
+		logger.Warn("Self-transfer not allowed", "account", from)
+		return fmt.Errorf("self-transfer not allowed")
+	}
+
+	// Validate nonce before proceeding
+	expectedNonce := fromAcc.GetNonce() + 1
+	if nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "from", from, "expected", expectedNonce, "got", nonce)
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, nonce)
+	}
+
 	// Lock both accounts to ensure atomicity
+	// Lock from account first to validate nonce atomically
 	fromAcc.mu.Lock()
 	defer fromAcc.mu.Unlock()
+
 	toAcc.mu.Lock()
 	defer toAcc.mu.Unlock()
 

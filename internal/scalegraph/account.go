@@ -8,14 +8,13 @@ import (
 )
 
 type Account struct {
-	mu               sync.RWMutex
-	id               ScalegraphId
-	balance          float64
-	blockchain       IBlockchain
-	valuestore       map[string]string
-	publicKey        ed25519.PublicKey
-	certificate      *x509.Certificate
-	TransactionCount uint64 // Number of transactions sent from this account
+	mu          sync.RWMutex
+	id          ScalegraphId
+	balance     float64
+	blockchain  IBlockchain
+	valuestore  map[string]string
+	publicKey   ed25519.PublicKey
+	certificate *x509.Certificate
 }
 
 // newAccount creates a new account with a unique ID and initial balance
@@ -32,11 +31,10 @@ func newAccountWithBlockchain(blockchain IBlockchain) (*Account, error) {
 
 	// Create account with provided blockchain
 	acc := &Account{
-		id:               id,
-		balance:          0,
-		blockchain:       blockchain,
-		valuestore:       make(map[string]string),
-		TransactionCount: 0,
+		id:         id,
+		balance:    0,
+		blockchain: blockchain,
+		valuestore: make(map[string]string),
 	}
 
 	return acc, nil
@@ -48,13 +46,12 @@ func newAccountWithPublicKey(pubKey ed25519.PublicKey, cert *x509.Certificate) (
 	id := ScalegraphIdFromPublicKey(pubKey)
 
 	acc := &Account{
-		id:               id,
-		balance:          0,
-		blockchain:       newBlockchain(),
-		valuestore:       make(map[string]string),
-		publicKey:        pubKey,
-		certificate:      cert,
-		TransactionCount: 0,
+		id:          id,
+		balance:     0,
+		blockchain:  newBlockchain(),
+		valuestore:  make(map[string]string),
+		publicKey:   pubKey,
+		certificate: cert,
 	}
 
 	return acc, nil
@@ -85,6 +82,14 @@ func (a *Account) Balance() float64 {
 // Blockchain returns the account's blockchain
 func (a *Account) Blockchain() IBlockchain {
 	return a.blockchain
+}
+
+// GetNonce returns the current nonce for this account (blockchain length)
+// The next transaction from this account should use nonce = GetNonce() + 1
+func (a *Account) GetNonce() uint64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return uint64(a.blockchain.Len())
 }
 
 func (a *Account) updateValue(key, value string) error {

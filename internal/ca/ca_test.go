@@ -163,7 +163,7 @@ func TestVerifier(t *testing.T) {
 		From:      accountID,
 		To:        "destination-account",
 		Amount:    100.0,
-		Nonce:     "unique-nonce-123",
+		Nonce:     1,
 		Timestamp: 1234567890,
 	}
 

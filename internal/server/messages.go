@@ -73,6 +73,7 @@ type TransferPayload struct {
 	From   scalegraph.ScalegraphId
 	To     scalegraph.ScalegraphId
 	Amount float64
+	Nonce  uint64
 	// SignedRequest contains the signed transfer request (optional for backwards compatibility)
 	SignedRequest *crypto.SignedEnvelope[*crypto.TransferRequest]
 }

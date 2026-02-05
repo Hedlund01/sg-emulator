@@ -19,7 +19,7 @@ MAIN_PACKAGE=./cmd/app
 .PHONY: all build run test test-coverage clean deps fmt lint swagger rename-module help
 
 # Default target
-all: fmt test build
+all: clean deps fmt swagger test build
 
 
 # Run benchmarks
@@ -65,6 +65,10 @@ deps:
 	@echo "Downloading dependencies..."
 	$(GOMOD) download
 	$(GOMOD) tidy
+	$(GOCMD) get github.com/vektra/mockery/v3@v3.6.3
+	$(GOCMD) install github.com/vektra/mockery/v3@v3.6.3
+	$(GOCMD) install github.com/swaggo/swag/cmd/swag@latest
+	$(GOCMD) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	@echo "Dependencies ready"
 
 # Format code
@@ -81,8 +85,8 @@ lint:
 # Generate Swagger documentation (requires swag)
 swagger:
 	@echo "Generating Swagger documentation..."
-	@test -f $(HOME)/go/bin/swag || (echo "swag not installed. Install with: go install github.com/swaggo/swag/cmd/swag@latest" && exit 1)
-	$(HOME)/go/bin/swag init -g internal/transport/rest/rest.go -o internal/transport/rest/docs
+	@which swag > /dev/null 2>&1 || (echo "swag not installed. Install with: go install github.com/swaggo/swag/cmd/swag@latest" && exit 1)
+	swag init -g internal/transport/rest/rest.go -o internal/transport/rest/docs
 	@echo "Swagger docs generated in internal/transport/rest/docs"
 
 # Rename module for publishing

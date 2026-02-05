@@ -140,89 +140,6 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "crypto.Signature": {
-            "type": "object",
-            "properties": {
-                "algorithm": {
-                    "description": "\"Ed25519\"",
-                    "type": "string"
-                },
-                "signer_id": {
-                    "description": "Account ID (hash of public key)",
-                    "type": "string"
-                },
-                "timestamp": {
-                    "description": "Unix timestamp when signed",
-                    "type": "integer"
-                },
-                "value": {
-                    "description": "Raw signature bytes (64 bytes for Ed25519)",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                }
-            }
-        },
-        "crypto.SignedEnvelope-crypto_TransferRequest": {
-            "type": "object",
-            "properties": {
-                "certificate": {
-                    "description": "PEM-encoded X.509 certificate",
-                    "type": "string"
-                },
-                "payload": {
-                    "$ref": "#/definitions/crypto.TransferRequest"
-                },
-                "signature": {
-                    "$ref": "#/definitions/crypto.Signature"
-                }
-            }
-        },
-        "crypto.SignedEnvelope-rest_AccountRequest": {
-            "type": "object",
-            "properties": {
-                "certificate": {
-                    "description": "PEM-encoded X.509 certificate",
-                    "type": "string"
-                },
-                "payload": {
-                    "$ref": "#/definitions/rest.AccountRequest"
-                },
-                "signature": {
-                    "$ref": "#/definitions/crypto.Signature"
-                }
-            }
-        },
-        "crypto.TransferRequest": {
-            "type": "object",
-            "properties": {
-                "amount": {
-                    "type": "number"
-                },
-                "from": {
-                    "type": "string"
-                },
-                "nonce": {
-                    "type": "string"
-                },
-                "timestamp": {
-                    "type": "integer"
-                },
-                "to": {
-                    "type": "string"
-                }
-            }
-        },
-        "rest.AccountRequest": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string",
-                    "example": "6c439a07c32f7fb09c29403d8d2e4e47b8c5e8a9"
-                }
-            }
-        },
         "rest.AccountResponse": {
             "type": "object",
             "properties": {
@@ -266,20 +183,10 @@ const docTemplate = `{
             }
         },
         "rest.SignedAccountRequest": {
-            "type": "object",
-            "properties": {
-                "signed_envelope": {
-                    "$ref": "#/definitions/crypto.SignedEnvelope-rest_AccountRequest"
-                }
-            }
+            "type": "object"
         },
         "rest.SignedTransferRequest": {
-            "type": "object",
-            "properties": {
-                "signed_envelope": {
-                    "$ref": "#/definitions/crypto.SignedEnvelope-crypto_TransferRequest"
-                }
-            }
+            "type": "object"
         },
         "rest.TransferResponse": {
             "type": "object",

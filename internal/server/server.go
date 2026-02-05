@@ -223,7 +223,7 @@ func (s *Server) handleRequest(req Request) Response {
 			logger.Debug("Transfer signature verified", "from", payload.From, "to", payload.To, "amount", payload.Amount)
 		}
 
-		err := s.app.Transfer(req.Context, payload.From, payload.To, payload.Amount)
+		err := s.app.Transfer(req.Context, payload.From, payload.To, payload.Amount, payload.Nonce)
 		if err != nil {
 			resp.Success = false
 			resp.Error = err.Error()

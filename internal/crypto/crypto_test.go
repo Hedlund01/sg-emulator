@@ -92,7 +92,7 @@ func TestSignAndVerify(t *testing.T) {
 		From:      "test-from",
 		To:        "test-to",
 		Amount:    100.0,
-		Nonce:     "test-nonce",
+		Nonce:     1,
 		Timestamp: time.Now().Unix(),
 	}
 
@@ -127,7 +127,7 @@ func TestTransferRequestBytes(t *testing.T) {
 		From:      "abc123",
 		To:        "def456",
 		Amount:    50.5,
-		Nonce:     "unique-nonce",
+		Nonce:     123,
 		Timestamp: 1234567890,
 	}
 

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"strconv"
 	"time"
@@ -403,6 +402,10 @@ func (m Model) updateSendMoney(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			fromID := accounts[m.sendFromIndex].ID()
 			toID := accounts[m.sendToIndex].ID()
 
+			// Get account to calculate nonce
+			fromAccount := accounts[m.sendFromIndex]
+			nonce := fromAccount.GetNonce() + 1
+
 			// Load credentials (from cache or disk)
 			creds, err := m.getCredentials(fromID)
 			if err != nil {
@@ -422,7 +425,7 @@ func (m Model) updateSendMoney(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				From:      fromID.String(),
 				To:        toID.String(),
 				Amount:    amount,
-				Nonce:     generateNonce(),
+				Nonce:     nonce,
 				Timestamp: time.Now().Unix(),
 			}
 
@@ -502,11 +505,4 @@ func (m *Model) getCredentials(accountID scalegraph.ScalegraphId) (*AccountCrede
 	}
 	m.credentialCache[accountID] = creds
 	return creds, nil
-}
-
-// generateNonce generates a random nonce for transaction uniqueness
-func generateNonce() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
 }

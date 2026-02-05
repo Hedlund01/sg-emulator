@@ -124,7 +124,7 @@ func (ca *CA) CreateAccountCredentials() (*crypto.KeyPair, *x509.Certificate, st
 	}
 
 	// Store credentials
-	if err := ca.store.SaveAccountCredentials( keyPair.PrivateKey, keyPair.PublicKey, cert); err != nil {
+	if err := ca.store.SaveAccountCredentials(keyPair.PrivateKey, keyPair.PublicKey, cert); err != nil {
 		return nil, nil, "", fmt.Errorf("failed to save account credentials: %w", err)
 	}
 

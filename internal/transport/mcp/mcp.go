@@ -2,8 +2,6 @@ package mcp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -311,12 +309,13 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 				return nil, nil, fmt.Errorf("invalid to_id: %v", err)
 			}
 
-			// Generate nonce
-			nonceBytes := make([]byte, 16)
-			if _, err := rand.Read(nonceBytes); err != nil {
-				return nil, nil, fmt.Errorf("failed to generate nonce: %v", err)
+			// Get account to calculate nonce
+			fromIDParsed, _ := scalegraph.ScalegraphIdFromString(args.AccountID)
+			fromAccount, err := client.GetAccount(context.Background(), fromIDParsed)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to get account for nonce: %v", err)
 			}
-			nonce := hex.EncodeToString(nonceBytes)
+			nonce := fromAccount.GetNonce() + 1
 
 			// Create transfer request
 			transferReq := &crypto.TransferRequest{

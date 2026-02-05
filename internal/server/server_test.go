@@ -311,6 +311,7 @@ func TestServer_HandleRequest_Transfer(t *testing.T) {
 			From:   from.ID(),
 			To:     to.ID(),
 			Amount: 30.0,
+			Nonce:  3, // Accounts have blockchain length 2 after initial mint, so nonce is 3
 		},
 		Context: context.Background(),
 	}
@@ -437,6 +438,7 @@ func TestServer_HandleRequest_Errors(t *testing.T) {
 				From:   idRandom1,
 				To:     idRandom2,
 				Amount: 100.0,
+				Nonce:  1, // Non-existent accounts, nonce doesn't matter for this error test
 			},
 		},
 		{

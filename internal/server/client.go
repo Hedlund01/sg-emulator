@@ -214,10 +214,19 @@ func (c *Client) Transfer(ctx context.Context, from, to scalegraph.ScalegraphId,
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Transfer requested", logAttrs...)
+
+	// Get the source account to calculate nonce
+	fromAcc, err := c.GetAccount(ctx, from)
+	if err != nil {
+		return fmt.Errorf("failed to get source account for nonce: %w", err)
+	}
+	nonce := fromAcc.GetNonce() + 1
+
 	resp, err := c.sendRequest(ctx, ReqTransfer, TransferPayload{
 		From:   from,
 		To:     to,
 		Amount: amount,
+		Nonce:  nonce,
 	})
 	if err != nil {
 		logAttrs = append(logAttrs, "error", err)
@@ -246,6 +255,7 @@ func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.Scalegr
 		From:          from,
 		To:            to,
 		Amount:        amount,
+		Nonce:         signedRequest.Payload.Nonce,
 		SignedRequest: signedRequest,
 	})
 	if err != nil {
