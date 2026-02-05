@@ -1,9 +1,12 @@
 package scalegraph
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+
+	"sg-emulator/internal/crypto"
 )
 
 // ScalegraphId represents a unique 160-bit (20-byte) identifier
@@ -36,4 +39,11 @@ func ScalegraphIdFromString(s string) (ScalegraphId, error) {
 // String returns the hexadecimal string representation of the ScalegraphId
 func (id ScalegraphId) String() string {
 	return hex.EncodeToString(id[:])
+}
+
+// ScalegraphIdFromPublicKey derives a ScalegraphId from an Ed25519 public key
+// using SHA-1 hash of the public key bytes
+func ScalegraphIdFromPublicKey(pubKey ed25519.PublicKey) ScalegraphId {
+	hash := crypto.DeriveAccountID(pubKey)
+	return ScalegraphId(hash)
 }

@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
 
+	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 )
 
@@ -42,7 +45,9 @@ type CreateAccountPayload struct {
 
 // CreateAccountResponse contains the result of CreateAccount
 type CreateAccountResponse struct {
-	Account *scalegraph.Account
+	Account     *scalegraph.Account
+	Certificate string // PEM-encoded X.509 certificate
+	PrivateKey  string // PEM-encoded Ed25519 private key
 }
 
 // GetAccountPayload contains parameters for GetAccount
@@ -68,10 +73,35 @@ type TransferPayload struct {
 	From   scalegraph.ScalegraphId
 	To     scalegraph.ScalegraphId
 	Amount float64
+	// SignedRequest contains the signed transfer request (optional for backwards compatibility)
+	SignedRequest *crypto.SignedEnvelope[*crypto.TransferRequest]
 }
 
 // TransferResponse contains the result of Transfer (empty on success)
 type TransferResponse struct{}
+
+// SignedTransferRequest represents a signed transfer request for verification
+type SignedTransferRequest struct {
+	From      scalegraph.ScalegraphId
+	To        scalegraph.ScalegraphId
+	Amount    float64
+	Nonce     string
+	Timestamp int64
+}
+
+// CreateAccountWithKeysPayload contains parameters for CreateAccount with cryptographic keys
+type CreateAccountWithKeysPayload struct {
+	InitialBalance float64
+	PublicKey      ed25519.PublicKey
+	Certificate    *x509.Certificate
+}
+
+// CreateAccountWithKeysResponse contains the result of CreateAccount with keys
+type CreateAccountWithKeysResponse struct {
+	Account     *scalegraph.Account
+	Certificate string // PEM-encoded X.509 certificate
+	PrivateKey  string // PEM-encoded Ed25519 private key
+}
 
 // MintPayload contains parameters for Mint
 type MintPayload struct {

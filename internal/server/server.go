@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 
+	"sg-emulator/internal/ca"
+	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/trace"
 )
@@ -19,6 +22,8 @@ type Server struct {
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 	logger      *slog.Logger
+	ca          *ca.CA
+	verifier    *crypto.Verifier
 }
 
 // New creates a new Server with a fresh App and Registry
@@ -32,6 +37,26 @@ func New(logger *slog.Logger) *Server {
 		cancel:      cancel,
 		logger:      logger,
 	}
+}
+
+// NewWithCA creates a new Server with a Certificate Authority
+func NewWithCA(logger *slog.Logger, certAuth *ca.CA) *Server {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Server{
+		app:         scalegraph.New(logger.With("component", "app")),
+		registry:    NewRegistry(logger.With("component", "registry")),
+		requestChan: make(chan Request, 1000),
+		ctx:         ctx,
+		cancel:      cancel,
+		logger:      logger,
+		ca:          certAuth,
+		verifier:    certAuth.NewVerifier(),
+	}
+}
+
+// CA returns the server's Certificate Authority (may be nil)
+func (s *Server) CA() *ca.CA {
+	return s.ca
 }
 
 // Start begins processing requests in a separate goroutine
@@ -122,13 +147,41 @@ func (s *Server) handleRequest(req Request) Response {
 	switch req.Type {
 	case ReqCreateAccount:
 		payload := req.Payload.(CreateAccountPayload)
-		acc, err := s.app.CreateAccount(req.Context, payload.InitialBalance)
-		if err != nil {
-			logger.Error("CreateAccount request failed", "error", err, "initial_balance", payload.InitialBalance)
-			resp.Success = false
-			resp.Error = err.Error()
+		// If CA is available, create account with cryptographic credentials
+		if s.ca != nil {
+			keyPair, cert, accountID, err := s.ca.CreateAccountCredentials()
+			if err != nil {
+				logger.Error("CreateAccount with keys failed", "error", err)
+				resp.Success = false
+				resp.Error = err.Error()
+				break
+			}
+
+			acc, err := s.app.CreateAccountWithKeys(req.Context, keyPair.PublicKey, cert, payload.InitialBalance)
+			if err != nil {
+				logger.Error("CreateAccountWithKeys request failed", "error", err, "initial_balance", payload.InitialBalance)
+				resp.Success = false
+				resp.Error = err.Error()
+			} else {
+				certPEM := crypto.EncodeCertificatePEM(cert)
+				privKeyPEM, _ := crypto.EncodePrivateKeyPEM(keyPair.PrivateKey)
+				resp.Payload = CreateAccountResponse{
+					Account:     acc,
+					Certificate: certPEM,
+					PrivateKey:  string(privKeyPEM),
+				}
+				logger.Info("Account created with cryptographic credentials", "account_id", accountID)
+			}
 		} else {
-			resp.Payload = CreateAccountResponse{Account: acc}
+			// Fallback to legacy account creation without crypto
+			acc, err := s.app.CreateAccount(req.Context, payload.InitialBalance)
+			if err != nil {
+				logger.Error("CreateAccount request failed", "error", err, "initial_balance", payload.InitialBalance)
+				resp.Success = false
+				resp.Error = err.Error()
+			} else {
+				resp.Payload = CreateAccountResponse{Account: acc}
+			}
 		}
 
 	case ReqGetAccount:
@@ -147,6 +200,29 @@ func (s *Server) handleRequest(req Request) Response {
 
 	case ReqTransfer:
 		payload := req.Payload.(TransferPayload)
+
+		// If verifier is available and a signed request is provided, verify it
+		if s.verifier != nil && payload.SignedRequest != nil {
+			// Verify the signed envelope
+			_, err := crypto.VerifyEnvelope(s.verifier, payload.SignedRequest)
+			if err != nil {
+				logger.Warn("Transfer signature verification failed", "error", err, "from", payload.From)
+				resp.Success = false
+				resp.Error = fmt.Sprintf("signature verification failed: %v", err)
+				break
+			}
+
+			// Verify the signer ID matches the From account
+			if payload.SignedRequest.Signature.SignerID != payload.From.String() {
+				logger.Warn("Transfer signer ID mismatch", "signer_id", payload.SignedRequest.Signature.SignerID, "from", payload.From)
+				resp.Success = false
+				resp.Error = "signer ID does not match source account"
+				break
+			}
+
+			logger.Debug("Transfer signature verified", "from", payload.From, "to", payload.To, "amount", payload.Amount)
+		}
+
 		err := s.app.Transfer(req.Context, payload.From, payload.To, payload.Amount)
 		if err != nil {
 			resp.Success = false

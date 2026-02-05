@@ -1,0 +1,7 @@
+{
+	"servers": {
+		"sg-emulator": {
+			"url": "http://localhost:3000"
+		}
+	}
+}

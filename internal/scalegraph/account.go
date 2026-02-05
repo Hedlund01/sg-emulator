@@ -1,16 +1,21 @@
 package scalegraph
 
 import (
+	"crypto/ed25519"
+	"crypto/x509"
 	"fmt"
 	"sync"
 )
 
 type Account struct {
-	mu         sync.RWMutex
-	id         ScalegraphId
-	balance    float64
-	blockchain IBlockchain
-	valuestore map[string]string
+	mu               sync.RWMutex
+	id               ScalegraphId
+	balance          float64
+	blockchain       IBlockchain
+	valuestore       map[string]string
+	publicKey        ed25519.PublicKey
+	certificate      *x509.Certificate
+	TransactionCount uint64 // Number of transactions sent from this account
 }
 
 // newAccount creates a new account with a unique ID and initial balance
@@ -27,13 +32,42 @@ func newAccountWithBlockchain(blockchain IBlockchain) (*Account, error) {
 
 	// Create account with provided blockchain
 	acc := &Account{
-		id:         id,
-		balance:    0,
-		blockchain: blockchain,
-		valuestore: make(map[string]string),
+		id:               id,
+		balance:          0,
+		blockchain:       blockchain,
+		valuestore:       make(map[string]string),
+		TransactionCount: 0,
 	}
 
 	return acc, nil
+}
+
+// newAccountWithPublicKey creates a new account with a public key and certificate
+// The account ID is derived from the public key hash
+func newAccountWithPublicKey(pubKey ed25519.PublicKey, cert *x509.Certificate) (*Account, error) {
+	id := ScalegraphIdFromPublicKey(pubKey)
+
+	acc := &Account{
+		id:               id,
+		balance:          0,
+		blockchain:       newBlockchain(),
+		valuestore:       make(map[string]string),
+		publicKey:        pubKey,
+		certificate:      cert,
+		TransactionCount: 0,
+	}
+
+	return acc, nil
+}
+
+// PublicKey returns the account's public key (may be nil for legacy accounts)
+func (a *Account) PublicKey() ed25519.PublicKey {
+	return a.publicKey
+}
+
+// Certificate returns the account's X.509 certificate (may be nil for legacy accounts)
+func (a *Account) Certificate() *x509.Certificate {
+	return a.certificate
 }
 
 // ID returns the account's unique identifier

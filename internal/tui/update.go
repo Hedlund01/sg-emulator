@@ -2,9 +2,15 @@ package tui
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
 	"strconv"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"sg-emulator/internal/crypto"
+	"sg-emulator/internal/scalegraph"
 )
 
 // Update handles incoming messages and updates the model accordingly
@@ -388,14 +394,50 @@ func (m Model) updateSendMoney(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			accounts, err := m.app.GetAccounts(context.Background())
+			ctx := context.Background()
+			accounts, err := m.app.GetAccounts(ctx)
 			if err != nil {
 				m.statusMsg = err.Error()
 				return m, nil
 			}
 			fromID := accounts[m.sendFromIndex].ID()
 			toID := accounts[m.sendToIndex].ID()
-			err = m.app.Transfer(context.Background(), fromID, toID, amount)
+
+			// Load credentials (from cache or disk)
+			creds, err := m.getCredentials(fromID)
+			if err != nil {
+				m.statusMsg = "Failed to load credentials: " + err.Error()
+				return m, nil
+			}
+
+			// Parse private key
+			privKey, err := crypto.DecodePrivateKeyPEM([]byte(creds.PrivateKeyPEM))
+			if err != nil {
+				m.statusMsg = "Failed to parse private key: " + err.Error()
+				return m, nil
+			}
+
+			// Create and sign transfer request
+			transferReq := &crypto.TransferRequest{
+				From:      fromID.String(),
+				To:        toID.String(),
+				Amount:    amount,
+				Nonce:     generateNonce(),
+				Timestamp: time.Now().Unix(),
+			}
+
+			signedEnvelope, err := crypto.CreateSignedEnvelope(
+				transferReq,
+				privKey,
+				fromID.String(),
+				creds.CertificatePEM,
+			)
+			if err != nil {
+				m.statusMsg = "Failed to sign request: " + err.Error()
+				return m, nil
+			}
+
+			err = m.app.TransferSigned(ctx, fromID, toID, amount, signedEnvelope)
 			if err != nil {
 				m.statusMsg = err.Error()
 				return m, nil
@@ -428,4 +470,43 @@ func (m Model) updateVirtualNodes(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// getCredentials loads credentials from CA store, using cache if available
+func (m *Model) getCredentials(accountID scalegraph.ScalegraphId) (*AccountCredentials, error) {
+	// Check cache first
+	if creds, ok := m.credentialCache[accountID]; ok {
+		return creds, nil
+	}
+
+	// Load from CA store
+	ca := m.server.CA()
+	if ca == nil {
+		return nil, fmt.Errorf("CA not available")
+	}
+
+	privKeyPEM, err := ca.GetAccountPrivateKeyPEM(accountID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	certPEM, err := ca.GetAccountCertificatePEM(accountID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache and return
+	creds := &AccountCredentials{
+		PrivateKeyPEM:  privKeyPEM,
+		CertificatePEM: certPEM,
+	}
+	m.credentialCache[accountID] = creds
+	return creds, nil
+}
+
+// generateNonce generates a random nonce for transaction uniqueness
+func generateNonce() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
 }

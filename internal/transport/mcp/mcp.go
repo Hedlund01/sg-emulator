@@ -2,10 +2,15 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
+	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server"
 
@@ -35,15 +40,40 @@ type MintArgs struct {
 	Amount float64 `json:"amount" jsonschema:"Amount to mint"`
 }
 
+// CreateSignedRequestArgs represents arguments for create_signed_request tool
+type CreateSignedRequestArgs struct {
+	Type      string  `json:"type" jsonschema:"Type of request: 'transfer' or 'get_account'"`
+	AccountID string  `json:"account_id" jsonschema:"Account ID that will sign the request (must have credentials)"`
+	ToID      string  `json:"to_id,omitempty" jsonschema:"Destination account ID (for transfer only)"`
+	Amount    float64 `json:"amount,omitempty" jsonschema:"Amount to transfer (for transfer only)"`
+}
+
 // RunHTTPServer starts an MCP server over HTTP with SSE transport.
 // This allows the MCP server to run alongside TUI since it doesn't use stdio.
+//
+// The server uses Server-Sent Events (SSE) transport which is compatible with
+// MCP clients like Claude Desktop, VS Code extensions, and direct HTTP clients.
+//
+// For Claude Desktop/VS Code configuration, add to your MCP settings:
+//
+//	{
+//	  "mcpServers": {
+//	    "sg-emulator": {
+//	      "url": "http://localhost:3000/sse"
+//	    }
+//	  }
+//	}
 func RunHTTPServer(ctx context.Context, addr string, client *server.Client, srv *server.Server, logger *slog.Logger) error {
 	logger.Info("MCP server starting", "address", addr)
-	mcpServer := createServer(client, srv, logger)
 
-	handler := mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
-		return mcpServer
-	}, nil)
+	// Create MCP server factory - returns the same server for all requests
+	// This maintains shared state across all MCP sessions
+	getServer := func(req *http.Request) *mcp.Server {
+		return createServer(client, srv, logger)
+	}
+
+	// Use the SSE transport handler which maintains session state per connection
+	handler := mcp.NewSSEHandler(getServer, nil)
 
 	httpServer := &http.Server{
 		Addr:    addr,
@@ -56,6 +86,13 @@ func RunHTTPServer(ctx context.Context, addr string, client *server.Client, srv 
 		logger.Info("MCP server shutting down")
 		httpServer.Shutdown(context.Background())
 	}()
+
+	baseURL := "http://" + addr
+	logger.Info("MCP server listening",
+		"address", addr,
+		"transport", "SSE",
+		"endpoint", baseURL,
+		"info", "Configure MCP clients to use: "+baseURL)
 
 	err := httpServer.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
@@ -78,14 +115,20 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 	// create_account tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "create_account",
-		Description: "Create a new account with an optional initial balance",
+		Description: "Create a new account with an optional initial balance. Returns account ID, balance, certificate, and private key location.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateAccountArgs) (*mcp.CallToolResult, any, error) {
-		acc, err := client.CreateAccount(context.Background(), args.Balance)
+		resp, err := client.CreateAccountWithCredentials(context.Background(), args.Balance)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		text := fmt.Sprintf("Created account %s with balance %.2f", acc.ID().String(), acc.Balance())
+		text := fmt.Sprintf("Created account %s with balance %.2f\n", resp.Account.ID().String(), resp.Account.Balance())
+		if resp.Certificate != "" {
+			text += fmt.Sprintf("\nCertificate (PEM):\n%s\n", resp.Certificate)
+		}
+		if resp.PrivateKey != "" {
+			text += fmt.Sprintf("\nPrivate Key (PEM):\n%s", resp.PrivateKey)
+		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		}, nil, nil
@@ -214,4 +257,150 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		}, nil, nil
 	})
+
+	// create_signed_request tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "create_signed_request",
+		Description: "Create a cryptographically signed request for REST API endpoints. Generates a complete SignedEnvelope with Ed25519 signature and certificate. Supports 'transfer' and 'get_account' request types.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateSignedRequestArgs) (*mcp.CallToolResult, any, error) {
+		// Validate account ID
+		_, err := scalegraph.ScalegraphIdFromString(args.AccountID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid account_id: %v", err)
+		}
+
+		// Get the CA from server
+		ca := srv.CA()
+		if ca == nil {
+			return nil, nil, fmt.Errorf("Certificate Authority not available")
+		}
+
+		// Retrieve private key
+		privKeyPEM, err := ca.GetAccountPrivateKeyPEM(args.AccountID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get private key for account %s: %v (account may not have credentials)", args.AccountID, err)
+		}
+
+		// Retrieve certificate
+		certPEM, err := ca.GetAccountCertificatePEM(args.AccountID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get certificate for account %s: %v", args.AccountID, err)
+		}
+
+		// Decode private key
+		privKey, err := crypto.DecodePrivateKeyPEM([]byte(privKeyPEM))
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to decode private key: %v", err)
+		}
+
+		var signedEnvelopeJSON []byte
+
+		switch args.Type {
+		case "transfer":
+			// Validate transfer-specific fields
+			if args.ToID == "" {
+				return nil, nil, fmt.Errorf("to_id is required for transfer requests")
+			}
+			if args.Amount <= 0 {
+				return nil, nil, fmt.Errorf("amount must be positive for transfer requests")
+			}
+
+			// Validate to account ID
+			_, err := scalegraph.ScalegraphIdFromString(args.ToID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid to_id: %v", err)
+			}
+
+			// Generate nonce
+			nonceBytes := make([]byte, 16)
+			if _, err := rand.Read(nonceBytes); err != nil {
+				return nil, nil, fmt.Errorf("failed to generate nonce: %v", err)
+			}
+			nonce := hex.EncodeToString(nonceBytes)
+
+			// Create transfer request
+			transferReq := &crypto.TransferRequest{
+				From:      args.AccountID,
+				To:        args.ToID,
+				Amount:    args.Amount,
+				Nonce:     nonce,
+				Timestamp: time.Now().Unix(),
+			}
+
+			// Create signed envelope
+			envelope, err := crypto.CreateSignedEnvelope(transferReq, privKey, args.AccountID, certPEM)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
+			}
+
+			// Marshal to JSON
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
+		case "get_account":
+			// Create signable account request
+			accountReq := &signableAccountRequest{
+				AccountID: args.AccountID,
+			}
+
+			// Sign the request
+			sig, err := crypto.Sign(accountReq, privKey, args.AccountID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to sign request: %v", err)
+			}
+
+			// Create envelope structure
+			envelope := map[string]interface{}{
+				"payload": map[string]string{
+					"account_id": args.AccountID,
+				},
+				"signature":   sig,
+				"certificate": certPEM,
+			}
+
+			// Marshal to JSON
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
+		default:
+			return nil, nil, fmt.Errorf("unsupported request type: %s (must be 'transfer' or 'get_account')", args.Type)
+		}
+
+		text := fmt.Sprintf("Signed %s request created for account %s\n\n", args.Type, args.AccountID[:16]+"...")
+		text += "Copy this JSON body and paste it into the Swagger UI for the REST API:\n\n"
+		text += string(signedEnvelopeJSON)
+		text += "\n\n"
+		text += "Instructions:\n"
+		text += "1. Open the Swagger UI (usually at http://localhost:8080/swagger/index.html)\n"
+		if args.Type == "transfer" {
+			text += "2. Find the POST /transfer endpoint\n"
+		} else {
+			text += "2. Find the POST /accounts/me endpoint\n"
+		}
+		text += "3. Click 'Try it out'\n"
+		text += "4. Paste the entire JSON above into the request body\n"
+		text += "5. Click 'Execute'\n"
+
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+}
+
+// signableAccountRequest wraps AccountRequest to implement SignableData
+type signableAccountRequest struct {
+	AccountID string `json:"account_id"`
+}
+
+func (s *signableAccountRequest) Bytes() []byte {
+	data, _ := json.Marshal(s)
+	return data
 }

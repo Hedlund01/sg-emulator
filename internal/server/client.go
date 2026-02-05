@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/trace"
 )
@@ -130,6 +131,34 @@ func (c *Client) CreateAccount(ctx context.Context, initialBalance float64) (*sc
 	return account, nil
 }
 
+// CreateAccountWithCredentials creates a new account and returns the full response
+// including the certificate and private key
+func (c *Client) CreateAccountWithCredentials(ctx context.Context, initialBalance float64) (*CreateAccountResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"initial_balance", initialBalance}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Creating account with credentials", logAttrs...)
+	resp, err := c.sendRequest(ctx, ReqCreateAccount, CreateAccountPayload{
+		InitialBalance: initialBalance,
+	})
+	if err != nil {
+		logAttrs = append(logAttrs, "error", err)
+		c.logger.Error("Failed to create account", logAttrs...)
+		return nil, err
+	}
+	if !resp.Success {
+		logAttrs = append(logAttrs, "error", resp.Error)
+		c.logger.Error("Account creation failed", logAttrs...)
+		return nil, errors.New(resp.Error)
+	}
+	result := resp.Payload.(CreateAccountResponse)
+	logAttrs = append([]any{"account_id", result.Account.ID(), "balance", result.Account.Balance(), "has_cert", result.Certificate != ""}, logAttrs...)
+	c.logger.Info("Account created with credentials", logAttrs...)
+	return &result, nil
+}
+
 // GetAccount retrieves an account by ID
 func (c *Client) GetAccount(ctx context.Context, id scalegraph.ScalegraphId) (*scalegraph.Account, error) {
 	traceID := trace.GetTraceID(ctx)
@@ -201,6 +230,35 @@ func (c *Client) Transfer(ctx context.Context, from, to scalegraph.ScalegraphId,
 		return errors.New(resp.Error)
 	}
 	c.logger.Info("Transfer completed", logAttrs...)
+	return nil
+}
+
+// TransferSigned transfers funds with a cryptographically signed request
+func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.ScalegraphId, amount float64, signedRequest *crypto.SignedEnvelope[*crypto.TransferRequest]) error {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"from", from, "to", to, "amount", amount, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Signed transfer requested", logAttrs...)
+
+	resp, err := c.sendRequest(ctx, ReqTransfer, TransferPayload{
+		From:          from,
+		To:            to,
+		Amount:        amount,
+		SignedRequest: signedRequest,
+	})
+	if err != nil {
+		logAttrs = append(logAttrs, "error", err)
+		c.logger.Error("Signed transfer failed", logAttrs...)
+		return err
+	}
+	if !resp.Success {
+		logAttrs = append(logAttrs, "error", resp.Error)
+		c.logger.Warn("Signed transfer rejected", logAttrs...)
+		return errors.New(resp.Error)
+	}
+	c.logger.Info("Signed transfer completed", logAttrs...)
 	return nil
 }
 
