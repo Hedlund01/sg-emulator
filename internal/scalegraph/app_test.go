@@ -2,14 +2,8 @@ package scalegraph
 
 import (
 	"context"
-	"log/slog"
 	"testing"
 )
-
-func testLogger() *slog.Logger {
-	// Create a no-op logger for tests
-	return slog.New(slog.NewTextHandler(nil, &slog.HandlerOptions{Level: slog.LevelError + 1}))
-}
 
 func TestNew(t *testing.T) {
 	app := New(testLogger())

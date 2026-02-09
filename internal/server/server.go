@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -9,7 +10,22 @@ import (
 	"sg-emulator/internal/ca"
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
+	"sg-emulator/internal/server/messages"
 	"sg-emulator/internal/trace"
+)
+
+// Signature verification errors
+var (
+	// ErrNoVerifier indicates the server was not configured with a CA for signature verification
+	ErrNoVerifier = errors.New("server not configured with certificate authority for signature verification")
+	// ErrMissingSignature indicates a required signature was not provided
+	ErrMissingSignature = errors.New("signature required but not provided")
+	// ErrInvalidSignature indicates the signature verification failed
+	ErrInvalidSignature = errors.New("signature verification failed")
+	// ErrSignerMismatch indicates the signer ID does not match the expected account
+	ErrSignerMismatch = errors.New("signer ID does not match expected account")
+	// ErrPayloadMismatch indicates the payload data does not match the signed data
+	ErrPayloadMismatch = errors.New("payload data does not match signed data")
 )
 
 // Server wraps a scalegraph.App and processes requests in its own goroutine.
@@ -17,7 +33,7 @@ import (
 type Server struct {
 	app         *scalegraph.App
 	registry    *Registry
-	requestChan chan Request
+	requestChan chan messages.Request
 	ctx         context.Context
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
@@ -32,7 +48,7 @@ func New(logger *slog.Logger) *Server {
 	return &Server{
 		app:         scalegraph.New(logger.With("component", "app")),
 		registry:    NewRegistry(logger.With("component", "registry")),
-		requestChan: make(chan Request, 1000),
+		requestChan: make(chan messages.Request, 1000),
 		ctx:         ctx,
 		cancel:      cancel,
 		logger:      logger,
@@ -45,7 +61,7 @@ func NewWithCA(logger *slog.Logger, certAuth *ca.CA) *Server {
 	return &Server{
 		app:         scalegraph.New(logger.With("component", "app")),
 		registry:    NewRegistry(logger.With("component", "registry")),
-		requestChan: make(chan Request, 1000),
+		requestChan: make(chan messages.Request, 1000),
 		ctx:         ctx,
 		cancel:      cancel,
 		logger:      logger,
@@ -59,9 +75,18 @@ func (s *Server) CA() *ca.CA {
 	return s.ca
 }
 
-// Start begins processing requests in a separate goroutine
+// Start begins processing requests in a separate goroutine.
+// The server requires a CA (Certificate Authority) to be configured for operations
+// that mandate cryptographic signatures (e.g., transfers).
 func (s *Server) Start() {
-	s.logger.Info("Server starting", "buffer_size", cap(s.requestChan))
+	if s.ca == nil || s.verifier == nil {
+		s.logger.Error("Server starting without CA - stopping server from starting",
+			"buffer_size", cap(s.requestChan))
+		return
+	}
+	s.logger.Info("Server starting with CA",
+		"buffer_size", cap(s.requestChan),
+		"signature_verification", "enabled")
 	s.wg.Add(1)
 	go s.run()
 }
@@ -81,7 +106,7 @@ func (s *Server) Stop() {
 }
 
 // RequestChannel returns the channel for sending requests to the server
-func (s *Server) RequestChannel() chan<- Request {
+func (s *Server) RequestChannel() chan<- messages.Request {
 	return s.requestChan
 }
 
@@ -108,6 +133,65 @@ func (s *Server) CreateVirtualApp() (*VirtualApp, error) {
 	return vapp, nil
 }
 
+// verifySignedRequest verifies the cryptographic signature on a signed request payload.
+// It is a generic function that works with any SignablePayload type.
+//
+// The function performs the following checks:
+//  1. Verifies signature is provided when required
+//  2. Validates certificate chain and cryptographic signature
+//  3. Verifies signer ID matches expected account
+//  4. Verifies payload data matches signed data
+//
+// Returns nil if verification succeeds or signature is optional and not provided.
+// Returns wrapped error with context if verification fails.
+func verifySignedRequest[T crypto.SignableData](s *Server, payload messages.SignablePayload[T]) error {
+	signedReq := payload.GetSignedRequest()
+	required := payload.RequiresSignature()
+
+	if required {
+		if s.verifier == nil {
+			// Server misconfiguration - CA required for this operation
+			return ErrNoVerifier
+		}
+
+		if signedReq == nil {
+			// Signature is mandatory but not provided
+			return ErrMissingSignature
+		}
+	} else {
+		// Signature is optional - if not provided, skip verification
+		if signedReq == nil {
+			return nil
+		}
+	}
+
+	// Verify the signed envelope (certificate chain, signature, timestamp)
+	_, err := crypto.VerifyEnvelope(s.verifier, signedReq)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidSignature, err)
+	}
+
+	// Verify the signer ID matches the expected account
+	expectedSignerID := payload.GetSignerID()
+	if expectedSignerID == (scalegraph.ScalegraphId{}) {
+		// Zero value means this request must be signed by the CA's system account
+		// (e.g., account creation requests)
+		caSystemID := scalegraph.ScalegraphIdFromPublicKey(s.ca.PublicKey())
+		if signedReq.Signature.SignerID != caSystemID.String() {
+			return fmt.Errorf("%w: request requires CA signature, expected %s, got %s", ErrSignerMismatch, caSystemID, signedReq.Signature.SignerID)
+		}
+	} else if signedReq.Signature.SignerID != expectedSignerID.String() {
+		return fmt.Errorf("%w: expected %s, got %s", ErrSignerMismatch, expectedSignerID, signedReq.Signature.SignerID)
+	}
+
+	// Verify the payload data matches the signed data
+	if err := payload.VerifyPayloadData(); err != nil {
+		return fmt.Errorf("%w: %v", ErrPayloadMismatch, err)
+	}
+
+	return nil
+}
+
 // run is the main processing loop that handles incoming requests
 func (s *Server) run() {
 	defer s.wg.Done()
@@ -126,124 +210,165 @@ func (s *Server) run() {
 				// Response channel full or closed, skip
 			}
 		case <-s.ctx.Done():
+			// Drain remaining requests so clients don't hang
+			s.drainRequests()
+			return
+		}
+	}
+}
+
+// drainRequests sends error responses to any requests still in the channel
+// so that waiting clients are unblocked during shutdown.
+func (s *Server) drainRequests() {
+	for {
+		select {
+		case req, ok := <-s.requestChan:
+			if !ok {
+				return
+			}
+			resp := messages.Response{
+				ID:      req.ID,
+				Success: false,
+				Error:   "server shutting down",
+			}
+			select {
+			case req.ResponseChan <- resp:
+			default:
+			}
+		default:
 			return
 		}
 	}
 }
 
 // handleRequest processes a single request and returns the response
-func (s *Server) handleRequest(req Request) Response {
+func (s *Server) handleRequest(req messages.Request) messages.Response {
 	traceID := trace.GetTraceID(req.Context)
 	logger := s.logger
 	if traceID != "" {
 		logger = logger.With("trace_id", traceID)
 	}
 
-	resp := Response{
+	resp := messages.Response{
 		ID:      req.ID,
 		Success: true,
 	}
 
 	switch req.Type {
-	case ReqCreateAccount:
-		payload := req.Payload.(CreateAccountPayload)
-		// If CA is available, create account with cryptographic credentials
-		if s.ca != nil {
-			keyPair, cert, accountID, err := s.ca.CreateAccountCredentials()
-			if err != nil {
-				logger.Error("CreateAccount with keys failed", "error", err)
-				resp.Success = false
-				resp.Error = err.Error()
-				break
-			}
+	case messages.ReqCreateAccount:
+		payload := req.Payload.(*messages.CreateAccountWithKeysPayload)
 
-			acc, err := s.app.CreateAccountWithKeys(req.Context, keyPair.PublicKey, cert, payload.InitialBalance)
-			if err != nil {
-				logger.Error("CreateAccountWithKeys request failed", "error", err, "initial_balance", payload.InitialBalance)
-				resp.Success = false
-				resp.Error = err.Error()
-			} else {
-				certPEM := crypto.EncodeCertificatePEM(cert)
-				privKeyPEM, _ := crypto.EncodePrivateKeyPEM(keyPair.PrivateKey)
-				resp.Payload = CreateAccountResponse{
-					Account:     acc,
-					Certificate: certPEM,
-					PrivateKey:  string(privKeyPEM),
-				}
-				logger.Info("Account created with cryptographic credentials", "account_id", accountID)
-			}
-		} else {
-			// Fallback to legacy account creation without crypto
-			acc, err := s.app.CreateAccount(req.Context, payload.InitialBalance)
-			if err != nil {
-				logger.Error("CreateAccount request failed", "error", err, "initial_balance", payload.InitialBalance)
-				resp.Success = false
-				resp.Error = err.Error()
-			} else {
-				resp.Payload = CreateAccountResponse{Account: acc}
-			}
+		payloadCert, err := crypto.ParseCertificatePEM(payload.GetSignedRequest().Certificate)
+		if err != nil {
+			logger.Error("Failed to parse certificate from CreateAccountWithKeys payload", "error", err)
+			resp.Success = false
+			resp.Error = "Invalid certificate in request"
+			break
 		}
 
-	case ReqGetAccount:
-		payload := req.Payload.(GetAccountPayload)
-		acc, err := s.app.GetAccount(req.Context, payload.ID)
+		if !s.ca.Certificate().Equal(payloadCert) {
+			logger.Error("Certificate in CreateAccountWithKeys payload does not match server CA certificate")
+			resp.Success = false
+			resp.Error = "Certificate in request does not match server CA certificate"
+			break
+		}
+
+		if err := verifySignedRequest(s, payload); err != nil {
+			logger.Warn("CreateAccountWithKeys signature verification failed", "error", err)
+			resp.Success = false
+			resp.Error = err.Error()
+			break
+		}
+
+		if s.ca == nil {
+			logger.Error("No CA available to create a new account with credentials")
+			resp.Error = "Internal server error: no CA available for account creation"
+			resp.Success = false
+			break
+		}
+
+		// If CA is available, create account with cryptographic credentials
+		keyPair, cert, accountID, err := s.ca.CreateAccountCredentials()
+		if err != nil {
+			logger.Error("CreateAccount with keys failed", "error", err)
+			resp.Success = false
+			resp.Error = err.Error()
+			break
+		}
+
+		acc, err := s.app.CreateAccountWithKeys(req.Context, keyPair.PublicKey, cert, payload.InitialBalance)
+		if err != nil {
+			logger.Error("CreateAccountWithKeys request failed", "error", err, "initial_balance", payload.InitialBalance)
+			resp.Success = false
+			resp.Error = err.Error()
+		}
+		certPEM := crypto.EncodeCertificatePEM(cert)
+		privKeyPEM, _ := crypto.EncodePrivateKeyPEM(keyPair.PrivateKey)
+		pubKeyPEM, _ := crypto.EncodePublicKeyPEM(keyPair.PublicKey)
+		resp.Payload = messages.CreateAccountWithKeysResponse{
+			Account:     acc,
+			Certificate: certPEM,
+			PrivateKey:  string(privKeyPEM),
+			PublicKey:   string(pubKeyPEM),
+		}
+		logger.Info("Account created with cryptographic credentials", "account_id", accountID)
+
+	case messages.ReqGetAccount:
+		payload := req.Payload.(*messages.GetAccountPayload)
+
+		if err := verifySignedRequest(s, payload); err != nil {
+			logger.Warn("GetAccount signature verification failed", "error", err, "account_id", payload.AccountID)
+			resp.Success = false
+			resp.Error = err.Error()
+			break
+		}
+
+		acc, err := s.app.GetAccount(req.Context, payload.AccountID)
 		if err != nil {
 			resp.Success = false
 			resp.Error = err.Error()
 		} else {
-			resp.Payload = GetAccountResponse{Account: acc}
+			resp.Payload = messages.GetAccountResponse{Account: acc}
 		}
 
-	case ReqGetAccounts:
+	case messages.ReqGetAccounts:
 		accounts := s.app.GetAccounts(req.Context)
-		resp.Payload = GetAccountsResponse{Accounts: accounts}
+		resp.Payload = messages.GetAccountsResponse{Accounts: accounts}
 
-	case ReqTransfer:
-		payload := req.Payload.(TransferPayload)
+	case messages.ReqTransfer:
+		payload := req.Payload.(*messages.TransferPayload)
 
-		// If verifier is available and a signed request is provided, verify it
-		if s.verifier != nil && payload.SignedRequest != nil {
-			// Verify the signed envelope
-			_, err := crypto.VerifyEnvelope(s.verifier, payload.SignedRequest)
-			if err != nil {
-				logger.Warn("Transfer signature verification failed", "error", err, "from", payload.From)
-				resp.Success = false
-				resp.Error = fmt.Sprintf("signature verification failed: %v", err)
-				break
-			}
-
-			// Verify the signer ID matches the From account
-			if payload.SignedRequest.Signature.SignerID != payload.From.String() {
-				logger.Warn("Transfer signer ID mismatch", "signer_id", payload.SignedRequest.Signature.SignerID, "from", payload.From)
-				resp.Success = false
-				resp.Error = "signer ID does not match source account"
-				break
-			}
-
-			logger.Debug("Transfer signature verified", "from", payload.From, "to", payload.To, "amount", payload.Amount)
+		// Verify cryptographic signature
+		if err := verifySignedRequest(s, payload); err != nil {
+			logger.Warn("Transfer signature verification failed", "error", err, "from", payload.From)
+			resp.Success = false
+			resp.Error = err.Error()
+			break
 		}
+
+		logger.Debug("Transfer signature verified", "from", payload.From, "to", payload.To, "amount", payload.Amount)
 
 		err := s.app.Transfer(req.Context, payload.From, payload.To, payload.Amount, payload.Nonce)
 		if err != nil {
 			resp.Success = false
 			resp.Error = err.Error()
 		} else {
-			resp.Payload = TransferResponse{}
+			resp.Payload = messages.TransferResponse{}
 		}
 
-	case ReqMint:
-		payload := req.Payload.(MintPayload)
+	case messages.ReqMint:
+		payload := req.Payload.(messages.MintPayload)
 		err := s.app.Mint(req.Context, payload.To, payload.Amount)
 		if err != nil {
 			resp.Success = false
 			resp.Error = err.Error()
 		} else {
-			resp.Payload = MintResponse{}
+			resp.Payload = messages.MintResponse{}
 		}
 
-	case ReqAccountCount:
+	case messages.ReqAccountCount:
 		count := s.app.AccountCount(req.Context)
-		resp.Payload = AccountCountResponse{Count: count}
+		resp.Payload = messages.AccountCountResponse{Count: count}
 
 	default:
 		logger.Warn("Unknown request type", "type", req.Type)

@@ -83,6 +83,14 @@ func (ca *CA) load() error {
 	return nil
 }
 
+func (ca *CA) PublicKey() ed25519.PublicKey {
+	return ca.publicKey
+}
+
+func (ca *CA) PrivateKey() ed25519.PrivateKey {
+	return ca.privateKey
+}
+
 // Certificate returns the CA certificate
 func (ca *CA) Certificate() *x509.Certificate {
 	return ca.certificate

@@ -14,6 +14,7 @@ import (
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server"
+	"sg-emulator/internal/server/messages"
 	_ "sg-emulator/internal/transport/rest/docs"
 )
 
@@ -158,10 +159,6 @@ type AccountRequest struct {
 	AccountID string `json:"account_id" example:"6c439a07c32f7fb09c29403d8d2e4e47b8c5e8a9"`
 }
 
-// SignedAccountRequest wraps the account request with signature
-type SignedAccountRequest struct {
-	SignedEnvelope *crypto.SignedEnvelope[*AccountRequest] `json:"signed_envelope"`
-}
 
 // AccountResponse represents account details with transaction history
 type AccountResponse struct {
@@ -184,38 +181,26 @@ func (a *AccountRequest) Bytes() []byte {
 // handleGetMyAccount godoc
 // @Summary Get your own account details
 // @Description Get account details including balance and transaction history. Requires cryptographically signed request with Ed25519 signature and X.509 certificate.
-// @Description
-// @Description The request must be wrapped in a SignedEnvelope structure containing:
-// @Description - payload: The AccountRequest with your account_id
-// @Description - signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id, and timestamp
-// @Description - certificate: PEM-encoded X.509 certificate containing your public key
-// @Description
-// @Description The signature must be created by signing the JSON bytes of the payload using your account's Ed25519 private key.
-// @Description The signer_id in the signature must match the account_id in the payload.
-// @Tags accounts
-// @Accept json
-// @Produce json
-// @Param request body SignedAccountRequest true "Signed account request with Ed25519 signature" SchemaExample({"signed_envelope": {"payload": {"account_id": "6a9449abe8d7a13b5ac7a24ad5d8e75af5e5d038"}, "signature": {"algorithm": "Ed25519", "value": "dGVzdHNpZ25hdHVyZWJhc2U2NGVuY29kZWR2YWx1ZQ==", "signer_id": "6a9449abe8d7a13b5ac7a24ad5d8e75af5e5d038", "timestamp": 1770219384}, "certificate": "-----BEGIN CERTIFICATE-----\nMIIBzjCCAYCgAwIBAgIRAOihXziTU66Z6IuOTkN3iKUwBQYDK2VwMFYxHDAaBgNV\nBAoTE1NjYWxlZ3JhcGggRW11bGF0b3IxHjAcBgNVBAsTFUNlcnRpZmljYXRlIEF1\ndGhvcml0eTEWMBQGA1UEAxMNU2NhbGVncmFwaCBDQTAeFw0yNjAyMDQxNTM1NDRa\nFw0yNzAyMDQxNTM1NDRaMGMxHDAaBgNVBAoTE1NjYWxlZ3JhcGggRW11bGF0b3Ix\nEDAOBgNVBAsTB0FjY291bnQxMTAvBgNVBAMTKDZhOTQ0OWFiZThkN2ExM2I1YWM3\nYTI0YWQ1ZDhlNzVhZjVlNWQwMzgwKjAFBgMrZXADIQD7yeDwJUBfq6VN3Q19psz6\npJngu+eTv8htYRedY9+ohKNWMFQwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG\nCCsGAQUFBwMCMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUXrWTE8j1zlHmiT+L\ne9GT14eaBJswBQYDK2VwA0EA88Q8Dj7fefnb1P0YotpaYcPp2UVWQyh/H5gSbdAC\n7mImKcgSPXnKgQAV4OfnZ/B/XQBrhBaOMPTbIKvYu68yAQ==\n-----END CERTIFICATE-----\n"}})
 // @Success 200 {object} AccountResponse
 // @Failure 400 {object} ErrorResponse "Invalid request body or missing signature"
 // @Failure 403 {object} ErrorResponse "Attempting to access another account"
 // @Failure 404 {object} ErrorResponse "Account not found"
 // @Router /accounts/me [post]
 func (t *Transport) handleGetMyAccount(w http.ResponseWriter, r *http.Request) {
-	var req SignedAccountRequest
+	var req messages.GetAccountPayload
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	if req.SignedEnvelope == nil {
+	if req.SignedRequest == nil {
 		respondError(w, http.StatusBadRequest, "Signed envelope required")
 		return
 	}
 
 	// Extract account ID from signed payload
-	accountIDStr := req.SignedEnvelope.Payload.AccountID
+	accountIDStr := req.SignedRequest.Payload.AccountID
 	accountID, err := scalegraph.ScalegraphIdFromString(accountIDStr)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid account ID")
@@ -223,16 +208,16 @@ func (t *Transport) handleGetMyAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify the signer matches the requested account
-	if req.SignedEnvelope.Signature.SignerID != accountIDStr {
+	if req.SignedRequest.Signature.SignerID != accountIDStr {
 		t.logger.Warn("Unauthorized access attempt",
 			"requested_account", accountIDStr,
-			"signer", req.SignedEnvelope.Signature.SignerID,
+			"signer", req.SignedRequest.Signature.SignerID,
 		)
 		respondError(w, http.StatusForbidden, "Can only access your own account")
 		return
 	}
 
-	acc, err := t.client.GetAccount(r.Context(), accountID)
+	acc, err := t.client.GetAccount(r.Context(), accountID, req.SignedRequest)
 	if err != nil {
 		t.logger.Error("Failed to get account", "error", err, "id", accountIDStr)
 		respondError(w, http.StatusNotFound, "Account not found")

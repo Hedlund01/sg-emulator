@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server"
+	"sg-emulator/internal/server/messages"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -109,13 +111,75 @@ func createServer(client *server.Client, srv *server.Server, logger *slog.Logger
 	return mcpServer
 }
 
+// createSignedEnvelope is a generic helper that retrieves credentials and creates a signed envelope.
+// If the accountID matches the CA's system account, the CA's own private key and certificate are used
+// directly. Otherwise, account credentials are loaded from the store.
+func createSignedEnvelope[T crypto.SignableData](srv *server.Server, accountID string, payload T) (*crypto.SignedEnvelope[T], error) {
+	// Get the CA from server
+	ca := srv.CA()
+	if ca == nil {
+		return nil, fmt.Errorf("Certificate Authority not available")
+	}
+
+	var privKey ed25519.PrivateKey
+	var certPEM string
+
+	// Check if signing as the CA's system account
+	systemAccountID := scalegraph.ScalegraphIdFromPublicKey(ca.PublicKey())
+	if accountID == systemAccountID.String() {
+		// Use CA's own credentials directly
+		privKey = ca.PrivateKey()
+		certPEM = ca.CertificatePEM()
+	} else {
+		// Retrieve account credentials from the store
+		privKeyPEM, err := ca.GetAccountPrivateKeyPEM(accountID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get private key for account %s: %v (account may not have credentials)", accountID, err)
+		}
+
+		certPEM, err = ca.GetAccountCertificatePEM(accountID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get certificate for account %s: %v", accountID, err)
+		}
+
+		privKey, err = crypto.DecodePrivateKeyPEM([]byte(privKeyPEM))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode private key: %v", err)
+		}
+	}
+
+	// Create signed envelope
+	signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, accountID, certPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signed envelope: %v", err)
+	}
+
+	return signedEnvelope, nil
+}
+
 func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Server) {
 	// create_account tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "create_account",
 		Description: "Create a new account with an optional initial balance. Returns account ID, balance, certificate, and private key location.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateAccountArgs) (*mcp.CallToolResult, any, error) {
-		resp, err := client.CreateAccountWithCredentials(context.Background(), args.Balance)
+		// Note: For create_account, we create a signed request with a temporary account ID
+		// The server will validate the signature against the CA's certificate
+		createReq := &crypto.CreateAccountRequest{
+			InitialBalance: args.Balance,
+		}
+
+		// For account creation, we use the CA's account ID derived from its public key
+		systemAccountID := scalegraph.ScalegraphIdFromPublicKey(srv.CA().PublicKey())
+
+		// Create signed envelope for the create account request
+		signedEnvelope, err := createSignedEnvelope(srv, systemAccountID.String(), createReq)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		// Call CreateAccountWithCredentials with the signed request
+		resp, err := client.CreateAccountWithCredentials(context.Background(), args.Balance, signedEnvelope)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -168,7 +232,12 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("invalid account ID: %v", err)
 		}
 
-		acc, err := client.GetAccount(context.Background(), id)
+		signedReq, err := createSignedEnvelope(srv, id.String(), &crypto.GetAccountRequest{AccountID: id.String()})
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		acc, err := client.GetAccount(context.Background(), id, signedReq)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -194,7 +263,32 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("invalid 'to' account ID: %v", err)
 		}
 
-		if err := client.Transfer(context.Background(), fromID, toID, args.Amount); err != nil {
+		signedReq, err := createSignedEnvelope(srv, fromID.String(), &crypto.GetAccountRequest{AccountID: fromID.String()})
+
+		// Get account to calculate nonce
+		fromAccount, err := client.GetAccount(context.Background(), fromID, signedReq)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get account for nonce: %v", err)
+		}
+		nonce := fromAccount.GetNonce() + 1
+
+		// Create transfer request
+		transferReq := &crypto.TransferRequest{
+			From:      args.From,
+			To:        args.To,
+			Amount:    args.Amount,
+			Nonce:     nonce,
+			Timestamp: time.Now().Unix(),
+		}
+
+		// Create signed envelope using generic helper
+		signedEnvelope, err := createSignedEnvelope(srv, args.From, transferReq)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Execute signed transfer
+		if err := client.TransferSigned(context.Background(), fromID, toID, args.Amount, signedEnvelope); err != nil {
 			return nil, nil, err
 		}
 
@@ -309,13 +403,11 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 				return nil, nil, fmt.Errorf("invalid to_id: %v", err)
 			}
 
-			// Get account to calculate nonce
-			fromIDParsed, _ := scalegraph.ScalegraphIdFromString(args.AccountID)
-			fromAccount, err := client.GetAccount(context.Background(), fromIDParsed)
+			nonce, err := getAccountNonce(client, srv, args.AccountID)
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to get account for nonce: %v", err)
+				return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
 			}
-			nonce := fromAccount.GetNonce() + 1
+			nonce++
 
 			// Create transfer request
 			transferReq := &crypto.TransferRequest{
@@ -341,29 +433,29 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			}
 
 		case "get_account":
+
+			account, _ := scalegraph.ScalegraphIdFromString(args.AccountID)
+
 			// Create signable account request
-			accountReq := &signableAccountRequest{
-				AccountID: args.AccountID,
+			accountReq := &crypto.GetAccountRequest{
+				AccountID: account.String(),
 			}
 
-			// Sign the request
-			sig, err := crypto.Sign(accountReq, privKey, args.AccountID)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to sign request: %v", err)
+			signedReq, err := createSignedEnvelope(srv,
+				args.AccountID,
+				accountReq,
+			)
+
+			payload := messages.GetAccountPayload{
+				AccountID:     account,
+				SignedRequest: signedReq,
 			}
 
-			// Create envelope structure
-			envelope := map[string]interface{}{
-				"payload": map[string]string{
-					"account_id": args.AccountID,
-				},
-				"signature":   sig,
-				"certificate": certPEM,
-			}
-
+		
 			// Marshal to JSON
 			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
-				"signed_envelope": envelope,
+				"signed_envelope": payload.SignedRequest,
+				"account_id":     payload.AccountID.String(),
 			}, "", "  ")
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
@@ -394,12 +486,21 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 	})
 }
 
-// signableAccountRequest wraps AccountRequest to implement SignableData
-type signableAccountRequest struct {
-	AccountID string `json:"account_id"`
-}
+func getAccountNonce(client *server.Client, srv *server.Server, accountID string) (uint64, error) {
+	id, err := scalegraph.ScalegraphIdFromString(accountID)
+	if err != nil {
+		return 0, fmt.Errorf("invalid account ID: %v", err)
+	}
 
-func (s *signableAccountRequest) Bytes() []byte {
-	data, _ := json.Marshal(s)
-	return data
+	signedReq, err := createSignedEnvelope(srv, id.String(), &crypto.GetAccountRequest{AccountID: id.String()})
+	if err != nil {
+		return 0, fmt.Errorf("failed to create signed request: %v", err)
+	}
+
+	acc, err := client.GetAccount(context.Background(), id, signedReq)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get account: %v", err)
+	}
+
+	return acc.GetNonce(), nil
 }

@@ -154,7 +154,7 @@ func (m Model) updateCreateAccount(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Invalid balance"
 				return m, nil
 			}
-			acc, err := m.app.CreateAccount(context.Background(), balance)
+			acc, err := m.createAccountWithCA(context.Background(), balance)
 			if err != nil {
 				m.statusMsg = err.Error()
 				return m, nil

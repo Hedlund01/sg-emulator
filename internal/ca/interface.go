@@ -10,6 +10,10 @@ import (
 // CertificateAuthority defines the interface for certificate authority operations.
 // The CA struct implements this interface.
 type CertificateAuthority interface {
+
+	// PublicKey returns the CA public key
+	PublicKey() ed25519.PublicKey
+
 	// Certificate returns the CA certificate
 	Certificate() *x509.Certificate
 

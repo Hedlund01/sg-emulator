@@ -86,20 +86,38 @@ type TransferRequest struct {
 }
 
 // Bytes returns the canonical byte representation for signing
-func (t *TransferRequest) Bytes() []byte {
+func (r *TransferRequest) Bytes() []byte {
 	// Create a deterministic byte representation
-	data, _ := json.Marshal(struct {
-		From      string  `json:"from"`
-		To        string  `json:"to"`
-		Amount    float64 `json:"amount"`
-		Nonce     uint64  `json:"nonce"`
-		Timestamp int64   `json:"timestamp"`
-	}{
-		From:      t.From,
-		To:        t.To,
-		Amount:    t.Amount,
-		Nonce:     t.Nonce,
-		Timestamp: t.Timestamp,
+	data, _ := json.Marshal(TransferRequest{
+		From:      r.From,
+		To:        r.To,
+		Amount:    r.Amount,
+		Nonce:     r.Nonce,
+		Timestamp: r.Timestamp,
+	})
+	return data
+}
+
+type CreateAccountRequest struct {
+	InitialBalance float64 `json:"initial_balance"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *CreateAccountRequest) Bytes() []byte {
+	data, _ := json.Marshal(CreateAccountRequest{
+		InitialBalance: r.InitialBalance,
+	})
+	return data
+}
+
+type GetAccountRequest struct {
+	AccountID string `json:"account_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *GetAccountRequest) Bytes() []byte {
+	data, _ := json.Marshal(GetAccountRequest{
+		AccountID: r.AccountID,
 	})
 	return data
 }

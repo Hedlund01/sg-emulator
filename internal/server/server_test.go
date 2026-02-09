@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"sg-emulator/internal/scalegraph"
+	"sg-emulator/internal/server/messages"
 )
 
 // TestNew verifies server creation
@@ -34,7 +35,11 @@ func TestNew(t *testing.T) {
 // TestServer_Start verifies server lifecycle
 func TestServer_Start(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 
 	srv.Start()
 
@@ -45,7 +50,7 @@ func TestServer_Start(t *testing.T) {
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	acc, err := client.CreateAccount(ctx, 100.0)
+	acc, err := createTestAccount(ctx, srv, client, 100.0)
 	if err != nil {
 		t.Errorf("Server not responding after Start(): %v", err)
 	}
@@ -59,7 +64,11 @@ func TestServer_Start(t *testing.T) {
 // TestServer_Stop verifies graceful shutdown
 func TestServer_Stop(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 
 	srv.Start()
 	time.Sleep(10 * time.Millisecond)
@@ -80,7 +89,11 @@ func TestServer_Stop(t *testing.T) {
 // TestServer_Stop_Multiple verifies multiple Stop calls are safe
 func TestServer_Stop_Multiple(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 
 	srv.Start()
 	time.Sleep(10 * time.Millisecond)
@@ -96,7 +109,11 @@ func TestServer_Stop_Multiple(t *testing.T) {
 // TestServer_Start_Multiple verifies multiple Start calls
 func TestServer_Start_Multiple(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 
 	// Start multiple times
 	srv.Start()
@@ -109,7 +126,7 @@ func TestServer_Start_Multiple(t *testing.T) {
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	_, err := client.CreateAccount(ctx, 100.0)
+	_, err = createTestAccount(ctx, srv, client, 100.0)
 	if err != nil {
 		t.Errorf("Server not responding after multiple Start() calls: %v", err)
 	}
@@ -207,13 +224,23 @@ func TestServer_CreateVirtualApp_Multiple(t *testing.T) {
 // TestServer_HandleRequest_CreateAccount verifies request handling
 func TestServer_HandleRequest_CreateAccount(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 
-	req := Request{
+	signedReq, err := createSignedAccountRequest(srv, 100.0)
+	if err != nil {
+		t.Fatalf("Failed to create signed account request: %v", err)
+	}
+
+	req := messages.Request{
 		ID:   "test-req-1",
-		Type: ReqCreateAccount,
-		Payload: CreateAccountPayload{
+		Type: messages.ReqCreateAccount,
+		Payload: &messages.CreateAccountWithKeysPayload{
 			InitialBalance: 100.0,
+			SignedRequest:  signedReq,
 		},
 		Context: context.Background(),
 	}
@@ -228,7 +255,7 @@ func TestServer_HandleRequest_CreateAccount(t *testing.T) {
 		t.Fatal("handleRequest() returned nil payload")
 	}
 
-	createResp, ok := resp.Payload.(CreateAccountResponse)
+	createResp, ok := resp.Payload.(messages.CreateAccountWithKeysResponse)
 	if !ok {
 		t.Fatal("handleRequest() returned wrong payload type")
 	}
@@ -241,16 +268,35 @@ func TestServer_HandleRequest_CreateAccount(t *testing.T) {
 // TestServer_HandleRequest_GetAccount verifies account retrieval
 func TestServer_HandleRequest_GetAccount(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
+	srv.Start()
+	defer srv.Stop()
 
-	// Create account first
-	acc, _ := srv.app.CreateAccount(context.Background(), 50.0)
+	client := NewClient(srv.RequestChannel(), logger)
+	ctx := context.Background()
 
-	req := Request{
+	// Create account first with credentials
+	acc, err := createTestAccount(ctx, srv, client, 50.0)
+	if err != nil {
+		t.Fatalf("Failed to create test account: %v", err)
+	}
+
+	// Create signed get account request
+	signedReq, err := createSignedGetAccountRequest(srv, acc.ID())
+	if err != nil {
+		t.Fatalf("Failed to create signed get account request: %v", err)
+	}
+
+	req := messages.Request{
 		ID:   "test-req-2",
-		Type: ReqGetAccount,
-		Payload: GetAccountPayload{
-			ID: acc.ID(),
+		Type: messages.ReqGetAccount,
+		Payload: &messages.GetAccountPayload{
+			AccountID:     acc.ID(),
+			SignedRequest: signedReq,
 		},
 		Context: context.Background(),
 	}
@@ -261,7 +307,7 @@ func TestServer_HandleRequest_GetAccount(t *testing.T) {
 		t.Errorf("handleRequest() failed: %s", resp.Error)
 	}
 
-	getResp := resp.Payload.(GetAccountResponse)
+	getResp := resp.Payload.(messages.GetAccountResponse)
 	if getResp.Account.ID() != acc.ID() {
 		t.Error("handleRequest() returned wrong account")
 	}
@@ -277,10 +323,10 @@ func TestServer_HandleRequest_GetAccounts(t *testing.T) {
 		srv.app.CreateAccount(context.Background(), float64(i*10))
 	}
 
-	req := Request{
+	req := messages.Request{
 		ID:      "test-req-3",
-		Type:    ReqGetAccounts,
-		Payload: GetAccountsPayload{},
+		Type:    messages.ReqGetAccounts,
+		Payload: messages.GetAccountsPayload{},
 		Context: context.Background(),
 	}
 
@@ -290,7 +336,7 @@ func TestServer_HandleRequest_GetAccounts(t *testing.T) {
 		t.Errorf("handleRequest() failed: %s", resp.Error)
 	}
 
-	getResp := resp.Payload.(GetAccountsResponse)
+	getResp := resp.Payload.(messages.GetAccountsResponse)
 	if len(getResp.Accounts) != 5 {
 		t.Errorf("handleRequest() returned %d accounts, want 5", len(getResp.Accounts))
 	}
@@ -299,27 +345,27 @@ func TestServer_HandleRequest_GetAccounts(t *testing.T) {
 // TestServer_HandleRequest_Transfer verifies fund transfer
 func TestServer_HandleRequest_Transfer(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-
-	from, _ := srv.app.CreateAccount(context.Background(), 100.0)
-	to, _ := srv.app.CreateAccount(context.Background(), 50.0)
-
-	req := Request{
-		ID:   "test-req-4",
-		Type: ReqTransfer,
-		Payload: TransferPayload{
-			From:   from.ID(),
-			To:     to.ID(),
-			Amount: 30.0,
-			Nonce:  3, // Accounts have blockchain length 2 after initial mint, so nonce is 3
-		},
-		Context: context.Background(),
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
 	}
+	defer cleanup()
+	srv.Start()
+	defer srv.Stop()
 
-	resp := srv.handleRequest(req)
+	client := NewClient(srv.RequestChannel(), logger)
+	ctx := context.Background()
 
-	if !resp.Success {
-		t.Errorf("handleRequest() failed: %s", resp.Error)
+	from, _ := createTestAccount(ctx, srv, client, 100.0)
+	to, _ := createTestAccount(ctx, srv, client, 50.0)
+
+	signedTransfer, err := createSignedTransfer(ctx, srv, client, from.ID(), to.ID(), 30.0)
+	if err != nil {
+		t.Fatalf("Failed to create signed transfer: %v", err)
+	}
+	err = client.TransferSigned(ctx, from.ID(), to.ID(), 30.0, signedTransfer)
+	if err != nil {
+		t.Fatalf("TransferSigned() error = %v", err)
 	}
 
 	// Verify balances
@@ -341,10 +387,10 @@ func TestServer_HandleRequest_Mint(t *testing.T) {
 
 	acc, _ := srv.app.CreateAccount(context.Background(), 100.0)
 
-	req := Request{
+	req := messages.Request{
 		ID:   "test-req-5",
-		Type: ReqMint,
-		Payload: MintPayload{
+		Type: messages.ReqMint,
+		Payload: messages.MintPayload{
 			To:     acc.ID(),
 			Amount: 50.0,
 		},
@@ -374,10 +420,10 @@ func TestServer_HandleRequest_AccountCount(t *testing.T) {
 		srv.app.CreateAccount(context.Background(), 0)
 	}
 
-	req := Request{
+	req := messages.Request{
 		ID:      "test-req-6",
-		Type:    ReqAccountCount,
-		Payload: AccountCountPayload{},
+		Type:    messages.ReqAccountCount,
+		Payload: messages.AccountCountPayload{},
 		Context: context.Background(),
 	}
 
@@ -387,7 +433,7 @@ func TestServer_HandleRequest_AccountCount(t *testing.T) {
 		t.Errorf("handleRequest() failed: %s", resp.Error)
 	}
 
-	countResp := resp.Payload.(AccountCountResponse)
+	countResp := resp.Payload.(messages.AccountCountResponse)
 	if countResp.Count != 3 {
 		t.Errorf("Count = %d, want 3", countResp.Count)
 	}
@@ -398,7 +444,7 @@ func TestServer_HandleRequest_UnknownType(t *testing.T) {
 	logger := newTestLogger()
 	srv := New(logger)
 
-	req := Request{
+	req := messages.Request{
 		ID:      "test-req-7",
 		Type:    99, // Invalid request type
 		Payload: nil,
@@ -419,32 +465,36 @@ func TestServer_HandleRequest_UnknownType(t *testing.T) {
 // TestServer_HandleRequest_Errors verifies error handling
 func TestServer_HandleRequest_Errors(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 
 	tests := []struct {
 		name    string
-		reqType RequestType
+		reqType messages.RequestType
 		payload any
 	}{
 		{
 			name:    "GetAccount non-existent",
-			reqType: ReqGetAccount,
-			payload: GetAccountPayload{ID: idRandom1},
+			reqType: messages.ReqGetAccount,
+			payload: &messages.GetAccountPayload{AccountID: idRandom1},
 		},
 		{
 			name:    "Transfer insufficient funds",
-			reqType: ReqTransfer,
-			payload: TransferPayload{
+			reqType: messages.ReqTransfer,
+			payload: &messages.TransferPayload{
 				From:   idRandom1,
 				To:     idRandom2,
 				Amount: 100.0,
-				Nonce:  1, // Non-existent accounts, nonce doesn't matter for this error test
+				Nonce:  1,
 			},
 		},
 		{
 			name:    "Mint to non-existent",
-			reqType: ReqMint,
-			payload: MintPayload{
+			reqType: messages.ReqMint,
+			payload: messages.MintPayload{
 				To:     idRandom1,
 				Amount: 100.0,
 			},
@@ -453,7 +503,7 @@ func TestServer_HandleRequest_Errors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := Request{
+			req := messages.Request{
 				ID:      "test-req",
 				Type:    tt.reqType,
 				Payload: tt.payload,
@@ -472,7 +522,11 @@ func TestServer_HandleRequest_Errors(t *testing.T) {
 // TestServer_ConcurrentRequests verifies concurrent request processing
 func TestServer_ConcurrentRequests(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -487,7 +541,7 @@ func TestServer_ConcurrentRequests(t *testing.T) {
 		wg.Add(1)
 		go func(balance float64) {
 			defer wg.Done()
-			_, err := client.CreateAccount(ctx, balance)
+			_, err := createTestAccount(ctx, srv, client, balance)
 			if err != nil {
 				errChan <- err
 			}
@@ -512,7 +566,11 @@ func TestServer_ConcurrentRequests(t *testing.T) {
 // TestServer_StopDuringProcessing verifies graceful shutdown during active requests
 func TestServer_StopDuringProcessing(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 
 	client := NewClient(srv.RequestChannel(), logger)
@@ -525,7 +583,7 @@ func TestServer_StopDuringProcessing(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			client.CreateAccount(ctx, 100.0)
+			createTestAccount(ctx, srv, client, 100.0)
 		}()
 	}
 
@@ -549,7 +607,11 @@ func TestServer_StopDuringProcessing(t *testing.T) {
 // TestServer_CreateVirtualApp_AfterStop verifies behavior after shutdown
 func TestServer_CreateVirtualApp_AfterStop(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	srv.Stop()
 
@@ -567,13 +629,23 @@ func TestServer_CreateVirtualApp_AfterStop(t *testing.T) {
 // BenchmarkServer_HandleRequest benchmarks request processing
 func BenchmarkServer_HandleRequest(b *testing.B) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		b.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 
-	req := Request{
+	signedReq, err := createSignedAccountRequest(srv, 100.0)
+	if err != nil {
+		b.Fatalf("Failed to create signed account request: %v", err)
+	}
+
+	req := messages.Request{
 		ID:   "bench-req",
-		Type: ReqCreateAccount,
-		Payload: CreateAccountPayload{
+		Type: messages.ReqCreateAccount,
+		Payload: &messages.CreateAccountWithKeysPayload{
 			InitialBalance: 100.0,
+			SignedRequest:  signedReq,
 		},
 		Context: context.Background(),
 	}
@@ -586,7 +658,11 @@ func BenchmarkServer_HandleRequest(b *testing.B) {
 // BenchmarkServer_ConcurrentRequests benchmarks concurrent processing
 func BenchmarkServer_ConcurrentRequests(b *testing.B) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		b.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -596,7 +672,7 @@ func BenchmarkServer_ConcurrentRequests(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			client.CreateAccount(ctx, 100.0)
+			createTestAccount(ctx, srv, client, 100.0)
 		}
 	})
 }

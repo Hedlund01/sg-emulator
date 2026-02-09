@@ -150,6 +150,7 @@ func VerifyEnvelope[T SignableData](v *Verifier, envelope *SignedEnvelope[T]) (e
 		return nil, err
 	}
 
+
 	return pubKey, nil
 }
 
