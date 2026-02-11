@@ -2,6 +2,8 @@ package scalegraph
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -54,6 +56,49 @@ func (a *App) CreateAccount(ctx context.Context, initialBalance float64) (*Accou
 	return acc, nil
 }
 
+// CreateAccountWithKeys creates a new account with a public key and certificate
+// The account ID is derived from the public key hash
+func (a *App) CreateAccountWithKeys(ctx context.Context, pubKey ed25519.PublicKey, cert *x509.Certificate, initialBalance float64) (*Account, error) {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+
+	// Derive account ID from public key
+	id := ScalegraphIdFromPublicKey(pubKey)
+	logger.Debug("Creating account with keys", "account_id", id, "initial_balance", initialBalance)
+
+	// Check if account already exists
+	a.mu.RLock()
+	_, exists := a.accounts[id]
+	a.mu.RUnlock()
+	if exists {
+		logger.Warn("Account already exists", "account_id", id)
+		return nil, fmt.Errorf("account already exists: %s", id)
+	}
+
+	acc, err := newAccountWithPublicKey(pubKey, cert)
+	if err != nil {
+		logger.Error("Failed to create account with keys", "error", err)
+		return nil, fmt.Errorf("failed to create account: %w", err)
+	}
+
+	if initialBalance > 0 {
+		if err := acc.mint(initialBalance); err != nil {
+			logger.Error("Failed to mint initial balance", "error", err, "account_id", acc.ID(), "amount", initialBalance)
+			return nil, fmt.Errorf("failed to mint initial balance: %w", err)
+		}
+	}
+
+	a.mu.Lock()
+	a.accounts[acc.ID()] = acc
+	totalAccounts := len(a.accounts)
+	a.mu.Unlock()
+
+	logger.Info("Account created with keys", "account_id", acc.ID(), "balance", acc.Balance(), "total_accounts", totalAccounts)
+	return acc, nil
+}
+
 // GetAccounts returns all accounts
 func (a *App) GetAccounts(ctx context.Context) []*Account {
 	a.mu.RLock()
@@ -80,12 +125,12 @@ func (a *App) GetAccount(ctx context.Context, id ScalegraphId) (*Account, error)
 }
 
 // Transfer transfers funds between two accounts atomically
-func (a *App) Transfer(ctx context.Context, from, to ScalegraphId, amount float64) error {
+func (a *App) Transfer(ctx context.Context, from, to ScalegraphId, amount float64, nonce uint64) error {
 	logger := a.logger
 	if traceID := trace.GetTraceID(ctx); traceID != "" {
 		logger = logger.With("trace_id", traceID)
 	}
-	logger.Debug("Transfer initiated", "from", from, "to", to, "amount", amount)
+	logger.Debug("Transfer initiated", "from", from, "to", to, "amount", amount, "nonce", nonce)
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -101,9 +146,24 @@ func (a *App) Transfer(ctx context.Context, from, to ScalegraphId, amount float6
 		return fmt.Errorf("destination account not found: %s", to)
 	}
 
+	// Reject self-transfers
+	if from == to {
+		logger.Warn("Self-transfer not allowed", "account", from)
+		return fmt.Errorf("self-transfer not allowed")
+	}
+
+	// Validate nonce before proceeding
+	expectedNonce := fromAcc.GetNonce() + 1
+	if nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "from", from, "expected", expectedNonce, "got", nonce)
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, nonce)
+	}
+
 	// Lock both accounts to ensure atomicity
+	// Lock from account first to validate nonce atomically
 	fromAcc.mu.Lock()
 	defer fromAcc.mu.Unlock()
+
 	toAcc.mu.Lock()
 	defer toAcc.mu.Unlock()
 

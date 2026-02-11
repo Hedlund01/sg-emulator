@@ -1,5 +1,8 @@
-# Go parameters - auto-detect go binary location
-GOCMD=$(shell which go)
+# Set shell explicitly
+SHELL=/usr/bin/bash
+
+# Go parameters
+GOCMD=go
 GOBUILD=$(GOCMD) build
 GOTEST=$(GOCMD) test
 GOCLEAN=$(GOCMD) clean
@@ -13,10 +16,10 @@ BINARY_DIR=bin
 # Main package path
 MAIN_PACKAGE=./cmd/app
 
-.PHONY: all build run test test-coverage clean deps fmt lint rename-module help
+.PHONY: all build run test test-coverage clean deps fmt lint swagger rename-module help
 
 # Default target
-all: fmt test build
+all: clean deps fmt swagger test build
 
 
 # Run benchmarks
@@ -62,6 +65,10 @@ deps:
 	@echo "Downloading dependencies..."
 	$(GOMOD) download
 	$(GOMOD) tidy
+	$(GOCMD) get github.com/vektra/mockery/v3@v3.6.3
+	$(GOCMD) install github.com/vektra/mockery/v3@v3.6.3
+	$(GOCMD) install github.com/swaggo/swag/cmd/swag@latest
+	$(GOCMD) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	@echo "Dependencies ready"
 
 # Format code
@@ -74,6 +81,13 @@ lint:
 	@echo "Running linter..."
 	@which golangci-lint > /dev/null 2>&1 || (echo "golangci-lint not installed. Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest" && exit 1)
 	golangci-lint run ./...
+
+# Generate Swagger documentation (requires swag)
+swagger:
+	@echo "Generating Swagger documentation..."
+	@which swag > /dev/null 2>&1 || (echo "swag not installed. Install with: go install github.com/swaggo/swag/cmd/swag@latest" && exit 1)
+	swag init -g internal/transport/rest/rest.go -o internal/transport/rest/docs
+	@echo "Swagger docs generated in internal/transport/rest/docs"
 
 # Rename module for publishing
 rename-module:
@@ -91,5 +105,6 @@ help:
 	@echo "  deps           - Download and tidy dependencies"
 	@echo "  fmt            - Format code"
 	@echo "  lint           - Run linter (requires golangci-lint)"
+	@echo "  swagger        - Generate Swagger documentation (requires swag)"
 	@echo "  rename-module  - Rename module for GitHub publishing"
 	@echo "  help           - Show this help message"

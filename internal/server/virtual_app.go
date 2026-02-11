@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"sg-emulator/internal/scalegraph"
+	"sg-emulator/internal/server/messages"
 )
 
 // VirtualApp represents a virtual application instance with its own ID and transports.
@@ -21,7 +22,7 @@ type VirtualApp struct {
 
 // newVirtualApp creates a new VirtualApp without any transports.
 // This is internal - use Server.CreateVirtualApp() to create and register.
-func newVirtualApp(requestChan chan<- Request, logger *slog.Logger) (*VirtualApp, error) {
+func newVirtualApp(requestChan chan<- messages.Request, logger *slog.Logger) (*VirtualApp, error) {
 	id, err := scalegraph.NewScalegraphId()
 	if err != nil {
 		return nil, err

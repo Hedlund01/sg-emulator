@@ -3,9 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math/big"
-	"os"
 	"sort"
 	"sync"
 	"testing"
@@ -46,12 +44,6 @@ func mustParseID(s string) scalegraph.ScalegraphId {
 		panic("invalid test ID: " + err.Error())
 	}
 	return id
-}
-
-func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelError, // Only show errors in tests
-	}))
 }
 
 // TestXORDistance_Identity verifies d(a, a) = 0

@@ -1,0 +1,148 @@
+basePath: /
+definitions:
+  rest.AccountResponse:
+    properties:
+      balance:
+        example: 100.5
+        type: number
+      id:
+        example: 6c439a07c32f7fb09c29403d8d2e4e47b8c5e8a9
+        type: string
+      transactions:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+    type: object
+  rest.ErrorResponse:
+    properties:
+      error:
+        example: Invalid request
+        type: string
+    type: object
+  rest.HealthResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+      type:
+        example: rest
+        type: string
+    type: object
+  rest.SignedAccountRequest:
+    type: object
+  rest.SignedTransferRequest:
+    type: object
+  rest.TransferResponse:
+    properties:
+      status:
+        example: success
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@example.com
+    name: API Support
+  description: REST API for SG Emulator with cryptographically signed requests
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: SG Emulator REST API
+  version: "1.0"
+paths:
+  /accounts/me:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Get account details including balance and transaction history. Requires cryptographically signed request with Ed25519 signature and X.509 certificate.
+
+        The request must be wrapped in a SignedEnvelope structure containing:
+        - payload: The AccountRequest with your account_id
+        - signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id, and timestamp
+        - certificate: PEM-encoded X.509 certificate containing your public key
+
+        The signature must be created by signing the JSON bytes of the payload using your account's Ed25519 private key.
+        The signer_id in the signature must match the account_id in the payload.
+      parameters:
+      - description: Signed account request with Ed25519 signature
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.SignedAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.AccountResponse'
+        "400":
+          description: Invalid request body or missing signature
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "403":
+          description: Attempting to access another account
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: Account not found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Get your own account details
+      tags:
+      - accounts
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Get the health status of the REST API
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.HealthResponse'
+      summary: Health check
+      tags:
+      - health
+  /transfer:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Transfer funds from one account to another. Requires cryptographically signed request with Ed25519 signature.
+
+        The request must be wrapped in a SignedEnvelope containing:
+        - payload: TransferRequest with from (sender account ID), to (recipient account ID), amount, nonce (random 16-byte hex string), and timestamp
+        - signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id (must match 'from'), and timestamp
+        - certificate: PEM-encoded X.509 certificate of the sender
+
+        The nonce prevents replay attacks. Each transfer must use a unique nonce.
+        The signature is created by signing the canonical JSON bytes of the TransferRequest payload.
+      parameters:
+      - description: Signed transfer request with Ed25519 signature
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.SignedTransferRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.TransferResponse'
+        "400":
+          description: Invalid request, missing fields, or transfer failed
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Transfer funds between accounts
+      tags:
+      - transfer
+swagger: "2.0"

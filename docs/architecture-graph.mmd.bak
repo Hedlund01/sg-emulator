@@ -1,0 +1,95 @@
+graph TB
+    subgraph "Transport Layer"
+        REST[REST Transport<br/>Port 8080+<br/>HTTP/Swagger]
+        GRPC[gRPC Transport<br/>Port 50051+<br/>Future]
+        MCP[MCP Transport<br/>Port 3000<br/>HTTP/SSE for LLMs]
+        TUI[TUI Transport<br/>Terminal UI<br/>Bubble Tea]
+    end
+
+    subgraph "Virtual Apps Layer"
+        VA1[VirtualApp #1<br/>ID: ScalegraphId<br/>Multiple Transports]
+        VA2[VirtualApp #2<br/>ID: ScalegraphId<br/>Multiple Transports]
+        VA3[VirtualApp #3<br/>ID: ScalegraphId<br/>Multiple Transports]
+
+        CLIENT1[Client #1<br/>Request/Response<br/>Channels]
+        CLIENT2[Client #2<br/>Request/Response<br/>Channels]
+        CLIENT3[Client #3<br/>Request/Response<br/>Channels]
+    end
+
+    subgraph "Server Layer"
+        REGISTRY[Registry<br/>VirtualApp Management<br/>DHT Routing]
+        REQCHAN[requestChan<br/>Buffered Channel<br/>Size: 1000]
+        SERVER[Server<br/>Event Loop<br/>Request Processing]
+        CA[Certificate Authority<br/>Signature Verification]
+    end
+
+    subgraph "App Layer - Business Logic"
+        APP[App<br/>Thread-Safe<br/>RWMutex]
+        ACCOUNTS[accounts map<br/>ScalegraphId → Account]
+    end
+
+    subgraph "Scalegraph Layer - Data Model"
+        ACC1[Account #1<br/>ID: ScalegraphId<br/>Balance<br/>PublicKey<br/>Certificate]
+        ACC2[Account #2<br/>ID: ScalegraphId<br/>Balance<br/>PublicKey<br/>Certificate]
+        ACC3[Account #N<br/>ID: ScalegraphId<br/>Balance<br/>PublicKey<br/>Certificate]
+
+        BC1[Blockchain #1<br/>Linked List<br/>Transactions]
+        BC2[Blockchain #2<br/>Linked List<br/>Transactions]
+        BC3[Blockchain #N<br/>Linked List<br/>Transactions]
+
+        TX1[Transactions<br/>From/To/Amount<br/>Immutable]
+        TX2[Transactions<br/>From/To/Amount<br/>Immutable]
+        TX3[Transactions<br/>From/To/Amount<br/>Immutable]
+    end
+
+    REST -->|attached to| VA1
+    GRPC -->|attached to| VA1
+    MCP -->|attached to| VA2
+    TUI -->|attached to| VA3
+
+    VA1 -.->|uses| CLIENT1
+    VA2 -.->|uses| CLIENT2
+    VA3 -.->|uses| CLIENT3
+
+    CLIENT1 -->|sends Request| REQCHAN
+    CLIENT2 -->|sends Request| REQCHAN
+    CLIENT3 -->|sends Request| REQCHAN
+
+    REQCHAN -->|processes| SERVER
+    SERVER -->|manages| REGISTRY
+    SERVER -->|verifies with| CA
+    SERVER -.->|sends Response| CLIENT1
+    SERVER -.->|sends Response| CLIENT2
+    SERVER -.->|sends Response| CLIENT3
+
+    REGISTRY -->|tracks| VA1
+    REGISTRY -->|tracks| VA2
+    REGISTRY -->|tracks| VA3
+
+    SERVER -->|delegates to| APP
+    APP -->|manages| ACCOUNTS
+
+    ACCOUNTS -->|contains| ACC1
+    ACCOUNTS -->|contains| ACC2
+    ACCOUNTS -->|contains| ACC3
+
+    ACC1 -->|has| BC1
+    ACC2 -->|has| BC2
+    ACC3 -->|has| BC3
+
+    BC1 -->|stores| TX1
+    BC2 -->|stores| TX2
+    BC3 -->|stores| TX3
+
+    style REST fill:#e1f5ff
+    style GRPC fill:#e1f5ff
+    style MCP fill:#e1f5ff
+    style TUI fill:#e1f5ff
+    style VA1 fill:#fff4e1
+    style VA2 fill:#fff4e1
+    style VA3 fill:#fff4e1
+    style SERVER fill:#ffe1e1
+    style APP fill:#e1ffe1
+    style ACC1 fill:#f0e1ff
+    style ACC2 fill:#f0e1ff
+    style ACC3 fill:#f0e1ff

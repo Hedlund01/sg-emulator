@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"sg-emulator/internal/scalegraph"
+	"sg-emulator/internal/server/messages"
 	"sg-emulator/internal/trace"
 )
 
 // TestNewClient verifies client creation
 func TestNewClient(t *testing.T) {
-	reqChan := make(chan Request, 10)
+	reqChan := make(chan messages.Request, 10)
 	logger := newTestLogger()
 
 	client := NewClient(reqChan, logger)
@@ -34,7 +35,7 @@ func TestNewClient(t *testing.T) {
 
 // TestClient_SetTimeout verifies timeout configuration
 func TestClient_SetTimeout(t *testing.T) {
-	reqChan := make(chan Request, 10)
+	reqChan := make(chan messages.Request, 10)
 	logger := newTestLogger()
 	client := NewClient(reqChan, logger)
 
@@ -48,7 +49,7 @@ func TestClient_SetTimeout(t *testing.T) {
 
 // TestClient_SetTimeout_Zero verifies zero timeout handling
 func TestClient_SetTimeout_Zero(t *testing.T) {
-	reqChan := make(chan Request, 10)
+	reqChan := make(chan messages.Request, 10)
 	logger := newTestLogger()
 	client := NewClient(reqChan, logger)
 
@@ -112,14 +113,18 @@ func TestGenerateRequestID_Concurrent(t *testing.T) {
 // TestClient_CreateAccount verifies account creation
 func TestClient_CreateAccount(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	acc, err := client.CreateAccount(ctx, 100.0)
+	acc, err := createTestAccount(ctx, srv, client, 100.0)
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v, want nil", err)
 	}
@@ -136,14 +141,18 @@ func TestClient_CreateAccount(t *testing.T) {
 // TestClient_CreateAccount_ZeroBalance verifies account creation with zero balance
 func TestClient_CreateAccount_ZeroBalance(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	acc, err := client.CreateAccount(ctx, 0)
+	acc, err := createTestAccount(ctx, srv, client, 0)
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v, want nil", err)
 	}
@@ -156,7 +165,11 @@ func TestClient_CreateAccount_ZeroBalance(t *testing.T) {
 // TestClient_GetAccount verifies account retrieval
 func TestClient_GetAccount(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -164,10 +177,13 @@ func TestClient_GetAccount(t *testing.T) {
 	ctx := context.Background()
 
 	// Create account first
-	acc, _ := client.CreateAccount(ctx, 50.0)
+	acc, err := createTestAccount(ctx, srv, client, 50.0)
+	if err != nil {
+		t.Fatalf("createTestAccount() error = %v", err)
+	}
 
 	// Retrieve it
-	retrieved, err := client.GetAccount(ctx, acc.ID())
+	retrieved, err := getTestAccount(ctx, srv, client, acc.ID())
 	if err != nil {
 		t.Fatalf("GetAccount() error = %v, want nil", err)
 	}
@@ -184,7 +200,11 @@ func TestClient_GetAccount(t *testing.T) {
 // TestClient_GetAccount_NotFound verifies error for non-existent account
 func TestClient_GetAccount_NotFound(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -193,7 +213,8 @@ func TestClient_GetAccount_NotFound(t *testing.T) {
 
 	nonExistentID := idRandom1
 
-	_, err := client.GetAccount(ctx, nonExistentID)
+	// Can't create a signed request for non-existent account, so pass nil
+	_, err = client.GetAccount(ctx, nonExistentID, nil)
 	if err == nil {
 		t.Error("GetAccount() for non-existent account succeeded, want error")
 	}
@@ -202,7 +223,11 @@ func TestClient_GetAccount_NotFound(t *testing.T) {
 // TestClient_GetAccounts verifies listing all accounts
 func TestClient_GetAccounts(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -212,7 +237,7 @@ func TestClient_GetAccounts(t *testing.T) {
 	// Create multiple accounts
 	count := 5
 	for i := 0; i < count; i++ {
-		client.CreateAccount(ctx, float64(i*10))
+		createTestAccount(ctx, srv, client, float64(i*10))
 	}
 
 	// Get all accounts
@@ -229,7 +254,11 @@ func TestClient_GetAccounts(t *testing.T) {
 // TestClient_GetAccounts_Empty verifies empty account list
 func TestClient_GetAccounts_Empty(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -249,26 +278,40 @@ func TestClient_GetAccounts_Empty(t *testing.T) {
 // TestClient_Transfer verifies fund transfer
 func TestClient_Transfer(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	// Create two accounts
-	from, _ := client.CreateAccount(ctx, 100.0)
-	to, _ := client.CreateAccount(ctx, 50.0)
-
-	// Transfer funds
-	err := client.Transfer(ctx, from.ID(), to.ID(), 30.0)
+	// Create two accounts with credentials
+	from, err := createTestAccount(ctx, srv, client, 100.0)
 	if err != nil {
-		t.Fatalf("Transfer() error = %v, want nil", err)
+		t.Fatalf("Failed to create from account: %v", err)
+	}
+	to, err := createTestAccount(ctx, srv, client, 50.0)
+	if err != nil {
+		t.Fatalf("Failed to create to account: %v", err)
+	}
+
+	// Transfer funds with signed request
+	signedTransfer, err := createSignedTransfer(ctx, srv, client, from.ID(), to.ID(), 30.0)
+	if err != nil {
+		t.Fatalf("Failed to create signed transfer: %v", err)
+	}
+	err = client.TransferSigned(ctx, from.ID(), to.ID(), 30.0, signedTransfer)
+	if err != nil {
+		t.Fatalf("TransferSigned() error = %v, want nil", err)
 	}
 
 	// Verify balances
-	fromAcc, _ := client.GetAccount(ctx, from.ID())
-	toAcc, _ := client.GetAccount(ctx, to.ID())
+	fromAcc, _ := getTestAccount(ctx, srv, client, from.ID())
+	toAcc, _ := getTestAccount(ctx, srv, client, to.ID())
 
 	if fromAcc.Balance() != 70.0 {
 		t.Errorf("Transfer() from balance = %.2f, want 70.00", fromAcc.Balance())
@@ -282,34 +325,55 @@ func TestClient_Transfer(t *testing.T) {
 // TestClient_Transfer_InsufficientFunds verifies insufficient funds error
 func TestClient_Transfer_InsufficientFunds(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	from, _ := client.CreateAccount(ctx, 50.0)
-	to, _ := client.CreateAccount(ctx, 0.0)
+	from, err := createTestAccount(ctx, srv, client, 50.0)
+	if err != nil {
+		t.Fatalf("Failed to create from account: %v", err)
+	}
+	to, err := createTestAccount(ctx, srv, client, 0.0)
+	if err != nil {
+		t.Fatalf("Failed to create to account: %v", err)
+	}
 
 	// Attempt transfer larger than balance
-	err := client.Transfer(ctx, from.ID(), to.ID(), 100.0)
+	signedTransfer, err := createSignedTransfer(ctx, srv, client, from.ID(), to.ID(), 100.0)
+	if err != nil {
+		t.Fatalf("Failed to create signed transfer: %v", err)
+	}
+	err = client.TransferSigned(ctx, from.ID(), to.ID(), 100.0, signedTransfer)
 	if err == nil {
-		t.Error("Transfer() with insufficient funds succeeded, want error")
+		t.Error("TransferSigned() with insufficient funds succeeded, want error")
 	}
 }
 
 // TestClient_Transfer_NonExistentAccounts verifies errors for missing accounts
 func TestClient_Transfer_NonExistentAccounts(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	acc, _ := client.CreateAccount(ctx, 100.0)
+	acc, err := createTestAccount(ctx, srv, client, 100.0)
+	if err != nil {
+		t.Fatalf("Failed to create account: %v", err)
+	}
 
 	tests := []struct {
 		name   string
@@ -323,9 +387,13 @@ func TestClient_Transfer_NonExistentAccounts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := client.Transfer(ctx, tt.fromID, tt.toID, 10.0)
+			// Try to create signed transfer - may fail if from account doesn't exist
+			signedTransfer, err := createSignedTransfer(ctx, srv, client, tt.fromID, tt.toID, 10.0)
 			if err == nil {
-				t.Error("Transfer() with non-existent account succeeded, want error")
+				err = client.TransferSigned(ctx, tt.fromID, tt.toID, 10.0, signedTransfer)
+			}
+			if err == nil {
+				t.Error("TransferSigned() with non-existent account succeeded, want error")
 			}
 		})
 	}
@@ -334,23 +402,27 @@ func TestClient_Transfer_NonExistentAccounts(t *testing.T) {
 // TestClient_Mint verifies token minting
 func TestClient_Mint(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	acc, _ := client.CreateAccount(ctx, 100.0)
+	acc, _ := createTestAccount(ctx, srv, client, 100.0)
 
 	// Mint tokens
-	err := client.Mint(ctx, acc.ID(), 50.0)
+	err = client.Mint(ctx, acc.ID(), 50.0)
 	if err != nil {
 		t.Fatalf("Mint() error = %v, want nil", err)
 	}
 
 	// Verify balance
-	updated, _ := client.GetAccount(ctx, acc.ID())
+	updated, _ := getTestAccount(ctx, srv, client, acc.ID())
 	if updated.Balance() != 150.0 {
 		t.Errorf("Mint() balance = %.2f, want 150.00", updated.Balance())
 	}
@@ -359,14 +431,18 @@ func TestClient_Mint(t *testing.T) {
 // TestClient_Mint_NonExistentAccount verifies mint error for missing account
 func TestClient_Mint_NonExistentAccount(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	err := client.Mint(ctx, idRandom1, 100.0)
+	err = client.Mint(ctx, idRandom1, 100.0)
 	if err == nil {
 		t.Error("Mint() to non-existent account succeeded, want error")
 	}
@@ -375,7 +451,11 @@ func TestClient_Mint_NonExistentAccount(t *testing.T) {
 // TestClient_AccountCount verifies account counting
 func TestClient_AccountCount(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -385,7 +465,7 @@ func TestClient_AccountCount(t *testing.T) {
 	// Create accounts
 	count := 7
 	for i := 0; i < count; i++ {
-		client.CreateAccount(ctx, 0)
+		createTestAccount(ctx, srv, client, 0)
 	}
 
 	// Get count
@@ -403,7 +483,7 @@ func TestClient_AccountCount(t *testing.T) {
 func TestClient_Timeout(t *testing.T) {
 	logger := newTestLogger()
 	// Create channel but don't start server (no one to respond)
-	reqChan := make(chan Request, 10)
+	reqChan := make(chan messages.Request, 10)
 	client := NewClient(reqChan, logger)
 	client.SetTimeout(100 * time.Millisecond)
 
@@ -411,11 +491,11 @@ func TestClient_Timeout(t *testing.T) {
 
 	// This should timeout since no server is processing
 	start := time.Now()
-	_, err := client.CreateAccount(ctx, 100.0)
+	_, err := client.CreateAccountWithCredentials(ctx, 100.0, nil)
 	duration := time.Since(start)
 
 	if err == nil {
-		t.Error("CreateAccount() without server succeeded, want timeout error")
+		t.Error("CreateAccountWithCredentials() without server succeeded, want timeout error")
 	}
 
 	// Verify it actually waited around the timeout period
@@ -430,7 +510,7 @@ func TestClient_Timeout(t *testing.T) {
 // TestClient_ContextCancellation verifies context cancellation handling
 func TestClient_ContextCancellation(t *testing.T) {
 	logger := newTestLogger()
-	reqChan := make(chan Request, 10)
+	reqChan := make(chan messages.Request, 10)
 	client := NewClient(reqChan, logger)
 	client.SetTimeout(100 * time.Millisecond) // Short timeout
 
@@ -439,11 +519,11 @@ func TestClient_ContextCancellation(t *testing.T) {
 
 	// Request should fail quickly due to cancelled context
 	start := time.Now()
-	_, err := client.CreateAccount(ctx, 100.0)
+	_, err := client.CreateAccountWithCredentials(ctx, 100.0, nil)
 	duration := time.Since(start)
 
 	if err == nil {
-		t.Error("CreateAccount() with cancelled context succeeded, want error")
+		t.Error("CreateAccountWithCredentials() with cancelled context succeeded, want error")
 	}
 
 	// Should fail within timeout period
@@ -455,7 +535,11 @@ func TestClient_ContextCancellation(t *testing.T) {
 // TestClient_ConcurrentRequests verifies concurrent request handling
 func TestClient_ConcurrentRequests(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -470,7 +554,7 @@ func TestClient_ConcurrentRequests(t *testing.T) {
 		wg.Add(1)
 		go func(balance float64) {
 			defer wg.Done()
-			_, err := client.CreateAccount(ctx, balance)
+			_, err := createTestAccount(ctx, srv, client, balance)
 			if err != nil {
 				errChan <- err
 			}
@@ -496,7 +580,11 @@ func TestClient_ConcurrentRequests(t *testing.T) {
 // NOTE: This test uses separate clients to avoid response channel conflicts
 func TestClient_ConcurrentDifferentOperations(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -510,9 +598,15 @@ func TestClient_ConcurrentDifferentOperations(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create initial accounts
-	acc1, _ := client1.CreateAccount(ctx, 1000.0)
-	acc2, _ := client1.CreateAccount(ctx, 1000.0)
+	// Create initial accounts with credentials
+	acc1, err := createTestAccount(ctx, srv, client1, 1000.0)
+	if err != nil {
+		t.Fatalf("Failed to create acc1: %v", err)
+	}
+	acc2, err := createTestAccount(ctx, srv, client1, 1000.0)
+	if err != nil {
+		t.Fatalf("Failed to create acc2: %v", err)
+	}
 
 	var wg sync.WaitGroup
 	var successCount atomic.Int32
@@ -522,7 +616,7 @@ func TestClient_ConcurrentDifferentOperations(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := client1.CreateAccount(ctx, 100.0)
+			_, err := createTestAccount(ctx, srv, client1, 100.0)
 			if err == nil {
 				successCount.Add(1)
 			}
@@ -534,7 +628,10 @@ func TestClient_ConcurrentDifferentOperations(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := client2.Transfer(ctx, acc1.ID(), acc2.ID(), 10.0)
+			signedTransfer, err := createSignedTransfer(ctx, srv, client2, acc1.ID(), acc2.ID(), 10.0)
+			if err == nil {
+				err = client2.TransferSigned(ctx, acc1.ID(), acc2.ID(), 10.0, signedTransfer)
+			}
 			if err == nil {
 				successCount.Add(1)
 			}
@@ -579,7 +676,11 @@ func TestClient_ConcurrentDifferentOperations(t *testing.T) {
 // response channels with a correlation map, ensuring each request gets its own response.
 func TestClient_ConcurrentSameClient_RaceCondition(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -587,9 +688,15 @@ func TestClient_ConcurrentSameClient_RaceCondition(t *testing.T) {
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	// Create initial accounts
-	acc1, _ := client.CreateAccount(ctx, 1000.0)
-	acc2, _ := client.CreateAccount(ctx, 1000.0)
+	// Create initial accounts with credentials
+	acc1, err := createTestAccount(ctx, srv, client, 1000.0)
+	if err != nil {
+		t.Fatalf("Failed to create acc1: %v", err)
+	}
+	acc2, err := createTestAccount(ctx, srv, client, 1000.0)
+	if err != nil {
+		t.Fatalf("Failed to create acc2: %v", err)
+	}
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, 50)
@@ -599,7 +706,7 @@ func TestClient_ConcurrentSameClient_RaceCondition(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := client.CreateAccount(ctx, 100.0)
+			_, err := createTestAccount(ctx, srv, client, 100.0)
 			if err != nil {
 				errChan <- err
 			}
@@ -611,7 +718,10 @@ func TestClient_ConcurrentSameClient_RaceCondition(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := client.Transfer(ctx, acc1.ID(), acc2.ID(), 10.0)
+			signedTransfer, err := createSignedTransfer(ctx, srv, client, acc1.ID(), acc2.ID(), 10.0)
+			if err == nil {
+				err = client.TransferSigned(ctx, acc1.ID(), acc2.ID(), 10.0, signedTransfer)
+			}
 			if err != nil {
 				errChan <- err
 			}
@@ -667,7 +777,11 @@ func TestClient_ConcurrentSameClient_RaceCondition(t *testing.T) {
 // TestClient_TraceIDPropagation verifies trace IDs flow through requests
 func TestClient_TraceIDPropagation(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -677,7 +791,7 @@ func TestClient_TraceIDPropagation(t *testing.T) {
 	ctx := trace.WithTraceID(context.Background(), traceID)
 
 	// Create account with trace ID
-	acc, err := client.CreateAccount(ctx, 100.0)
+	acc, err := createTestAccount(ctx, srv, client, 100.0)
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
@@ -691,7 +805,11 @@ func TestClient_TraceIDPropagation(t *testing.T) {
 // TestClient_MultipleClients verifies multiple clients can use same server
 func TestClient_MultipleClients(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -710,7 +828,7 @@ func TestClient_MultipleClients(t *testing.T) {
 		go func(c *Client, id int) {
 			defer wg.Done()
 			for j := 0; j < 5; j++ {
-				c.CreateAccount(ctx, float64(id*10+j))
+				createTestAccount(ctx, srv, c, float64(id*10+j))
 			}
 		}(client, i)
 	}
@@ -727,7 +845,11 @@ func TestClient_MultipleClients(t *testing.T) {
 // TestClient_RequestResponseCorrelation verifies responses match requests
 func TestClient_RequestResponseCorrelation(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -735,12 +857,12 @@ func TestClient_RequestResponseCorrelation(t *testing.T) {
 	ctx := context.Background()
 
 	// Create account and capture its ID
-	acc1, _ := client.CreateAccount(ctx, 100.0)
-	acc2, _ := client.CreateAccount(ctx, 200.0)
+	acc1, _ := createTestAccount(ctx, srv, client, 100.0)
+	acc2, _ := createTestAccount(ctx, srv, client, 200.0)
 
 	// Retrieve and verify correct accounts are returned
-	retrieved1, _ := client.GetAccount(ctx, acc1.ID())
-	retrieved2, _ := client.GetAccount(ctx, acc2.ID())
+	retrieved1, _ := getTestAccount(ctx, srv, client, acc1.ID())
+	retrieved2, _ := getTestAccount(ctx, srv, client, acc2.ID())
 
 	if retrieved1.ID() != acc1.ID() {
 		t.Error("GetAccount() returned wrong account")
@@ -762,7 +884,11 @@ func TestClient_RequestResponseCorrelation(t *testing.T) {
 // BenchmarkClient_CreateAccount benchmarks account creation
 func BenchmarkClient_CreateAccount(b *testing.B) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		b.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -770,14 +896,18 @@ func BenchmarkClient_CreateAccount(b *testing.B) {
 	ctx := context.Background()
 
 	for b.Loop() {
-		client.CreateAccount(ctx, 100.0)
+		createTestAccount(ctx, srv, client, 100.0)
 	}
 }
 
 // BenchmarkClient_GetAccount benchmarks account retrieval
 func BenchmarkClient_GetAccount(b *testing.B) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		b.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -785,29 +915,35 @@ func BenchmarkClient_GetAccount(b *testing.B) {
 	ctx := context.Background()
 
 	// Create an account to retrieve
-	acc, _ := client.CreateAccount(ctx, 100.0)
+	acc, _ := createTestAccount(ctx, srv, client, 100.0)
 
 	for b.Loop() {
-		client.GetAccount(ctx, acc.ID())
+		getTestAccount(ctx, srv, client, acc.ID())
 	}
 }
 
 // BenchmarkClient_Transfer benchmarks fund transfers
 func BenchmarkClient_Transfer(b *testing.B) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		b.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
 	client := NewClient(srv.RequestChannel(), logger)
 	ctx := context.Background()
 
-	// Create accounts with large balances
-	from, _ := client.CreateAccount(ctx, 1000000.0)
-	to, _ := client.CreateAccount(ctx, 0.0)
+	// Create accounts with large balances and credentials
+	from, _ := createTestAccount(ctx, srv, client, 1000000.0)
+	to, _ := createTestAccount(ctx, srv, client, 0.0)
 
+	b.ResetTimer()
 	for b.Loop() {
-		client.Transfer(ctx, from.ID(), to.ID(), 1.0)
+		signedTransfer, _ := createSignedTransfer(ctx, srv, client, from.ID(), to.ID(), 1.0)
+		client.TransferSigned(ctx, from.ID(), to.ID(), 1.0, signedTransfer)
 	}
 }
 
@@ -821,7 +957,11 @@ func BenchmarkGenerateRequestID(b *testing.B) {
 // BenchmarkClient_ConcurrentRequests benchmarks concurrent operations
 func BenchmarkClient_ConcurrentRequests(b *testing.B) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		b.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -831,7 +971,7 @@ func BenchmarkClient_ConcurrentRequests(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			client.CreateAccount(ctx, 100.0)
+			createTestAccount(ctx, srv, client, 100.0)
 		}
 	})
 }

@@ -1,0 +1,273 @@
+```mermaid
+classDiagram
+    class Transport {
+        <<interface>>
+        +Start(ctx Context) error
+        +Stop() error
+        +Address() string
+        +Type() string
+    }
+
+    class RESTTransport {
+        -server *http.Server
+        -client *Client
+        -address string
+        +Start(ctx Context) error
+        +Stop() error
+        +Address() string
+        +Type() string
+    }
+
+    class gRPCTransport {
+        -server *grpc.Server
+        -client *Client
+        -address string
+        +Start(ctx Context) error
+        +Stop() error
+    }
+
+    class MCPTransport {
+        -server *http.Server
+        -client *Client
+        -address string
+        +Start(ctx Context) error
+        +Stop() error
+    }
+
+    class TUITransport {
+        -client *Client
+        -model BubbleTeaModel
+        +Start(ctx Context) error
+        +Stop() error
+    }
+
+    class VirtualApp {
+        -id ScalegraphId
+        -client *Client
+        -transports []Transport
+        -ctx Context
+        -cancel CancelFunc
+        -wg WaitGroup
+        +ID() ScalegraphId
+        +Client() *Client
+        +AddTransport(t Transport)
+        +Start() error
+        +Stop() error
+        +Addresses() map~string~string
+    }
+
+    class Client {
+        -id ScalegraphId
+        -requestChan chan Request
+        -responseChan chan Response
+        -pendingRequests map~string~chan Response
+        -mu RWMutex
+        +ID() ScalegraphId
+        +CreateAccount(ctx, balance) Response
+        +Transfer(ctx, to, amount) Response
+        +TransferSigned(ctx, req SignedRequest) Response
+        +GetAccount(ctx, id) Response
+        +Mint(ctx, to, amount) Response
+        -sendRequest(req Request) Response
+    }
+
+    class Server {
+        -app *App
+        -registry *Registry
+        -requestChan chan Request
+        -ctx Context
+        -cancel CancelFunc
+        -wg WaitGroup
+        -logger *Logger
+        -ca *CA
+        -verifier *Verifier
+        +Start() error
+        +Stop() error
+        +CreateVirtualApp() *VirtualApp
+        +RequestChannel() chan Request
+        -run()
+        -handleRequest(req Request) Response
+        -verifySignedRequest(req SignedRequest) error
+    }
+
+    class Registry {
+        -apps map~ScalegraphId~*VirtualApp
+        -mu RWMutex
+        +Register(app *VirtualApp)
+        +Unregister(id ScalegraphId)
+        +Get(id ScalegraphId) *VirtualApp
+        +GetAll() []*VirtualApp
+        +GetKClosest(target ScalegraphId, k int) []*VirtualApp
+    }
+
+    class App {
+        -accounts map~ScalegraphId~*Account
+        -mu RWMutex
+        -logger *Logger
+        +CreateAccount(ctx, balance) (*Account, error)
+        +CreateAccountWithKeys(ctx, pubKey, cert, balance) (*Account, error)
+        +Transfer(ctx, from, to, amount, nonce) error
+        +Mint(ctx, to, amount) error
+        +GetAccount(ctx, id) (*Account, error)
+        +GetAccounts(ctx) ([]*Account, error)
+        +AccountCount(ctx) int
+    }
+
+    class Account {
+        -id ScalegraphId
+        -balance float64
+        -blockchain IBlockchain
+        -publicKey ed25519.PublicKey
+        -certificate *x509.Certificate
+        -valuestore map~string~string
+        -mu RWMutex
+        +ID() ScalegraphId
+        +Balance() float64
+        +Blockchain() IBlockchain
+        +PublicKey() ed25519.PublicKey
+        +Certificate() *x509.Certificate
+        +Debit(amount float64) error
+        +Credit(amount float64)
+        +GetValue(key string) string
+        +SetValue(key, value string)
+    }
+
+    class ScalegraphId {
+        -data [20]byte
+        +FromPublicKey(pubKey) ScalegraphId
+        +Random() ScalegraphId
+        +String() string
+        +Bytes() []byte
+        +XorDistance(other ScalegraphId) *big.Int
+    }
+
+    class IBlockchain {
+        <<interface>>
+        +Append(tx *Transaction) error
+        +GetLatest() *Block
+        +Len() int
+        +GetAll() []*Block
+    }
+
+    class Blockchain {
+        -head *Block
+        -tail *Block
+        -length int
+        -mu RWMutex
+        +Append(tx *Transaction) error
+        +GetLatest() *Block
+        +Len() int
+        +GetAll() []*Block
+    }
+
+    class Block {
+        -transaction *Transaction
+        -timestamp time.Time
+        -prev *Block
+        -next *Block
+        +Transaction() *Transaction
+        +Timestamp() time.Time
+    }
+
+    class Transaction {
+        -from ScalegraphId
+        -to ScalegraphId
+        -amount float64
+        -timestamp time.Time
+        +From() ScalegraphId
+        +To() ScalegraphId
+        +Amount() float64
+        +Timestamp() time.Time
+    }
+
+    class CA {
+        -rootCert *x509.Certificate
+        -rootKey *ecdsa.PrivateKey
+        +IssueCertificate(pubKey, id) (*x509.Certificate, error)
+        +VerifySignature(cert, data, sig) error
+    }
+
+    Transport <|.. RESTTransport
+    Transport <|.. gRPCTransport
+    Transport <|.. MCPTransport
+    Transport <|.. TUITransport
+
+    VirtualApp o-- Transport : contains multiple
+    VirtualApp *-- Client : owns
+    VirtualApp -- ScalegraphId : has
+
+    Client --> Server : sends requests via channel
+
+    Server *-- App : owns
+    Server *-- Registry : owns
+    Server *-- CA : owns
+    Server -- Client : receives from
+
+    Registry o-- VirtualApp : manages
+
+    App o-- Account : manages multiple
+
+    Account *-- ScalegraphId : has
+    Account *-- IBlockchain : owns
+    Account -- ed25519.PublicKey : has
+    Account -- x509.Certificate : has
+
+    IBlockchain <|.. Blockchain
+    Blockchain o-- Block : linked list
+    Block *-- Transaction : contains
+
+    Transaction -- ScalegraphId : from/to
+```
+
+## UML Class Diagram Overview
+
+This diagram shows the object-oriented structure of the SG Emulator.
+
+### Key Design Patterns
+
+1. **Interface Segregation**
+   - `Transport` interface with multiple implementations (REST, gRPC, MCP, TUI)
+   - `IBlockchain` interface implemented by `Blockchain`
+
+2. **Composition Over Inheritance**
+   - `VirtualApp` contains multiple `Transport` instances
+   - `Server` owns `App`, `Registry`, and `CA`
+   - `Account` owns `IBlockchain` and has cryptographic credentials
+
+3. **Thread-Safe Design**
+   - `RWMutex` in `App`, `Account`, `Blockchain`, `Registry`, `Client`
+   - Channel-based communication between `Client` and `Server`
+
+4. **Domain Model**
+   - `ScalegraphId`: 160-bit unique identifier (DHT-compatible)
+   - `Account`: Core entity with balance, blockchain, and crypto keys
+   - `Blockchain`: Per-account immutable transaction ledger
+   - `Transaction`: Immutable record of value transfer
+
+### Relationship Types
+
+- `*--`: Composition (owns, lifecycle managed)
+- `o--`: Aggregation (has, independent lifecycle)
+- `--`: Association (uses/references)
+- `<|..`: Interface implementation
+- `<|--`: Inheritance
+
+### Key File Locations
+
+| Class | File Path |
+|-------|-----------|
+| Transport | `internal/server/transport.go` |
+| RESTTransport | `internal/transport/rest/rest.go` |
+| gRPCTransport | `internal/transport/grpc/grpc.go` |
+| MCPTransport | `internal/transport/mcp/mcp.go` |
+| TUITransport | `internal/transport/tui/tui.go` |
+| VirtualApp | `internal/server/virtual_app.go` |
+| Client | `internal/server/client.go` |
+| Server | `internal/server/server.go` |
+| Registry | `internal/server/registry.go` |
+| App | `internal/scalegraph/app.go` |
+| Account | `internal/scalegraph/account.go` |
+| ScalegraphId | `internal/scalegraph/id.go` |
+| Blockchain | `internal/scalegraph/blockchain.go` |
+| Transaction | `internal/scalegraph/transaction.go` |
+| CA | `internal/ca/ca.go` |

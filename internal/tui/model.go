@@ -23,6 +23,12 @@ const (
 	ViewVirtualNodes
 )
 
+// AccountCredentials caches loaded cryptographic credentials
+type AccountCredentials struct {
+	PrivateKeyPEM  string
+	CertificatePEM string
+}
+
 // Model represents the TUI state
 type Model struct {
 	app    *server.Client
@@ -35,6 +41,9 @@ type Model struct {
 
 	// Account names (TUI-only, maps account ID to custom name)
 	accountNames map[scalegraph.ScalegraphId]string
+
+	// Credential cache (maps account ID to loaded credentials)
+	credentialCache map[scalegraph.ScalegraphId]*AccountCredentials
 
 	// Menu state
 	menuCursor int
@@ -77,12 +86,13 @@ func NewModel(application *server.Client, srv *server.Server) Model {
 	nameInput.Width = 40
 
 	return Model{
-		app:          application,
-		server:       srv,
-		view:         ViewMenu,
-		accountNames: make(map[scalegraph.ScalegraphId]string),
-		balanceInput: balanceInput,
-		nameInput:    nameInput,
+		app:             application,
+		server:          srv,
+		view:            ViewMenu,
+		accountNames:    make(map[scalegraph.ScalegraphId]string),
+		credentialCache: make(map[scalegraph.ScalegraphId]*AccountCredentials),
+		balanceInput:    balanceInput,
+		nameInput:       nameInput,
 	}
 }
 

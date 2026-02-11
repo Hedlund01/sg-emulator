@@ -1,16 +1,9 @@
 package scalegraph
 
-import "context"
-
 import (
-	"log/slog"
+	"context"
 	"testing"
 )
-
-func testLogger() *slog.Logger {
-	// Create a no-op logger for tests
-	return slog.New(slog.NewTextHandler(nil, &slog.HandlerOptions{Level: slog.LevelError + 1}))
-}
 
 func TestNew(t *testing.T) {
 	app := New(testLogger())
@@ -141,7 +134,7 @@ func TestTransfer(t *testing.T) {
 	acc2, _ := app.CreateAccount(context.Background(), 50.0)
 
 	// Test successful transfer
-	err := app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 30.0)
+	err := app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 30.0, 3)
 	if err != nil {
 		t.Fatalf("Transfer failed: %v", err)
 	}
@@ -154,7 +147,7 @@ func TestTransfer(t *testing.T) {
 	}
 
 	// Test transfer with insufficient funds
-	err = app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 100.0)
+	err = app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 100.0, 4)
 	if err == nil {
 		t.Error("expected error for insufficient funds, got nil")
 	}
@@ -169,13 +162,13 @@ func TestTransfer(t *testing.T) {
 
 	// Test transfer from non-existent account
 	fakeID, _ := NewScalegraphId()
-	err = app.Transfer(context.Background(), fakeID, acc2.ID(), 10.0)
+	err = app.Transfer(context.Background(), fakeID, acc2.ID(), 10.0, 1)
 	if err == nil {
 		t.Error("expected error for non-existent sender, got nil")
 	}
 
 	// Test transfer to non-existent account
-	err = app.Transfer(context.Background(), acc1.ID(), fakeID, 10.0)
+	err = app.Transfer(context.Background(), acc1.ID(), fakeID, 10.0, 4)
 	if err == nil {
 		t.Error("expected error for non-existent receiver, got nil")
 	}
@@ -187,7 +180,7 @@ func TestTransferZeroAmount(t *testing.T) {
 	acc2, _ := app.CreateAccount(context.Background(), 50.0)
 
 	// Transfer 0 should succeed but not change balances
-	err := app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 0)
+	err := app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 0, 3)
 	if err != nil {
 		t.Fatalf("Transfer(0) failed: %v", err)
 	}
@@ -230,7 +223,7 @@ func TestTransferAtomicity(t *testing.T) {
 	initialTotal := acc1.Balance() + acc2.Balance()
 
 	// Successful transfer should preserve total balance
-	app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 25.0)
+	app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 25.0, 3)
 	finalTotal := acc1.Balance() + acc2.Balance()
 
 	if initialTotal != finalTotal {
@@ -241,7 +234,7 @@ func TestTransferAtomicity(t *testing.T) {
 	beforeAcc1 := acc1.Balance()
 	beforeAcc2 := acc2.Balance()
 
-	app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 1000.0) // Should fail
+	app.Transfer(context.Background(), acc1.ID(), acc2.ID(), 1000.0, 4) // Should fail
 
 	if acc1.Balance() != beforeAcc1 || acc2.Balance() != beforeAcc2 {
 		t.Error("balances changed after failed transfer")

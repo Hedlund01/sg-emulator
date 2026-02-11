@@ -435,7 +435,11 @@ func TestVirtualApp_AddTransport_AfterStart(t *testing.T) {
 // TestVirtualApp_ClientIntegration verifies client works with virtual app
 func TestVirtualApp_ClientIntegration(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("newTestServer() error = %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -445,9 +449,9 @@ func TestVirtualApp_ClientIntegration(t *testing.T) {
 	client := vapp.Client()
 	ctx := context.Background()
 
-	acc, err := client.CreateAccount(ctx, 100.0)
+	acc, err := createTestAccount(ctx, srv, client, 100.0)
 	if err != nil {
-		t.Fatalf("CreateAccount() error = %v", err)
+		t.Fatalf("createTestAccount() error = %v", err)
 	}
 
 	if acc.Balance() != 100.0 {
@@ -468,7 +472,11 @@ func TestVirtualApp_ClientIntegration(t *testing.T) {
 // TestVirtualApp_MultipleVirtualApps verifies multiple virtual apps work independently
 func TestVirtualApp_MultipleVirtualApps(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("newTestServer() error = %v", err)
+	}
+	defer cleanup()
 	srv.Start()
 	defer srv.Stop()
 
@@ -480,9 +488,9 @@ func TestVirtualApp_MultipleVirtualApps(t *testing.T) {
 	ctx := context.Background()
 
 	// Each creates an account
-	acc1, _ := vapp1.Client().CreateAccount(ctx, 100.0)
-	acc2, _ := vapp2.Client().CreateAccount(ctx, 200.0)
-	acc3, _ := vapp3.Client().CreateAccount(ctx, 300.0)
+	acc1, _ := createTestAccount(ctx, srv, vapp1.Client(), 100.0)
+	acc2, _ := createTestAccount(ctx, srv, vapp2.Client(), 200.0)
+	acc3, _ := createTestAccount(ctx, srv, vapp3.Client(), 300.0)
 
 	// All should have unique IDs
 	if acc1.ID() == acc2.ID() || acc2.ID() == acc3.ID() || acc1.ID() == acc3.ID() {

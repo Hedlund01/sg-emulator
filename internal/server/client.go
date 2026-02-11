@@ -9,7 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
+	"sg-emulator/internal/server/messages"
 	"sg-emulator/internal/trace"
 )
 
@@ -25,18 +27,18 @@ func generateRequestID() string {
 // Client communicates with a Server via channels.
 // It provides the same API as scalegraph.App but sends requests through channels.
 type Client struct {
-	requestChan     chan<- Request
-	pendingRequests map[string]chan Response
+	requestChan     chan<- messages.Request
+	pendingRequests map[string]chan messages.Response
 	mu              sync.Mutex
 	timeout         time.Duration
 	logger          *slog.Logger
 }
 
 // NewClient creates a new Client that sends requests to the given channel
-func NewClient(requestChan chan<- Request, logger *slog.Logger) *Client {
+func NewClient(requestChan chan<- messages.Request, logger *slog.Logger) *Client {
 	return &Client{
 		requestChan:     requestChan,
-		pendingRequests: make(map[string]chan Response),
+		pendingRequests: make(map[string]chan messages.Response),
 		timeout:         30 * time.Second,
 		logger:          logger,
 	}
@@ -48,12 +50,12 @@ func (c *Client) SetTimeout(d time.Duration) {
 }
 
 // sendRequest sends a request and waits for the response
-func (c *Client) sendRequest(ctx context.Context, reqType RequestType, payload any) (Response, error) {
+func (c *Client) sendRequest(ctx context.Context, reqType messages.RequestType, payload any) (messages.Response, error) {
 	traceID := trace.GetTraceID(ctx)
 	reqID := generateRequestID()
 
 	// Create a unique response channel for this request
-	respChan := make(chan Response, 1)
+	respChan := make(chan messages.Response, 1)
 
 	// Register the response channel
 	c.mu.Lock()
@@ -68,7 +70,7 @@ func (c *Client) sendRequest(ctx context.Context, reqType RequestType, payload a
 		close(respChan)
 	}()
 
-	req := Request{
+	req := messages.Request{
 		ID:           reqID,
 		Type:         reqType,
 		ResponseChan: respChan,
@@ -81,9 +83,9 @@ func (c *Client) sendRequest(ctx context.Context, reqType RequestType, payload a
 	case c.requestChan <- req:
 		// Request sent successfully
 	case <-ctx.Done():
-		return Response{}, ctx.Err()
+		return messages.Response{}, ctx.Err()
 	case <-time.After(c.timeout):
-		return Response{}, errors.New("request send timeout")
+		return messages.Response{}, errors.New("request send timeout")
 	}
 
 	// Wait for response
@@ -94,25 +96,27 @@ func (c *Client) sendRequest(ctx context.Context, reqType RequestType, payload a
 		if traceID != "" {
 			c.logger.Error("Request cancelled", "trace_id", traceID)
 		}
-		return Response{}, ctx.Err()
+		return messages.Response{}, ctx.Err()
 	case <-time.After(c.timeout):
 		if traceID != "" {
 			c.logger.Error("Response timeout", "trace_id", traceID)
 		}
-		return Response{}, errors.New("response timeout")
+		return messages.Response{}, errors.New("response timeout")
 	}
 }
 
-// CreateAccount creates a new account with an optional initial balance
-func (c *Client) CreateAccount(ctx context.Context, initialBalance float64) (*scalegraph.Account, error) {
+// CreateAccountWithCredentials creates a new account and returns the full response
+// including the certificate and private key
+func (c *Client) CreateAccountWithCredentials(ctx context.Context, initialBalance float64, signedReq *crypto.SignedEnvelope[*crypto.CreateAccountRequest]) (*messages.CreateAccountWithKeysResponse, error) {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"initial_balance", initialBalance}
 	if traceID != "" {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
-	c.logger.Debug("Creating account", logAttrs...)
-	resp, err := c.sendRequest(ctx, ReqCreateAccount, CreateAccountPayload{
+	c.logger.Debug("Creating account with credentials", logAttrs...)
+	resp, err := c.sendRequest(ctx, messages.ReqCreateAccount, &messages.CreateAccountWithKeysPayload{
 		InitialBalance: initialBalance,
+		SignedRequest:  signedReq,
 	})
 	if err != nil {
 		logAttrs = append(logAttrs, "error", err)
@@ -124,21 +128,21 @@ func (c *Client) CreateAccount(ctx context.Context, initialBalance float64) (*sc
 		c.logger.Error("Account creation failed", logAttrs...)
 		return nil, errors.New(resp.Error)
 	}
-	account := resp.Payload.(CreateAccountResponse).Account
-	logAttrs = append([]any{"account_id", account.ID(), "balance", account.Balance()}, logAttrs...)
-	c.logger.Info("Account created", logAttrs...)
-	return account, nil
+	result := resp.Payload.(messages.CreateAccountWithKeysResponse)
+	logAttrs = append([]any{"account_id", result.Account.ID(), "balance", result.Account.Balance(), "has_cert", result.Certificate != ""}, logAttrs...)
+	c.logger.Info("Account created with credentials", logAttrs...)
+	return &result, nil
 }
 
 // GetAccount retrieves an account by ID
-func (c *Client) GetAccount(ctx context.Context, id scalegraph.ScalegraphId) (*scalegraph.Account, error) {
+func (c *Client) GetAccount(ctx context.Context, id scalegraph.ScalegraphId, signedReq *crypto.SignedEnvelope[*crypto.GetAccountRequest]) (*scalegraph.Account, error) {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"account_id", id}
 	if traceID != "" {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Getting account", logAttrs...)
-	resp, err := c.sendRequest(ctx, ReqGetAccount, GetAccountPayload{ID: id})
+	resp, err := c.sendRequest(ctx, messages.ReqGetAccount, &messages.GetAccountPayload{AccountID: id, SignedRequest: signedReq})
 	if err != nil {
 		logAttrs = append(logAttrs, "error", err)
 		c.logger.Error("Failed to get account", logAttrs...)
@@ -149,7 +153,7 @@ func (c *Client) GetAccount(ctx context.Context, id scalegraph.ScalegraphId) (*s
 		c.logger.Warn("Account not found", logAttrs...)
 		return nil, errors.New(resp.Error)
 	}
-	return resp.Payload.(GetAccountResponse).Account, nil
+	return resp.Payload.(messages.GetAccountResponse).Account, nil
 }
 
 // GetAccounts retrieves all accounts
@@ -160,7 +164,7 @@ func (c *Client) GetAccounts(ctx context.Context) ([]*scalegraph.Account, error)
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Getting all accounts", logAttrs...)
-	resp, err := c.sendRequest(ctx, ReqGetAccounts, GetAccountsPayload{})
+	resp, err := c.sendRequest(ctx, messages.ReqGetAccounts, messages.GetAccountsPayload{})
 	if err != nil {
 		logAttrs = append(logAttrs, "error", err)
 		c.logger.Error("Failed to get accounts", logAttrs...)
@@ -171,36 +175,39 @@ func (c *Client) GetAccounts(ctx context.Context) ([]*scalegraph.Account, error)
 		c.logger.Error("Get accounts failed", logAttrs...)
 		return nil, errors.New(resp.Error)
 	}
-	accounts := resp.Payload.(GetAccountsResponse).Accounts
+	accounts := resp.Payload.(messages.GetAccountsResponse).Accounts
 	logAttrs = append([]any{"count", len(accounts)}, logAttrs...)
 	c.logger.Debug("Retrieved accounts", logAttrs...)
 	return accounts, nil
 }
 
-// Transfer transfers funds between two accounts
-func (c *Client) Transfer(ctx context.Context, from, to scalegraph.ScalegraphId, amount float64) error {
+// TransferSigned transfers funds with a cryptographically signed request
+func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.ScalegraphId, amount float64, signedRequest *crypto.SignedEnvelope[*crypto.TransferRequest]) error {
 	traceID := trace.GetTraceID(ctx)
-	logAttrs := []any{"from", from, "to", to, "amount", amount}
+	logAttrs := []any{"from", from, "to", to, "amount", amount, "signed", true}
 	if traceID != "" {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
-	c.logger.Debug("Transfer requested", logAttrs...)
-	resp, err := c.sendRequest(ctx, ReqTransfer, TransferPayload{
-		From:   from,
-		To:     to,
-		Amount: amount,
+	c.logger.Debug("Signed transfer requested", logAttrs...)
+
+	resp, err := c.sendRequest(ctx, messages.ReqTransfer, &messages.TransferPayload{
+		From:          from,
+		To:            to,
+		Amount:        amount,
+		Nonce:         signedRequest.Payload.Nonce,
+		SignedRequest: signedRequest,
 	})
 	if err != nil {
 		logAttrs = append(logAttrs, "error", err)
-		c.logger.Error("Transfer failed", logAttrs...)
+		c.logger.Error("Signed transfer failed", logAttrs...)
 		return err
 	}
 	if !resp.Success {
 		logAttrs = append(logAttrs, "error", resp.Error)
-		c.logger.Warn("Transfer rejected", logAttrs...)
+		c.logger.Warn("Signed transfer rejected", logAttrs...)
 		return errors.New(resp.Error)
 	}
-	c.logger.Info("Transfer completed", logAttrs...)
+	c.logger.Info("Signed transfer completed", logAttrs...)
 	return nil
 }
 
@@ -212,7 +219,7 @@ func (c *Client) Mint(ctx context.Context, to scalegraph.ScalegraphId, amount fl
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Mint requested", logAttrs...)
-	resp, err := c.sendRequest(ctx, ReqMint, MintPayload{
+	resp, err := c.sendRequest(ctx, messages.ReqMint, messages.MintPayload{
 		To:     to,
 		Amount: amount,
 	})
@@ -238,7 +245,7 @@ func (c *Client) AccountCount(ctx context.Context) (int, error) {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Getting account count", logAttrs...)
-	resp, err := c.sendRequest(ctx, ReqAccountCount, AccountCountPayload{})
+	resp, err := c.sendRequest(ctx, messages.ReqAccountCount, messages.AccountCountPayload{})
 	if err != nil {
 		logAttrs = append(logAttrs, "error", err)
 		c.logger.Error("Failed to get account count", logAttrs...)
@@ -249,7 +256,7 @@ func (c *Client) AccountCount(ctx context.Context) (int, error) {
 		c.logger.Error("Account count failed", logAttrs...)
 		return 0, errors.New(resp.Error)
 	}
-	count := resp.Payload.(AccountCountResponse).Count
+	count := resp.Payload.(messages.AccountCountResponse).Count
 	logAttrs = append([]any{"count", count}, logAttrs...)
 	c.logger.Debug("Account count retrieved", logAttrs...)
 	return count, nil

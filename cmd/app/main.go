@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"sg-emulator/internal/ca"
 	"sg-emulator/internal/server"
 	"sg-emulator/internal/transport/grpc"
 	"sg-emulator/internal/transport/mcp"
@@ -60,8 +61,24 @@ func main() {
 	rootLogger := slog.Default().With("app", "sg-emulator")
 	serverLogger := rootLogger.With("component", "server")
 
-	// Create and start the server (runs in its own goroutine)
-	srv := server.New(serverLogger)
+	// Get current working directory for CA storage
+	cwd, err := os.Getwd()
+	if err != nil {
+		slog.Error("Failed to get current directory", "error", err)
+		os.Exit(1)
+	}
+
+	// Initialize Certificate Authority
+	caLogger := rootLogger.With("component", "ca")
+	certAuth, err := ca.New(cwd, caLogger)
+	if err != nil {
+		slog.Error("Failed to initialize Certificate Authority", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("Certificate Authority initialized")
+
+	// Create and start the server with CA (runs in its own goroutine)
+	srv := server.NewWithCA(serverLogger, certAuth)
 	srv.Start()
 	defer func() {
 		slog.Info("Stopping server")
@@ -150,8 +167,14 @@ func main() {
 		slog.Info("Starting TUI")
 		vapp.Start()
 
-		// Wait for TUI to finish (it will block)
-		// The transport handles its own lifecycle
+		// Wait for TUI virtual app to finish (blocks until user exits TUI)
+		// This keeps the REST servers and other transports running while TUI is active
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
+
+		slog.Info("Shutting down")
+		vapp.Stop()
 	} else {
 		runHeadless(srv, rootLogger)
 	}
