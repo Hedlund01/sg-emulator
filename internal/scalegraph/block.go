@@ -6,7 +6,7 @@ import "fmt"
 type Block struct {
 	id          ScalegraphId
 	prevBlock   *Block
-	transaction *Transaction
+	transaction ITransaction
 }
 
 func genesisBlock() *Block {
@@ -19,7 +19,7 @@ func genesisBlock() *Block {
 	}
 }
 
-func (b *Block) newBlock(trx *Transaction) *Block {
+func (b *Block) newBlock(trx ITransaction) *Block {
 	newId, _ := NewScalegraphId()
 
 	return &Block{
@@ -38,7 +38,7 @@ func (b *Block) PrevBlock() *Block {
 }
 
 // Transaction returns the transaction in this block
-func (b *Block) Transaction() *Transaction {
+func (b *Block) Transaction() ITransaction {
 	return b.transaction
 }
 

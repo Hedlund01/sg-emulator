@@ -2,206 +2,197 @@ package scalegraph
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestNewAccount_Integration(t *testing.T) {
-	acc, err := newAccount()
-	if err != nil {
-		t.Fatalf("newAccount() failed: %v", err)
-	}
-	if acc == nil {
-		t.Fatal("newAccount() returned nil")
-	}
+func TestNewAccountWithPublicKey(t *testing.T) {
+	acc, _ := testCreateAccount(t)
 
-	// Test initial state
-	if acc.Balance() != 0 {
-		t.Errorf("expected initial balance 0, got %.2f", acc.Balance())
-	}
-	if acc.Blockchain() == nil {
-		t.Error("blockchain not initialized")
-	}
-
-	// Test that ID is set
-	if acc.ID() == (ScalegraphId{}) {
-		t.Error("account ID is zero value")
-	}
+	assert.NotNil(t, acc)
+	assert.Equal(t, 0.0, acc.Balance(), "initial balance should be 0")
+	assert.NotNil(t, acc.Blockchain(), "blockchain should be initialized")
+	assert.NotEqual(t, ScalegraphId{}, acc.ID(), "account ID should not be zero value")
+	assert.NotNil(t, acc.PublicKey(), "public key should be set")
+	assert.NotNil(t, acc.Certificate(), "certificate should be set")
 }
 
-func TestAccountID_Integration(t *testing.T) {
-	acc1, _ := newAccount()
-	acc2, _ := newAccount()
+func TestAccountIDUniqueness(t *testing.T) {
+	acc1, acc2 := testCreateTwoAccounts(t)
 
-	// Test that IDs are unique
-	if acc1.ID() == acc2.ID() {
-		t.Error("two accounts have the same ID")
-	}
+	assert.NotEqual(t, acc1.ID(), acc2.ID(), "two accounts should have unique IDs")
 
 	// Test that ID is consistent
 	id := acc1.ID()
-	if acc1.ID() != id {
-		t.Error("account ID changed between calls")
-	}
+	assert.Equal(t, id, acc1.ID(), "account ID should be consistent between calls")
 }
 
-func TestAccountBalance_Integration(t *testing.T) {
-	acc, _ := newAccount()
+func TestAccountIDDerivedFromPublicKey(t *testing.T) {
+	acc, kp := testCreateAccount(t)
+
+	expectedID := ScalegraphIdFromPublicKey(kp.PublicKey)
+	assert.Equal(t, expectedID, acc.ID(), "account ID should be derived from public key")
+}
+
+func TestAccountBalance(t *testing.T) {
+	app := testApp()
+	acc := createTestAccountInApp(t, app, 0)
 
 	// Test initial balance
-	if acc.Balance() != 0 {
-		t.Errorf("expected balance 0, got %.2f", acc.Balance())
-	}
+	assert.Equal(t, 0.0, acc.Balance())
 
-	// Test balance after minting
-	acc.mint(100.0)
-	if acc.Balance() != 100.0 {
-		t.Errorf("expected balance 100.0, got %.2f", acc.Balance())
-	}
+	// Mint via app
+	err := app.Mint(testCtx(), acc.ID(), 100.0)
+	require.NoError(t, err)
+	assert.Equal(t, 100.0, acc.Balance())
 
-	// Test balance is thread-safe (multiple reads)
-	done := make(chan bool)
-	for i := 0; i < 10; i++ {
-		go func() {
-			_ = acc.Balance()
-			done <- true
-		}()
-	}
-	for i := 0; i < 10; i++ {
-		<-done
-	}
+	// Test balance is thread-safe (multiple concurrent reads)
+	runConcurrent(t, 10, func(i int) {
+		_ = acc.Balance()
+	})
 }
 
-func TestAccountMint_Integration(t *testing.T) {
-	acc, _ := newAccount()
+func TestAccountMintViaApp(t *testing.T) {
+	app := testApp()
+	acc := createTestAccountInApp(t, app, 0)
 
 	// Test minting positive amount
-	err := acc.mint(50.0)
-	if err != nil {
-		t.Fatalf("mint(50.0) failed: %v", err)
-	}
-	if acc.Balance() != 50.0 {
-		t.Errorf("expected balance 50.0, got %.2f", acc.Balance())
-	}
+	err := app.Mint(testCtx(), acc.ID(), 50.0)
+	require.NoError(t, err)
+	assert.Equal(t, 50.0, acc.Balance())
 
 	// Test multiple mints
-	acc.mint(30.0)
-	acc.mint(20.0)
-	if acc.Balance() != 100.0 {
-		t.Errorf("expected balance 100.0, got %.2f", acc.Balance())
-	}
+	err = app.Mint(testCtx(), acc.ID(), 30.0)
+	require.NoError(t, err)
+	err = app.Mint(testCtx(), acc.ID(), 20.0)
+	require.NoError(t, err)
+	assert.Equal(t, 100.0, acc.Balance())
 
-	// Test that mint creates transaction
-	blockchain := acc.Blockchain()
-	blocks := blockchain.GetBlocks()
-	if len(blocks) == 0 {
-		t.Error("no blocks created after mint")
-	}
+	// Test that mint creates transaction in blockchain
+	blocks := acc.Blockchain().GetBlocks()
+	assert.Greater(t, len(blocks), 1, "should have blocks after mint (genesis + mint)")
 }
 
-func TestAccountMintZero_Integration(t *testing.T) {
-	acc, _ := newAccount()
+func TestAccountMintZero(t *testing.T) {
+	app := testApp()
+	acc := createTestAccountInApp(t, app, 0)
 
-	// Minting 0 should work
-	err := acc.mint(0)
-	if err != nil {
-		t.Fatalf("mint(0) failed: %v", err)
-	}
-	if acc.Balance() != 0 {
-		t.Errorf("expected balance 0, got %.2f", acc.Balance())
-	}
+	err := app.Mint(testCtx(), acc.ID(), 0)
+	require.NoError(t, err)
+	assert.Equal(t, 0.0, acc.Balance())
 }
 
-func TestAccountBlockchain_Integration(t *testing.T) {
-	acc, _ := newAccount()
+func TestAccountBlockchain(t *testing.T) {
+	app := testApp()
+	acc := createTestAccountInApp(t, app, 0)
 
 	blockchain := acc.Blockchain()
-	if blockchain == nil {
-		t.Fatal("Blockchain() returned nil")
-	}
+	require.NotNil(t, blockchain)
 
-	// Test that blockchain is consistent
-	if acc.Blockchain() != blockchain {
-		t.Error("Blockchain() returns different instances")
-	}
+	// Test that blockchain is consistent (same instance)
+	assert.Equal(t, blockchain, acc.Blockchain(), "Blockchain() should return same instance")
 
 	// Test that minting adds to blockchain
-	initialBlocks := len(blockchain.GetBlocks())
-	acc.mint(100.0)
-
-	if len(blockchain.GetBlocks()) <= initialBlocks {
-		t.Error("mint did not add block to blockchain")
-	}
+	initialLen := blockchain.Len()
+	err := app.Mint(testCtx(), acc.ID(), 100.0)
+	require.NoError(t, err)
+	assert.Greater(t, blockchain.Len(), initialLen, "mint should add block to blockchain")
 }
 
-func TestAccountString_Integration(t *testing.T) {
-	acc, _ := newAccount()
-	acc.mint(123.45)
+func TestAccountString(t *testing.T) {
+	app := testApp()
+	acc := createTestAccountInApp(t, app, 123.45)
 
 	str := acc.String()
-	if str == "" {
-		t.Error("String() returned empty string")
-	}
-
-	// Check that string contains key information
-	idStr := acc.ID().String()
-	if len(idStr) < 8 {
-		t.Error("ID string too short")
-	}
+	assert.NotEmpty(t, str, "String() should return non-empty string")
+	assert.GreaterOrEqual(t, len(acc.ID().String()), 8, "ID string should be at least 8 chars")
 }
 
-func TestAccountConcurrentMint_Integration(t *testing.T) {
-	acc, _ := newAccount()
-	done := make(chan bool)
+func TestAccountGetNonce(t *testing.T) {
+	app := testApp()
+	acc := createTestAccountInApp(t, app, 0)
 
-	// Mint concurrently from 100 goroutines
-	for i := 0; i < 100; i++ {
-		go func() {
-			err := acc.mint(1.0)
-			if err != nil {
-				t.Errorf("concurrent mint failed: %v", err)
-			}
-			done <- true
-		}()
-	}
+	// Nonce is based on blockchain length
+	initialNonce := acc.GetNonce()
 
-	// Wait for all goroutines
-	for i := 0; i < 100; i++ {
-		<-done
-	}
+	err := app.Mint(testCtx(), acc.ID(), 50.0)
+	require.NoError(t, err)
 
-	// Check final balance
-	if acc.Balance() != 100.0 {
-		t.Errorf("expected balance 100.0 after concurrent mints, got %.2f", acc.Balance())
-	}
+	assert.Greater(t, acc.GetNonce(), initialNonce, "nonce should increase after transaction")
 }
 
-func TestAccountUpdateValue_Integration(t *testing.T) {
-	acc, _ := newAccount()
+func TestAccountConcurrentMint(t *testing.T) {
+	app := testApp()
+	acc := createTestAccountInApp(t, app, 0)
 
-	// Test updating value
-	err := acc.updateValue("key1", "value1")
-	if err != nil {
-		t.Fatalf("updateValue failed: %v", err)
-	}
+	runConcurrent(t, 100, func(i int) {
+		err := app.Mint(testCtx(), acc.ID(), 1.0)
+		assert.NoError(t, err, "concurrent mint %d failed", i)
+	})
 
-	// Test that update creates transaction with value
-	blockchain := acc.Blockchain()
-	blocks := blockchain.GetBlocks()
-	if len(blocks) == 0 {
-		t.Error("no blocks created after updateValue")
-	}
+	assert.Equal(t, 100.0, acc.Balance(), "balance should be 100.0 after 100 concurrent mints of 1.0")
+}
 
-	// Find the transaction with the value
-	found := false
-	for _, block := range blocks {
-		tx := block.Transaction()
-		if tx != nil && tx.Value() == "value1" {
-			found = true
-			if tx.Amount() != 0 {
-				t.Error("value transaction should have 0 amount")
-			}
-		}
-	}
-	if !found {
-		t.Error("value transaction not found in blockchain")
-	}
+func TestAccountAppendTransactionMint(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+
+	mintTx := newMintTransaction(acc, 75.0)
+	err := acc.appendTransaction(mintTx)
+	require.NoError(t, err)
+	assert.Equal(t, 75.0, acc.Balance())
+}
+
+func TestAccountAppendTransactionTransfer(t *testing.T) {
+	sender, receiver := testCreateTwoAccounts(t)
+
+	// Give sender some balance first
+	mintTx := newMintTransaction(sender, 100.0)
+	err := sender.appendTransaction(mintTx)
+	require.NoError(t, err)
+
+	// Transfer from sender
+	transferTx := newTransferTransaction(sender, receiver, 30.0)
+	err = sender.appendTransaction(transferTx)
+	require.NoError(t, err)
+	assert.Equal(t, 70.0, sender.Balance())
+
+	// Receiver side
+	err = receiver.appendTransaction(transferTx)
+	require.NoError(t, err)
+	assert.Equal(t, 30.0, receiver.Balance())
+}
+
+func TestAccountAppendTransactionInsufficientBalance(t *testing.T) {
+	sender, receiver := testCreateTwoAccounts(t)
+
+	// Sender has 0 balance
+	transferTx := newTransferTransaction(sender, receiver, 50.0)
+	err := sender.appendTransaction(transferTx)
+	assert.Error(t, err, "should fail with insufficient balance")
+	assert.Equal(t, 0.0, sender.Balance(), "balance should not change after failed transfer")
+}
+
+func TestAccountAppendTransactionBurn(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+
+	// Give account some balance
+	mintTx := newMintTransaction(acc, 100.0)
+	err := acc.appendTransaction(mintTx)
+	require.NoError(t, err)
+
+	// Burn some tokens
+	burnTx := newBurnTransaction(acc, 40.0)
+	err = acc.appendTransaction(burnTx)
+	require.NoError(t, err)
+	assert.Equal(t, 60.0, acc.Balance())
+}
+
+func TestAccountAppendTransactionBurnInsufficientBalance(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+
+	burnTx := newBurnTransaction(acc, 10.0)
+	err := acc.appendTransaction(burnTx)
+	assert.Error(t, err, "should fail when burning more than balance")
+	assert.Equal(t, 0.0, acc.Balance())
 }

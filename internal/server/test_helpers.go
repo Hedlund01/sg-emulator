@@ -2,9 +2,15 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"os"
+	"testing"
 	"time"
 
 	"sg-emulator/internal/ca"
@@ -17,6 +23,38 @@ func newTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelError, // Only show errors in tests
 	}))
+}
+
+// createTestAccountDirect creates an account directly on the app using generated keys.
+// Use this in tests that don't go through the full server/client/CA flow.
+func createTestAccountDirect(t *testing.T, app *scalegraph.App, balance float64) *scalegraph.Account {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key pair: %v", err)
+	}
+
+	// Create a self-signed cert
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "test"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, pub, ed25519.NewKeyFromSeed(make([]byte, 32)))
+	if err != nil {
+		t.Fatalf("failed to create certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("failed to parse certificate: %v", err)
+	}
+
+	acc, err := app.CreateAccountWithKeys(context.Background(), pub, cert, balance)
+	if err != nil {
+		t.Fatalf("failed to create test account: %v", err)
+	}
+	return acc
 }
 
 // newTestServer creates a server with a temporary CA for testing

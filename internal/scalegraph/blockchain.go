@@ -7,7 +7,7 @@ import (
 
 // IBlockchain defines the interface for blockchain operations
 type IBlockchain interface {
-	append(trx *Transaction) *Block
+	append(trx ITransaction) *Block
 	Head() *Block
 	Tail() *Block
 	GetBlocks() []*Block
@@ -35,7 +35,7 @@ func newBlockchain() *Blockchain {
 }
 
 // append adds a new block with the given transaction to the end of the chain
-func (bc *Blockchain) append(trx *Transaction) *Block {
+func (bc *Blockchain) append(trx ITransaction) *Block {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 

@@ -27,35 +27,6 @@ func New(logger *slog.Logger) *App {
 	}
 }
 
-// CreateAccount creates a new account with an optional initial balance
-func (a *App) CreateAccount(ctx context.Context, initialBalance float64) (*Account, error) {
-	logger := a.logger
-	if traceID := trace.GetTraceID(ctx); traceID != "" {
-		logger = logger.With("trace_id", traceID)
-	}
-	logger.Debug("Creating account", "initial_balance", initialBalance)
-	acc, err := newAccount()
-	if err != nil {
-		logger.Error("Failed to create account", "error", err)
-		return nil, fmt.Errorf("failed to create account: %w", err)
-	}
-
-	if initialBalance > 0 {
-		if err := acc.mint(initialBalance); err != nil {
-			logger.Error("Failed to mint initial balance", "error", err, "account_id", acc.ID(), "amount", initialBalance)
-			return nil, fmt.Errorf("failed to mint initial balance: %w", err)
-		}
-	}
-
-	a.mu.Lock()
-	a.accounts[acc.ID()] = acc
-	totalAccounts := len(a.accounts)
-	a.mu.Unlock()
-
-	logger.Info("Account created", "account_id", acc.ID(), "balance", acc.Balance(), "total_accounts", totalAccounts)
-	return acc, nil
-}
-
 // CreateAccountWithKeys creates a new account with a public key and certificate
 // The account ID is derived from the public key hash
 func (a *App) CreateAccountWithKeys(ctx context.Context, pubKey ed25519.PublicKey, cert *x509.Certificate, initialBalance float64) (*Account, error) {
@@ -83,17 +54,25 @@ func (a *App) CreateAccountWithKeys(ctx context.Context, pubKey ed25519.PublicKe
 		return nil, fmt.Errorf("failed to create account: %w", err)
 	}
 
+	// Add account to map before minting so Mint() can find it
+	a.mu.Lock()
+	a.accounts[acc.ID()] = acc
+	a.mu.Unlock()
+
 	if initialBalance > 0 {
-		if err := acc.mint(initialBalance); err != nil {
+		if err := a.Mint(ctx, acc.ID(), initialBalance); err != nil {
+			// Rollback: remove account from map if mint fails
+			a.mu.Lock()
+			delete(a.accounts, acc.ID())
+			a.mu.Unlock()
 			logger.Error("Failed to mint initial balance", "error", err, "account_id", acc.ID(), "amount", initialBalance)
 			return nil, fmt.Errorf("failed to mint initial balance: %w", err)
 		}
 	}
 
-	a.mu.Lock()
-	a.accounts[acc.ID()] = acc
+	a.mu.RLock()
 	totalAccounts := len(a.accounts)
-	a.mu.Unlock()
+	a.mu.RUnlock()
 
 	logger.Info("Account created with keys", "account_id", acc.ID(), "balance", acc.Balance(), "total_accounts", totalAccounts)
 	return acc, nil
@@ -159,50 +138,17 @@ func (a *App) Transfer(ctx context.Context, from, to ScalegraphId, amount float6
 		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, nonce)
 	}
 
-	// Lock both accounts to ensure atomicity
-	// Lock from account first to validate nonce atomically
-	fromAcc.mu.Lock()
-	defer fromAcc.mu.Unlock()
+	transferTx := newTransferTransaction(fromAcc, toAcc, amount)
 
-	toAcc.mu.Lock()
-	defer toAcc.mu.Unlock()
-
-	// Validate preconditions
-	if amount > fromAcc.balance {
-		logger.Warn("Insufficient funds", "from", from, "balance", fromAcc.balance, "amount", amount)
-		return fmt.Errorf("insufficient funds: attempted to transfer %.2f but balance is %.2f", amount, fromAcc.balance)
-	}
-
-	fromBalanceBefore := fromAcc.balance
-	toBalanceBefore := toAcc.balance
-
-	// Create both transactions before applying any changes
-	fromTx, err := newTransaction(fromAcc, toAcc, amount, "")
-	if err != nil {
-		logger.Error("Failed to create from transaction", "error", err, "from", from, "to", to, "amount", amount)
-		return err
-	}
-	toTx, err := newTransaction(fromAcc, toAcc, amount, "")
-	if err != nil {
-		logger.Error("Failed to create to transaction", "error", err, "from", from, "to", to, "amount", amount)
+	if err := fromAcc.appendTransaction(transferTx); err != nil {
+		logger.Error("Failed to append transaction", "error", err)
 		return err
 	}
 
-	// Apply changes atomically
-	fromAcc.blockchain.append(fromTx)
-	fromAcc.balance -= amount
-
-	toAcc.blockchain.append(toTx)
-	toAcc.balance += amount
-
-	logger.Info("Transfer completed",
-		"from", from,
-		"to", to,
-		"amount", amount,
-		"from_balance_before", fromBalanceBefore,
-		"from_balance_after", fromAcc.balance,
-		"to_balance_before", toBalanceBefore,
-		"to_balance_after", toAcc.balance)
+	if err := toAcc.appendTransaction(transferTx); err != nil {
+		logger.Error("Failed to append transaction", "error", err)
+		return err
+	}
 
 	return nil
 }
@@ -222,10 +168,9 @@ func (a *App) Mint(ctx context.Context, to ScalegraphId, amount float64) error {
 		return fmt.Errorf("destination account not found: %s", to)
 	}
 
-	if err := toAcc.mint(amount); err != nil {
-		logger.Error("Mint failed", "error", err, "account_id", to, "amount", amount)
-		return err
-	}
+	mintTx := newMintTransaction(toAcc, amount)
+
+	toAcc.appendTransaction(mintTx)
 
 	logger.Info("Mint completed", "account_id", to, "amount", amount, "new_balance", toAcc.Balance())
 	return nil

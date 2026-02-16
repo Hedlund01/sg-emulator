@@ -278,7 +278,7 @@ func (m Model) viewAccountDetailSingle() string {
 	blocks := blockchain.GetBlocks()
 
 	// Collect transactions (skip genesis block)
-	var transactions []*scalegraph.Transaction
+	var transactions []scalegraph.ITransaction
 	for _, block := range blocks {
 		if block.Transaction() != nil {
 			transactions = append(transactions, block.Transaction())
@@ -330,18 +330,23 @@ func (m Model) viewAccountDetailSingle() string {
 			txNum := i + 1
 			line := fmt.Sprintf("%s#%d: ", arrow, txNum)
 
-			// Determine transaction type and format
-			if tx.Sender() == nil {
-				// Mint transaction
-				line += fmt.Sprintf("Mint +%.2f", tx.Amount())
-			} else if tx.Sender().ID() == selectedAcc.ID() {
-				// Sent transaction
-				toName := m.getAccountDisplayName(tx.Receiver())
-				line += fmt.Sprintf("Send -%.2f to %s", tx.Amount(), toName)
-			} else {
-				// Received transaction
-				fromName := m.getAccountDisplayName(tx.Sender())
-				line += fmt.Sprintf("Receive +%.2f from %s", tx.Amount(), fromName)
+			switch *tx.Type() {
+			case scalegraph.Transfer:
+				if transferTx, ok := tx.(*scalegraph.TransferTransaction); ok {
+					if tx.Sender() != nil && tx.Sender().ID() == selectedAcc.ID() { // Sent transaction
+						line += fmt.Sprintf("Send -%.2f to %s", transferTx.Amount(), m.getAccountDisplayName(tx.Receiver()))
+					} else if tx.Receiver() != nil && tx.Receiver().ID() == selectedAcc.ID() { // Received transaction
+						line += fmt.Sprintf("Receive +%.2f from %s", transferTx.Amount(), m.getAccountDisplayName(tx.Sender()))
+					}
+				}
+			case scalegraph.Mint:
+				if mintTx, ok := tx.(*scalegraph.MintTransaction); ok {
+					line += fmt.Sprintf("Mint +%.2f", mintTx.Amount())
+				}
+			case scalegraph.Burn:
+				if burnTx, ok := tx.(*scalegraph.BurnTransaction); ok {
+					line += fmt.Sprintf("Burn -%.2f", burnTx.Amount())
+				}
 			}
 
 			if i == m.selectedTransactionIndex {
@@ -401,7 +406,7 @@ func (m Model) viewTransactionDetail() string {
 	blocks := blockchain.GetBlocks()
 
 	// Collect transactions (skip genesis block)
-	var transactions []*scalegraph.Transaction
+	var transactions []scalegraph.ITransaction
 	for _, block := range blocks {
 		if block.Transaction() != nil {
 			transactions = append(transactions, block.Transaction())
@@ -449,39 +454,58 @@ func (m Model) viewTransactionDetail() string {
 
 	// Type and Details
 	detailContent += lipgloss.NewStyle().Bold(true).Render("Type:") + "\n"
-	if tx.Sender() == nil {
+
+	var amount float64
+	switch *tx.Type() {
+	case scalegraph.Mint:
+		if mintTx, ok := tx.(*scalegraph.MintTransaction); ok {
+			amount = mintTx.Amount()
+		}
 		// Mint transaction
 		detailContent += "  Mint (Initial Balance)\n\n"
 		detailContent += lipgloss.NewStyle().Bold(true).Render("To:") + "\n"
 		detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(selectedAcc))
 		detailContent += fmt.Sprintf("  %s\n\n", selectedAcc.ID().String())
-	} else if tx.Sender().ID() == selectedAcc.ID() {
-		// Sent transaction
-		detailContent += "  Send\n\n"
+	case scalegraph.Transfer:
+		if transferTx, ok := tx.(*scalegraph.TransferTransaction); ok {
+			amount = transferTx.Amount()
+		}
+		if tx.Sender() != nil && tx.Sender().ID() == selectedAcc.ID() {
+			// Sent transaction
+			detailContent += "  Send\n\n"
+			detailContent += lipgloss.NewStyle().Bold(true).Render("From:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(tx.Sender()))
+			detailContent += fmt.Sprintf("  %s\n\n", tx.Sender().ID().String())
+			detailContent += lipgloss.NewStyle().Bold(true).Render("To:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(tx.Receiver()))
+			detailContent += fmt.Sprintf("  %s\n\n", tx.Receiver().ID().String())
+		} else {
+			// Received transaction
+			detailContent += "  Receive\n\n"
+			detailContent += lipgloss.NewStyle().Bold(true).Render("From:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(tx.Sender()))
+			detailContent += fmt.Sprintf("  %s\n\n", tx.Sender().ID().String())
+			detailContent += lipgloss.NewStyle().Bold(true).Render("To:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(tx.Receiver()))
+			detailContent += fmt.Sprintf("  %s\n\n", tx.Receiver().ID().String())
+		}
+	case scalegraph.Burn:
+		if burnTx, ok := tx.(*scalegraph.BurnTransaction); ok {
+			amount = burnTx.Amount()
+		}
+		detailContent += "  Burn\n\n"
 		detailContent += lipgloss.NewStyle().Bold(true).Render("From:") + "\n"
-		detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(tx.Sender()))
-		detailContent += fmt.Sprintf("  %s\n\n", tx.Sender().ID().String())
-		detailContent += lipgloss.NewStyle().Bold(true).Render("To:") + "\n"
-		detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(tx.Receiver()))
-		detailContent += fmt.Sprintf("  %s\n\n", tx.Receiver().ID().String())
-	} else {
-		// Received transaction
-		detailContent += "  Receive\n\n"
-		detailContent += lipgloss.NewStyle().Bold(true).Render("From:") + "\n"
-		detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(tx.Sender()))
-		detailContent += fmt.Sprintf("  %s\n\n", tx.Sender().ID().String())
-		detailContent += lipgloss.NewStyle().Bold(true).Render("To:") + "\n"
 		detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(tx.Receiver()))
 		detailContent += fmt.Sprintf("  %s\n\n", tx.Receiver().ID().String())
 	}
 
 	// Amount
 	detailContent += lipgloss.NewStyle().Bold(true).Render("Amount:") + "\n"
-	amountStr := fmt.Sprintf("  %.2f", tx.Amount())
-	if tx.Sender() == nil || tx.Sender().ID() != selectedAcc.ID() {
-		amountStr = "  +" + amountStr
+	amountStr := fmt.Sprintf("  %.2f", amount)
+	if tx.Sender() == nil || (tx.Sender() != nil && tx.Sender().ID() != selectedAcc.ID()) {
+		amountStr = "  +" + fmt.Sprintf("%.2f", amount)
 	} else {
-		amountStr = "  -" + amountStr
+		amountStr = "  -" + fmt.Sprintf("%.2f", amount)
 	}
 	detailContent += amountStr + "\n"
 

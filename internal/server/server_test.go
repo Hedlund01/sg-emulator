@@ -320,7 +320,7 @@ func TestServer_HandleRequest_GetAccounts(t *testing.T) {
 
 	// Create multiple accounts
 	for i := 0; i < 5; i++ {
-		srv.app.CreateAccount(context.Background(), float64(i*10))
+		createTestAccountDirect(t, srv.app, float64(i*10))
 	}
 
 	req := messages.Request{
@@ -385,7 +385,7 @@ func TestServer_HandleRequest_Mint(t *testing.T) {
 	logger := newTestLogger()
 	srv := New(logger)
 
-	acc, _ := srv.app.CreateAccount(context.Background(), 100.0)
+	acc := createTestAccountDirect(t, srv.app, 100.0)
 
 	req := messages.Request{
 		ID:   "test-req-5",
@@ -417,7 +417,7 @@ func TestServer_HandleRequest_AccountCount(t *testing.T) {
 
 	// Create accounts
 	for i := 0; i < 3; i++ {
-		srv.app.CreateAccount(context.Background(), 0)
+		createTestAccountDirect(t, srv.app, 0)
 	}
 
 	req := messages.Request{
