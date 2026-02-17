@@ -29,7 +29,7 @@ func testCtx() context.Context {
 
 // testApp creates a new App instance with a test logger
 func testApp() *App {
-	return New(testLogger())
+	return NewApp(testLogger())
 }
 
 // testKeyPairAndCert generates a fresh Ed25519 key pair and a self-signed test certificate.

@@ -19,28 +19,8 @@
     "paths": {
         "/accounts/me": {
             "post": {
-                "description": "Get account details including balance and transaction history. Requires cryptographically signed request with Ed25519 signature and X.509 certificate.\n\nThe request must be wrapped in a SignedEnvelope structure containing:\n- payload: The AccountRequest with your account_id\n- signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id, and timestamp\n- certificate: PEM-encoded X.509 certificate containing your public key\n\nThe signature must be created by signing the JSON bytes of the payload using your account's Ed25519 private key.\nThe signer_id in the signature must match the account_id in the payload.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "accounts"
-                ],
+                "description": "Get account details including balance and transaction history. Requires cryptographically signed request with Ed25519 signature and X.509 certificate.",
                 "summary": "Get your own account details",
-                "parameters": [
-                    {
-                        "description": "Signed account request with Ed25519 signature",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/rest.SignedAccountRequest"
-                        }
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -175,9 +155,6 @@
                     "example": "rest"
                 }
             }
-        },
-        "rest.SignedAccountRequest": {
-            "type": "object"
         },
         "rest.SignedTransferRequest": {
             "type": "object"

@@ -159,7 +159,6 @@ type AccountRequest struct {
 	AccountID string `json:"account_id" example:"6c439a07c32f7fb09c29403d8d2e4e47b8c5e8a9"`
 }
 
-
 // AccountResponse represents account details with transaction history
 type AccountResponse struct {
 	ID           string                   `json:"id" example:"6c439a07c32f7fb09c29403d8d2e4e47b8c5e8a9"`
@@ -224,41 +223,41 @@ func (t *Transport) handleGetMyAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-// Get transaction history
-    blocks := acc.Blockchain().GetBlocks()
-    transactions := make([]map[string]interface{}, 0)
-    for _, block := range blocks {
-        if tx := block.Transaction(); tx != nil {
-            fromID := "genesis"
-            if sender := tx.Sender(); sender != nil {
-                fromID = sender.ID().String()
-            }
-            toID := "unknown"
-            if receiver := tx.Receiver(); receiver != nil {
-                toID = receiver.ID().String()
-            }
-            
-            var amount float64
-            switch *tx.Type() {
-            case scalegraph.Mint:
-                mintTx := tx.(*scalegraph.MintTransaction)
-                amount = mintTx.Amount()
-            case scalegraph.Transfer:
-                transferTx := tx.(*scalegraph.TransferTransaction)
-                amount = transferTx.Amount()
-            case scalegraph.Burn:
-                burnTx := tx.(*scalegraph.BurnTransaction)
-                amount = burnTx.Amount()
-            }
-            
-            transactions = append(transactions, map[string]interface{}{
-				"type":  tx.Type().String(),
-                "from":   fromID,
-                "to":     toID,
-                "amount": amount,
-            })
-        }
-    }
+	// Get transaction history
+	blocks := acc.Blockchain().GetBlocks()
+	transactions := make([]map[string]interface{}, 0)
+	for _, block := range blocks {
+		if tx := block.Transaction(); tx != nil {
+			fromID := "genesis"
+			if sender := tx.Sender(); sender != nil {
+				fromID = sender.ID().String()
+			}
+			toID := "unknown"
+			if receiver := tx.Receiver(); receiver != nil {
+				toID = receiver.ID().String()
+			}
+
+			var amount float64
+			switch tx.Type() {
+			case scalegraph.Mint:
+				mintTx := tx.(*scalegraph.MintTransaction)
+				amount = mintTx.Amount()
+			case scalegraph.Transfer:
+				transferTx := tx.(*scalegraph.TransferTransaction)
+				amount = transferTx.Amount()
+			case scalegraph.Burn:
+				burnTx := tx.(*scalegraph.BurnTransaction)
+				amount = burnTx.Amount()
+			}
+
+			transactions = append(transactions, map[string]interface{}{
+				"type":   tx.Type().String(),
+				"from":   fromID,
+				"to":     toID,
+				"amount": amount,
+			})
+		}
+	}
 
 	respondJSON(w, http.StatusOK, AccountResponse{
 		ID:           acc.ID().String(),

@@ -451,11 +451,10 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 				SignedRequest: signedReq,
 			}
 
-		
 			// Marshal to JSON
 			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
 				"signed_envelope": payload.SignedRequest,
-				"account_id":     payload.AccountID.String(),
+				"account_id":      payload.AccountID.String(),
 			}, "", "  ")
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)

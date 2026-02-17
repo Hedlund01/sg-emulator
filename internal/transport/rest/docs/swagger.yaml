@@ -29,8 +29,6 @@ definitions:
         example: rest
         type: string
     type: object
-  rest.SignedAccountRequest:
-    type: object
   rest.SignedTransferRequest:
     type: object
   rest.TransferResponse:
@@ -54,27 +52,9 @@ info:
 paths:
   /accounts/me:
     post:
-      consumes:
-      - application/json
-      description: |-
-        Get account details including balance and transaction history. Requires cryptographically signed request with Ed25519 signature and X.509 certificate.
-
-        The request must be wrapped in a SignedEnvelope structure containing:
-        - payload: The AccountRequest with your account_id
-        - signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id, and timestamp
-        - certificate: PEM-encoded X.509 certificate containing your public key
-
-        The signature must be created by signing the JSON bytes of the payload using your account's Ed25519 private key.
-        The signer_id in the signature must match the account_id in the payload.
-      parameters:
-      - description: Signed account request with Ed25519 signature
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/rest.SignedAccountRequest'
-      produces:
-      - application/json
+      description: Get account details including balance and transaction history.
+        Requires cryptographically signed request with Ed25519 signature and X.509
+        certificate.
       responses:
         "200":
           description: OK
@@ -93,8 +73,6 @@ paths:
           schema:
             $ref: '#/definitions/rest.ErrorResponse'
       summary: Get your own account details
-      tags:
-      - accounts
   /health:
     get:
       consumes:

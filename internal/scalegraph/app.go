@@ -19,8 +19,8 @@ type App struct {
 	logger   *slog.Logger
 }
 
-// New creates a new App instance
-func New(logger *slog.Logger) *App {
+// NewApp creates a new App instance
+func NewApp(logger *slog.Logger) *App {
 	return &App{
 		accounts: make(map[ScalegraphId]*Account),
 		logger:   logger,
@@ -173,6 +173,78 @@ func (a *App) Mint(ctx context.Context, to ScalegraphId, amount float64) error {
 	toAcc.appendTransaction(mintTx)
 
 	logger.Info("Mint completed", "account_id", to, "amount", amount, "new_balance", toAcc.Balance())
+	return nil
+}
+
+func (a *App) MintToken(ctx context.Context, to ScalegraphId, tokenValue string, signature []byte, clawbackAddress *ScalegraphId) error {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+	logger.Debug("Mint token operation initiated", "account_id", to, "token_value", tokenValue)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	toAcc, exists := a.accounts[to]
+	if !exists {
+		logger.Warn("Account not found for mint token", "account_id", to)
+		return fmt.Errorf("destination account not found: %s", to)
+	}
+
+	token := newToken(tokenValue, signature, clawbackAddress)
+	mintTokenTx := newMintTokenTransaction(toAcc, token)
+
+	if err := toAcc.appendTransaction(mintTokenTx); err != nil {
+		logger.Error("Failed to append mint token transaction", "error", err)
+		return err
+	}
+
+	logger.Info("Mint token completed", "account_id", to, "token_value", tokenValue)
+	return nil
+}
+
+func (a *App) TransferToken(ctx context.Context, from, to ScalegraphId, tokenId ScalegraphId) error {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+	logger.Debug("Transfer token operation initiated", "from", from, "to", to, "token_id", tokenId)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	fromAcc, exists := a.accounts[from]
+	if !exists {
+		logger.Warn("Source account not found for token transfer", "from", from)
+		return fmt.Errorf("source account not found: %s", from)
+	}
+	
+	toAcc, exists := a.accounts[to]
+	if !exists {
+		logger.Warn("Destination account not found for token transfer", "to", to)
+		return fmt.Errorf("destination account not found: %s", to)
+	}
+
+	token, exists := fromAcc.GetToken(tokenId)
+	if !exists {
+		logger.Warn("Token not found in source account", "token_id", tokenId, "from_account", from)
+		return fmt.Errorf("token not found in source account: %s", tokenId)
+	}
+	
+	transferTokenTx := newTransferTokenTransaction(fromAcc, toAcc, token)
+
+	if err := fromAcc.appendTransaction(transferTokenTx); err != nil {
+		logger.Error("Failed to append transfer token transaction", "error", err)
+		return err
+	}
+
+	if err := toAcc.appendTransaction(transferTokenTx); err != nil {
+		logger.Error("Failed to append transfer token transaction", "error", err)
+		// Rollback: remove transaction from sender if receiver append fails
+		fromAcc.rollbacklatestTransaction(transferTokenTx)
+		return err
+	}
+
+	logger.Info("Transfer token completed", "from", from, "to", to, "token_id", tokenId)
 	return nil
 }
 

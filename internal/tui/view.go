@@ -330,7 +330,7 @@ func (m Model) viewAccountDetailSingle() string {
 			txNum := i + 1
 			line := fmt.Sprintf("%s#%d: ", arrow, txNum)
 
-			switch *tx.Type() {
+			switch tx.Type() {
 			case scalegraph.Transfer:
 				if transferTx, ok := tx.(*scalegraph.TransferTransaction); ok {
 					if tx.Sender() != nil && tx.Sender().ID() == selectedAcc.ID() { // Sent transaction
@@ -456,7 +456,7 @@ func (m Model) viewTransactionDetail() string {
 	detailContent += lipgloss.NewStyle().Bold(true).Render("Type:") + "\n"
 
 	var amount float64
-	switch *tx.Type() {
+	switch tx.Type() {
 	case scalegraph.Mint:
 		if mintTx, ok := tx.(*scalegraph.MintTransaction); ok {
 			amount = mintTx.Amount()

@@ -15,6 +15,7 @@ type Account struct {
 	valuestore  map[string]string
 	publicKey   ed25519.PublicKey
 	certificate *x509.Certificate
+	tokenStore  map[ScalegraphId]*Token // &Token{} means authorized but not owned, nil means not authorized, non-nil means owned
 }
 
 // newAccountWithPublicKey creates a new account with a public key and certificate
@@ -69,10 +70,70 @@ func (a *Account) GetNonce() uint64 {
 	return uint64(a.blockchain.Len())
 }
 
+// GetToken returns the token with the given ID if it exists in the account's token store.
+// Returns the token and true if found, or nil and false if not found.
+// Returns nil and false if the token is not authorized for this account (i.e. token store entry is &Token{}), or if the token does not exist (i.e. token store entry is nil).
+func (a *Account) GetToken(tokenId ScalegraphId) (*Token, bool) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if !a.tokenStore[tokenId].Equal(&Token{}) {
+		return nil, false
+	}
+
+	token, exists := a.tokenStore[tokenId]
+
+	return token, exists
+}
+
+func (a *Account) addToken(token *Token) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+
+	if !a.tokenStore[token.ID()].Equal(&Token{}) {
+		return fmt.Errorf("token with ID %s is not authorized for account %s", token.ID(), a.ID())
+	}
+
+	if a.tokenStore[token.ID()] != nil {
+		return fmt.Errorf("token with ID %s already exists in account %s", token.ID(), a.ID())
+	}
+
+	a.tokenStore[token.ID()] = token
+	return nil
+}
+
+func (a *Account) removeToken(tokenId ScalegraphId) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.tokenStore[tokenId] == nil {
+		return fmt.Errorf("token with ID %s does not exist in account %s", tokenId, a.ID())
+	}
+	delete(a.tokenStore, tokenId)
+	return nil
+}
+
+func (a *Account) rollbacklatestTransaction(trx ITransaction) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.blockchain.Len() == 0 {
+		return nil // No transactions to remove
+	}
+
+	latest := a.blockchain.Tail()
+	if latest.ID() != trx.ID() {
+		return fmt.Errorf("transaction to remove is not the latest transaction in the blockchain")
+	}
+
+	a.blockchain.removeLatestBlock()
+	return nil
+}
+
 func (a *Account) appendTransaction(trx ITransaction) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	switch *trx.Type() {
+	switch trx.Type() {
 	case Mint:
 		tx := trx.(*MintTransaction)
 		a.balance += tx.Amount()
@@ -95,6 +156,51 @@ func (a *Account) appendTransaction(trx ITransaction) error {
 			}
 			a.balance -= tx.Amount()
 		}
+	case MintToken:
+		tx := trx.(*MintTokenTransaction)
+		if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
+			if err := a.addToken(tx.Token()); err != nil {
+				return fmt.Errorf("failed to mint token: %w", err)
+			}
+		} else if tx.Sender() != nil && tx.Sender().ID() == a.ID() {
+			return fmt.Errorf("sender should be nil for mint token transaction")
+		}
+	case TransferToken:
+		tx := trx.(*TransferTokenTransaction)
+		if tx.Sender() != nil && tx.Sender().ID() == a.ID() {
+			_, exists := a.GetToken(tx.Token().ID())
+			if !exists {
+				return fmt.Errorf("token with ID %s does not exist in account %s", tx.Token().ID(), a.ID())
+			}
+			if err := a.removeToken(tx.Token().ID()); err != nil {
+				return fmt.Errorf("failed to transfer token: %w", err)
+			}
+		} else if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
+			if err := a.addToken(tx.Token()); err != nil {
+				return fmt.Errorf("failed to transfer token: %w", err)
+			}
+		} else {
+			return fmt.Errorf("either sender or receiver must be this account for transfer token transaction")
+		}
+	case AuthorizeTokenTransfer:
+		tx := trx.(*AuthorizeTokenTransferTransaction)
+
+		if tx.Sender() != nil && tx.Receiver() != nil && tx.Sender().ID() == a.ID() && tx.Receiver().ID() == a.ID() {
+			tokenId := *tx.TokenId()
+			if a.tokenStore[tokenId] == nil {
+				a.tokenStore[tokenId] = &Token{}
+			} else if a.tokenStore[tokenId] != nil && !a.tokenStore[tokenId].Equal(&Token{}) {
+				return fmt.Errorf("token with ID %s is already owned by account %s, cannot authorize transfer", tokenId, a.ID())
+			} 
+			
+			// If the token store entry is &Token{}, it means it's already authorized but not owned, so we can just return nil without error as we are authorizing again only
+			return nil
+		}
+		return fmt.Errorf("both sender and receiver must be this account for authorize token transfer transaction")
+
+	default:
+		return fmt.Errorf("unsupported transaction type: %s", trx.Type())
+
 	}
 
 	a.blockchain.append(trx)

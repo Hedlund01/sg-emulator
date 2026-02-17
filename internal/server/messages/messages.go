@@ -111,9 +111,6 @@ type Response struct {
 	Payload any
 }
 
-
-
-
 // SignablePayload is an interface for payloads that support cryptographic signature verification.
 // It uses Go generics to support different SignableData types while maintaining type safety.
 type SignablePayload[T crypto.SignableData] interface {
@@ -126,5 +123,3 @@ type SignablePayload[T crypto.SignableData] interface {
 	// VerifyPayloadData verifies that the payload data matches the signed data
 	VerifyPayloadData() error
 }
-
-

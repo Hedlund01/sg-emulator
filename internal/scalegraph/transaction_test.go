@@ -26,7 +26,7 @@ func TestMintTransactionType(t *testing.T) {
 	tx := newMintTransaction(receiver, 50.0)
 
 	require.NotNil(t, tx.Type())
-	assert.Equal(t, Mint, *tx.Type())
+	assert.Equal(t, Mint, tx.Type())
 }
 
 func TestMintTransactionID(t *testing.T) {
@@ -37,19 +37,19 @@ func TestMintTransactionID(t *testing.T) {
 
 	require.NotNil(t, tx1.ID())
 	require.NotNil(t, tx2.ID())
-	assert.NotEqual(t, *tx1.ID(), *tx2.ID(), "two mint transactions should have unique IDs")
-	assert.NotEqual(t, ScalegraphId{}, *tx1.ID(), "transaction ID should not be zero value")
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two mint transactions should have unique IDs")
+	assert.NotEqual(t, ScalegraphId{}, tx1.ID(), "transaction ID should not be zero value")
 }
 
 func TestMintTransactionImmutability(t *testing.T) {
 	receiver, _ := testCreateAccount(t)
 
 	tx := newMintTransaction(receiver, 75.0)
-	originalID := *tx.ID()
+	originalID := tx.ID()
 	originalAmount := tx.Amount()
 
 	for i := 0; i < 10; i++ {
-		assert.Equal(t, originalID, *tx.ID(), "transaction ID changed on access %d", i)
+		assert.Equal(t, originalID, tx.ID(), "transaction ID changed on access %d", i)
 		assert.Equal(t, originalAmount, tx.Amount(), "transaction amount changed on access %d", i)
 		assert.Nil(t, tx.Sender())
 		assert.Equal(t, receiver, tx.Receiver())
@@ -75,7 +75,7 @@ func TestTransferTransactionType(t *testing.T) {
 	tx := newTransferTransaction(sender, receiver, 25.0)
 
 	require.NotNil(t, tx.Type())
-	assert.Equal(t, Transfer, *tx.Type())
+	assert.Equal(t, Transfer, tx.Type())
 }
 
 func TestTransferTransactionID(t *testing.T) {
@@ -86,19 +86,19 @@ func TestTransferTransactionID(t *testing.T) {
 
 	require.NotNil(t, tx1.ID())
 	require.NotNil(t, tx2.ID())
-	assert.NotEqual(t, *tx1.ID(), *tx2.ID(), "two transfer transactions should have unique IDs")
-	assert.NotEqual(t, ScalegraphId{}, *tx1.ID(), "transaction ID should not be zero value")
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two transfer transactions should have unique IDs")
+	assert.NotEqual(t, ScalegraphId{}, tx1.ID(), "transaction ID should not be zero value")
 }
 
 func TestTransferTransactionImmutability(t *testing.T) {
 	sender, receiver := testCreateTwoAccounts(t)
 
 	tx := newTransferTransaction(sender, receiver, 50.0)
-	originalID := *tx.ID()
+	originalID := tx.ID()
 	originalAmount := tx.Amount()
 
 	for i := 0; i < 10; i++ {
-		assert.Equal(t, originalID, *tx.ID(), "transaction ID changed on access %d", i)
+		assert.Equal(t, originalID, tx.ID(), "transaction ID changed on access %d", i)
 		assert.Equal(t, originalAmount, tx.Amount(), "transaction amount changed on access %d", i)
 		assert.Equal(t, sender, tx.Sender())
 		assert.Equal(t, receiver, tx.Receiver())
@@ -124,7 +124,7 @@ func TestBurnTransactionType(t *testing.T) {
 	tx := newBurnTransaction(receiver, 15.0)
 
 	require.NotNil(t, tx.Type())
-	assert.Equal(t, Burn, *tx.Type())
+	assert.Equal(t, Burn, tx.Type())
 }
 
 func TestBurnTransactionID(t *testing.T) {
@@ -135,8 +135,8 @@ func TestBurnTransactionID(t *testing.T) {
 
 	require.NotNil(t, tx1.ID())
 	require.NotNil(t, tx2.ID())
-	assert.NotEqual(t, *tx1.ID(), *tx2.ID(), "two burn transactions should have unique IDs")
-	assert.NotEqual(t, ScalegraphId{}, *tx1.ID(), "transaction ID should not be zero value")
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two burn transactions should have unique IDs")
+	assert.NotEqual(t, ScalegraphId{}, tx1.ID(), "transaction ID should not be zero value")
 }
 
 // --- ITransaction Interface Compliance Tests ---

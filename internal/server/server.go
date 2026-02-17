@@ -46,7 +46,7 @@ type Server struct {
 func New(logger *slog.Logger) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
-		app:         scalegraph.New(logger.With("component", "app")),
+		app:         scalegraph.NewApp(logger.With("component", "app")),
 		registry:    NewRegistry(logger.With("component", "registry")),
 		requestChan: make(chan messages.Request, 1000),
 		ctx:         ctx,
@@ -59,7 +59,7 @@ func New(logger *slog.Logger) *Server {
 func NewWithCA(logger *slog.Logger, certAuth *ca.CA) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
-		app:         scalegraph.New(logger.With("component", "app")),
+		app:         scalegraph.NewApp(logger.With("component", "app")),
 		registry:    NewRegistry(logger.With("component", "registry")),
 		requestChan: make(chan messages.Request, 1000),
 		ctx:         ctx,
