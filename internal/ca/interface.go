@@ -14,6 +14,9 @@ type CertificateAuthority interface {
 	// PublicKey returns the CA public key
 	PublicKey() ed25519.PublicKey
 
+	// PrivateKey returns the CA private key
+	PrivateKey() ed25519.PrivateKey
+
 	// Certificate returns the CA certificate
 	Certificate() *x509.Certificate
 

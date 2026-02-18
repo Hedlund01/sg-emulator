@@ -66,7 +66,7 @@ func newTestServer(logger *slog.Logger) (*Server, func(), error) {
 	}
 
 	// Create CA
-	certAuth, err := ca.New(tmpDir, logger)
+	certAuth, err := ca.NewCA(tmpDir, logger)
 	if err != nil {
 		os.RemoveAll(tmpDir)
 		return nil, nil, err

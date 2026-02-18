@@ -42,18 +42,7 @@ type Server struct {
 	verifier    *crypto.Verifier
 }
 
-// New creates a new Server with a fresh App and Registry
-func New(logger *slog.Logger) *Server {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{
-		app:         scalegraph.NewApp(logger.With("component", "app")),
-		registry:    NewRegistry(logger.With("component", "registry")),
-		requestChan: make(chan messages.Request, 1000),
-		ctx:         ctx,
-		cancel:      cancel,
-		logger:      logger,
-	}
-}
+
 
 // NewWithCA creates a new Server with a Certificate Authority
 func NewWithCA(logger *slog.Logger, certAuth *ca.CA) *Server {
@@ -369,6 +358,16 @@ func (s *Server) handleRequest(req messages.Request) messages.Response {
 	case messages.ReqAccountCount:
 		count := s.app.AccountCount(req.Context)
 		resp.Payload = messages.AccountCountResponse{Count: count}
+
+	case messages.ReqMintToken:
+		payload := req.Payload.(*messages.MintTokenPayload)
+		
+		if err := verifySignedRequest(s, payload); err != nil {
+			logger.Warn("MintToken signature verification failed", "error", err, "to", payload.TokenValue)
+			resp.Success = false
+			resp.Error = err.Error()
+			break
+		}
 
 	default:
 		logger.Warn("Unknown request type", "type", req.Type)

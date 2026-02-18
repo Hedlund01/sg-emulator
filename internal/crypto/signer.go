@@ -121,3 +121,17 @@ func (r *GetAccountRequest) Bytes() []byte {
 	})
 	return data
 }
+
+type MintTokenRequest struct {
+	TokenValue     string  `json:"token_value"`
+	ClawbackAddress *string `json:"clawback_address,omitempty"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *MintTokenRequest) Bytes() []byte {
+	data, _ := json.Marshal(MintTokenRequest{
+		TokenValue:     r.TokenValue,
+		ClawbackAddress: r.ClawbackAddress,
+	})
+	return data
+}

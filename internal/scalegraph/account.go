@@ -91,7 +91,7 @@ func (a *Account) addToken(token *Token) error {
 
 
 	if !a.tokenStore[token.ID()].Equal(&Token{}) {
-		return fmt.Errorf("token with ID %s is not authorized for account %s", token.ID(), a.ID())
+		return fmt.Errorf("token with ID %s is not authorized to transfer to account %s", token.ID(), a.ID())
 	}
 
 	if a.tokenStore[token.ID()] != nil {
@@ -175,7 +175,7 @@ func (a *Account) appendTransaction(trx ITransaction) error {
 			if err := a.removeToken(tx.Token().ID()); err != nil {
 				return fmt.Errorf("failed to transfer token: %w", err)
 			}
-		} else if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
+		} else if tx.Receiver() != nil && tx.Receiver().ID() == a.ID(){
 			if err := a.addToken(tx.Token()); err != nil {
 				return fmt.Errorf("failed to transfer token: %w", err)
 			}
@@ -211,5 +211,5 @@ func (a *Account) appendTransaction(trx ITransaction) error {
 func (a *Account) String() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return fmt.Sprintf("Account(ID: %s, Balance: %.2f, Valutestore: %v)", a.id, a.balance, a.valuestore)
+	return fmt.Sprintf("Account(ID: %s, Balance: %.2f, TokenStore: %v)", a.id, a.balance, a.tokenStore)
 }

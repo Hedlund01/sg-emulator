@@ -8,28 +8,21 @@ import (
 
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server/messages"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // TestNew verifies server creation
 func TestNew(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	if srv == nil {
-		t.Fatal("New() returned nil")
-	}
-
-	if srv.app == nil {
-		t.Error("New() server has nil app")
-	}
-
-	if srv.registry == nil {
-		t.Error("New() server has nil registry")
-	}
-
-	if cap(srv.requestChan) != 1000 {
-		t.Errorf("New() request channel capacity = %d, want 1000", cap(srv.requestChan))
-	}
+	assert.NotNil(t, srv, "New() should not return nil")
+	assert.NotNil(t, srv.app, "New() server should have non-nil app")
+	assert.NotNil(t, srv.registry, "New() server should have non-nil registry")
+	assert.Equal(t, 1000, cap(srv.requestChan), "New() request channel capacity")
 }
 
 // TestServer_Start verifies server lifecycle
@@ -137,88 +130,69 @@ func TestServer_Start_Multiple(t *testing.T) {
 // TestServer_RequestChannel verifies request channel accessor
 func TestServer_RequestChannel(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	reqChan := srv.RequestChannel()
-	if reqChan == nil {
-		t.Error("RequestChannel() returned nil")
-	}
-
-	// Verify it's the same channel
-	if reqChan != srv.requestChan {
-		t.Error("RequestChannel() returned different channel")
-	}
+	assert.NotNil(t, reqChan, "RequestChannel() should not return nil")
+	assert.Equal(t, srv.requestChan, reqChan, "RequestChannel() should return the same channel")
 }
 
 // TestServer_Registry verifies registry accessor
 func TestServer_Registry(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	registry := srv.Registry()
-	if registry == nil {
-		t.Error("Registry() returned nil")
-	}
-
-	if registry != srv.registry {
-		t.Error("Registry() returned different registry")
-	}
+	assert.NotNil(t, registry, "Registry() should not return nil")
+	assert.Equal(t, srv.registry, registry, "Registry() should return the same registry")
 }
 
 // TestServer_CreateVirtualApp verifies virtual app creation
 func TestServer_CreateVirtualApp(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	vapp, err := srv.CreateVirtualApp()
-	if err != nil {
-		t.Fatalf("CreateVirtualApp() error = %v, want nil", err)
-	}
-
-	if vapp == nil {
-		t.Fatal("CreateVirtualApp() returned nil")
-	}
+	assert.NoError(t, err)
+	assert.NotNil(t, vapp, "CreateVirtualApp() should not return nil")
 
 	// Verify it's registered
-	registry := srv.Registry()
-	retrieved, exists := registry.GetByID(vapp.ID())
-	if !exists {
-		t.Error("CreateVirtualApp() did not register virtual app")
-	}
-	if retrieved != vapp {
-		t.Error("Registry returned different virtual app instance")
-	}
+	retrieved, exists := srv.Registry().GetByID(vapp.ID())
+	assert.True(t, exists, "CreateVirtualApp() should register virtual app")
+	assert.Same(t, vapp, retrieved, "Registry should return the same virtual app instance")
 }
 
 // TestServer_CreateVirtualApp_Multiple verifies multiple virtual apps
 func TestServer_CreateVirtualApp_Multiple(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	count := 10
 	vapps := make([]*VirtualApp, count)
 
 	for i := 0; i < count; i++ {
 		vapp, err := srv.CreateVirtualApp()
-		if err != nil {
-			t.Fatalf("CreateVirtualApp() %d error = %v", i, err)
-		}
+		assert.NoError(t, err, "CreateVirtualApp() %d should succeed", i)
 		vapps[i] = vapp
 	}
 
 	// Verify all have unique IDs
 	seen := make(map[scalegraph.ScalegraphId]bool)
 	for _, vapp := range vapps {
-		if seen[vapp.ID()] {
-			t.Errorf("CreateVirtualApp() generated duplicate ID: %s", vapp.ID())
-		}
+		assert.False(t, seen[vapp.ID()], "CreateVirtualApp() generated duplicate ID: %s", vapp.ID())
 		seen[vapp.ID()] = true
 	}
 
 	// Verify all are registered
-	if srv.Registry().Count() != count {
-		t.Errorf("Registry count = %d, want %d", srv.Registry().Count(), count)
-	}
+	assert.Equal(t, count, srv.Registry().Count(), "Registry count")
 }
 
 // TestServer_HandleRequest_CreateAccount verifies request handling
@@ -316,7 +290,9 @@ func TestServer_HandleRequest_GetAccount(t *testing.T) {
 // TestServer_HandleRequest_GetAccounts verifies account listing
 func TestServer_HandleRequest_GetAccounts(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	// Create multiple accounts
 	for i := 0; i < 5; i++ {
@@ -332,14 +308,9 @@ func TestServer_HandleRequest_GetAccounts(t *testing.T) {
 
 	resp := srv.handleRequest(req)
 
-	if !resp.Success {
-		t.Errorf("handleRequest() failed: %s", resp.Error)
-	}
-
+	assert.True(t, resp.Success, "handleRequest() failed: %s", resp.Error)
 	getResp := resp.Payload.(messages.GetAccountsResponse)
-	if len(getResp.Accounts) != 5 {
-		t.Errorf("handleRequest() returned %d accounts, want 5", len(getResp.Accounts))
-	}
+	assert.Len(t, getResp.Accounts, 5, "handleRequest() should return 5 accounts")
 }
 
 // TestServer_HandleRequest_Transfer verifies fund transfer
@@ -383,7 +354,9 @@ func TestServer_HandleRequest_Transfer(t *testing.T) {
 // TestServer_HandleRequest_Mint verifies token minting
 func TestServer_HandleRequest_Mint(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	acc := createTestAccountDirect(t, srv.app, 100.0)
 
@@ -399,21 +372,19 @@ func TestServer_HandleRequest_Mint(t *testing.T) {
 
 	resp := srv.handleRequest(req)
 
-	if !resp.Success {
-		t.Errorf("handleRequest() failed: %s", resp.Error)
-	}
+	assert.True(t, resp.Success, "handleRequest() failed: %s", resp.Error)
 
 	// Verify balance
 	updated, _ := srv.app.GetAccount(context.Background(), acc.ID())
-	if updated.Balance() != 150.0 {
-		t.Errorf("Balance = %.2f, want 150.00", updated.Balance())
-	}
+	assert.Equal(t, 150.0, updated.Balance(), "Balance after mint")
 }
 
 // TestServer_HandleRequest_AccountCount verifies account counting
 func TestServer_HandleRequest_AccountCount(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	// Create accounts
 	for i := 0; i < 3; i++ {
@@ -429,20 +400,17 @@ func TestServer_HandleRequest_AccountCount(t *testing.T) {
 
 	resp := srv.handleRequest(req)
 
-	if !resp.Success {
-		t.Errorf("handleRequest() failed: %s", resp.Error)
-	}
-
+	assert.True(t, resp.Success, "handleRequest() failed: %s", resp.Error)
 	countResp := resp.Payload.(messages.AccountCountResponse)
-	if countResp.Count != 3 {
-		t.Errorf("Count = %d, want 3", countResp.Count)
-	}
+	assert.Equal(t, 3, countResp.Count, "Count")
 }
 
 // TestServer_HandleRequest_UnknownType verifies unknown request type handling
 func TestServer_HandleRequest_UnknownType(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	req := messages.Request{
 		ID:      "test-req-7",
@@ -453,13 +421,8 @@ func TestServer_HandleRequest_UnknownType(t *testing.T) {
 
 	resp := srv.handleRequest(req)
 
-	if resp.Success {
-		t.Error("handleRequest() with unknown type succeeded, want error")
-	}
-
-	if resp.Error == "" {
-		t.Error("handleRequest() with unknown type returned empty error")
-	}
+	assert.False(t, resp.Success, "handleRequest() with unknown type should fail")
+	assert.NotEmpty(t, resp.Error, "handleRequest() with unknown type should return an error message")
 }
 
 // TestServer_HandleRequest_Errors verifies error handling

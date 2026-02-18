@@ -88,6 +88,9 @@ const (
 	ReqTransfer
 	ReqMint
 	ReqAccountCount
+	ReqMintToken
+	ReqTransferToken
+	ReqAuthorizeTokenTransfer
 )
 
 // Request is sent from clients to the Server.

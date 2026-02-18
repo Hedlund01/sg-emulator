@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/trace"
 )
 
@@ -176,7 +177,7 @@ func (a *App) Mint(ctx context.Context, to ScalegraphId, amount float64) error {
 	return nil
 }
 
-func (a *App) MintToken(ctx context.Context, to ScalegraphId, tokenValue string, signature []byte, clawbackAddress *ScalegraphId) error {
+func (a *App) MintToken(ctx context.Context, to ScalegraphId, tokenValue string, signature crypto.Signature, clawbackAddress *ScalegraphId) error {
 	logger := a.logger
 	if traceID := trace.GetTraceID(ctx); traceID != "" {
 		logger = logger.With("trace_id", traceID)
@@ -203,7 +204,7 @@ func (a *App) MintToken(ctx context.Context, to ScalegraphId, tokenValue string,
 	return nil
 }
 
-func (a *App) TransferToken(ctx context.Context, from, to ScalegraphId, tokenId ScalegraphId) error {
+func (a *App) TransferToken(ctx context.Context, from, to, tokenId ScalegraphId) error {
 	logger := a.logger
 	if traceID := trace.GetTraceID(ctx); traceID != "" {
 		logger = logger.With("trace_id", traceID)

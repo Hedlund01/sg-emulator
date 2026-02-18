@@ -20,7 +20,7 @@ func TestCABootstrapAndLoad(t *testing.T) {
 	logger := slog.Default()
 
 	// Bootstrap new CA
-	ca1, err := New(tmpDir, logger)
+	ca1, err := NewCA(tmpDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestCABootstrapAndLoad(t *testing.T) {
 	}
 
 	// Load existing CA
-	ca2, err := New(tmpDir, logger)
+	ca2, err := NewCA(tmpDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to load CA: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestCAIssueCertificate(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	logger := slog.Default()
-	certAuth, err := New(tmpDir, logger)
+	certAuth, err := NewCA(tmpDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestCACreateAccountCredentials(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	logger := slog.Default()
-	certAuth, err := New(tmpDir, logger)
+	certAuth, err := NewCA(tmpDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestVerifier(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	logger := slog.Default()
-	certAuth, err := New(tmpDir, logger)
+	certAuth, err := NewCA(tmpDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
