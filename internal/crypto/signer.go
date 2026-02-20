@@ -135,3 +135,15 @@ func (r *MintTokenRequest) Bytes() []byte {
 	})
 	return data
 }
+
+type BurnTokenRequest struct {
+	TokenID string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *BurnTokenRequest) Bytes() []byte {
+	data, _ := json.Marshal(BurnTokenRequest{
+		TokenID: r.TokenID,
+	})
+	return data
+}

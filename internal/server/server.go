@@ -244,7 +244,7 @@ func (s *Server) drainRequests() {
 }
 
 // handleRequest processes a single request and returns the response
-func (s *Server) handleRequest(req messages.Request) messages.Response {
+func (s *Server)  handleRequest(req messages.Request) messages.Response {
 	traceID := trace.GetTraceID(req.Context)
 	logger := s.logger
 	if traceID != "" {

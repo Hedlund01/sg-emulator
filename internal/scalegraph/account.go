@@ -7,6 +7,30 @@ import (
 	"sync"
 )
 
+// txHandlerFunc is a function that handles a specific transaction type for an account.
+// After a successful handler call, the transaction is appended to the account's blockchain.
+// Handlers that manage their own blockchain appending (e.g. AuthorizeTokenTransfer) should return errSkipAppend.
+type txHandlerFunc func(trx ITransaction) error
+
+// errSkipAppend is a sentinel error returned by a txHandlerFunc to signal that
+// the handler has already managed blockchain state and the caller should skip the
+// default a.blockchain.append(trx) step.
+type errSkipAppend struct{}
+
+func (errSkipAppend) Error() string { return "skip blockchain append" }
+
+// registerTxHandler registers a typed transaction handler for a specific transaction type.
+// The handler receives the concrete transaction type T.
+func registerTxHandler[T ITransaction](handlers map[TransactionType]txHandlerFunc, txType TransactionType, handler func(trx T) error) {
+	handlers[txType] = func(trx ITransaction) error {
+		typed, ok := trx.(T)
+		if !ok {
+			return fmt.Errorf("invalid transaction type: got %T, want %T", trx, *new(T))
+		}
+		return handler(typed)
+	}
+}
+
 const (
 	// MBR (Minimum Balance Requirement) = MBR_SLOT_COST * number of authorized token transfers (i.e. number of &Token{} entries in the token store) + MBR_TOKEN_COST * number of tokens created by the account. Each token creation or authorization of token transfer will require the account to have at least MBR_SLOT_COST balance as MBR, which will be unfrozen when the burn token transaction is executed or the unauthorize token transfer transaction is executed. This is to prevent accounts to create DoS token transactions by authorizing unlimited token transfers or token creation transactions, which can cause the blockchain to grow indefinitely and consume all memory.
 
@@ -26,6 +50,7 @@ type Account struct {
 	publicKey   ed25519.PublicKey
 	certificate *x509.Certificate
 	tokenStore  map[ScalegraphId]*Token // &Token{} means authorized but not owned, nil means not authorized, non-nil means owned
+	txHandlers  map[TransactionType]txHandlerFunc
 }
 
 // newAccountWithPublicKey creates a new account with a public key and certificate
@@ -41,8 +66,19 @@ func newAccountWithPublicKey(pubKey ed25519.PublicKey, cert *x509.Certificate) (
 		publicKey:   pubKey,
 		certificate: cert,
 	}
+	acc.registerTxHandlers()
 
 	return acc, nil
+}
+
+func (a *Account) registerTxHandlers() {
+	a.txHandlers = make(map[TransactionType]txHandlerFunc)
+	registerTxHandler(a.txHandlers, Mint, a.handleMintTx)
+	registerTxHandler(a.txHandlers, Transfer, a.handleTransferTx)
+	registerTxHandler(a.txHandlers, Burn, a.handleBurnTx)
+	registerTxHandler(a.txHandlers, MintToken, a.handleMintTokenTx)
+	registerTxHandler(a.txHandlers, TransferToken, a.handleTransferTokenTx)
+	registerTxHandler(a.txHandlers, AuthorizeTokenTransfer, a.handleAuthorizeTokenTransferTx)
 }
 
 // PublicKey returns the account's public key (may be nil for legacy accounts)
@@ -115,7 +151,6 @@ func (a *Account) addToken(token *Token) error {
 		return fmt.Errorf("token with ID %s is signed by account %s, cannot be added to account %s", token.ID(), token.Signature().SignerID, a.ID())
 	}
 
-
 	a.mbr += MBR_TOKEN_COST
 	a.tokenStore[token.ID()] = token
 	return nil
@@ -132,7 +167,7 @@ func (a *Account) removeToken(tokenId ScalegraphId) error {
 	return nil
 }
 
-func (a *Account ) burnToken(tokenId ScalegraphId) error {
+func (a *Account) burnToken(tokenId ScalegraphId) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -157,8 +192,6 @@ func (a *Account ) burnToken(tokenId ScalegraphId) error {
 	return nil
 }
 
-
-
 func (a *Account) rollbacklatestTransaction(trx ITransaction) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -179,85 +212,100 @@ func (a *Account) rollbacklatestTransaction(trx ITransaction) error {
 func (a *Account) appendTransaction(trx ITransaction) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	switch trx.Type() {
-	case Mint:
-		tx := trx.(*MintTransaction)
-		a.balance += tx.Amount()
-	case Transfer:
-		tx := trx.(*TransferTransaction)
-		if tx.Sender() != nil && tx.Sender().ID() == a.ID() {
-			if (a.balance - a.mbr) < tx.Amount() {
-				return fmt.Errorf("insufficient balance for transfer: current balance %.2f, mbr %.2f, transfer amount %.2f", a.balance, a.mbr, tx.Amount())
-			}
 
-			a.balance -= tx.Amount()
-		}
-		if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
-			a.balance += tx.Amount()
-		}
-	case Burn:
-		tx := trx.(*BurnTransaction)
-		if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
-			if (a.balance - a.mbr) < tx.Amount() {
-				return fmt.Errorf("insufficient balance for burn, can not burn more than balance: current balance %.2f, mbr %.2f, burn amount %.2f", a.balance, a.mbr, tx.Amount())
-			}
-			a.balance -= tx.Amount()
-		}
-	case MintToken:
-		tx := trx.(*MintTokenTransaction)
-		if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
-			if err := a.addToken(tx.Token()); err != nil {
-				return fmt.Errorf("failed to mint token: %w", err)
-			}
-		} else if tx.Sender() != nil && tx.Sender().ID() == a.ID() {
-			return fmt.Errorf("sender should be nil for mint token transaction")
-		}
-	case TransferToken:
-		tx := trx.(*TransferTokenTransaction)
-		if tx.Sender() != nil && tx.Sender().ID() == a.ID() {
-			_, exists := a.GetToken(tx.Token().ID())
-			if !exists {
-				return fmt.Errorf("token with ID %s does not exist in account %s", tx.Token().ID(), a.ID())
-			}
-			if err := a.removeToken(tx.Token().ID()); err != nil {
-				return fmt.Errorf("failed to transfer token: %w", err)
-			}
-		} else if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
-			if err := a.addToken(tx.Token()); err != nil {
-				return fmt.Errorf("failed to transfer token: %w", err)
-			}
-		} else {
-			return fmt.Errorf("either sender or receiver must be this account for transfer token transaction")
-		}
-	case AuthorizeTokenTransfer:
-		tx := trx.(*AuthorizeTokenTransferTransaction)
+	handler, ok := a.txHandlers[trx.Type()]
+	if !ok {
+		return fmt.Errorf("unsupported transaction type: %s", trx.Type())
+	}
 
-		if tx.Sender() != nil && tx.Receiver() != nil && tx.Sender().ID() == a.ID() && tx.Receiver().ID() == a.ID() {
-			tokenId := *tx.TokenId()
-			if a.tokenStore[tokenId] == nil {
-				if (a.balance - a.mbr) < MBR_SLOT_COST {
-					return fmt.Errorf("insufficient balance to authorize token transfer: current balance %.2f, mbr %.2f, required mbr for authorizing token transfer %.2f", a.balance, a.mbr, MBR_SLOT_COST)
-				}
-
-				a.mbr += MBR_SLOT_COST
-				a.tokenStore[tokenId] = &Token{}
-			} else if a.tokenStore[tokenId] != nil && !a.tokenStore[tokenId].Equal(&Token{}) {
-				return fmt.Errorf("token with ID %s is already owned by account %s, cannot authorize transfer", tokenId, a.ID())
-			}
-
-			// If the token store entry is &Token{}, it means it's already authorized but not owned, so we can just return nil without error as we are authorizing again only
+	if err := handler(trx); err != nil {
+		if _, skip := err.(errSkipAppend); skip {
 			return nil
 		}
-		return fmt.Errorf("both sender and receiver must be this account for authorize token transfer transaction")
-
-	default:
-		return fmt.Errorf("unsupported transaction type: %s", trx.Type())
-
+		return err
 	}
 
 	a.blockchain.append(trx)
 	return nil
+}
 
+func (a *Account) handleMintTx(trx *MintTransaction) error {
+	a.balance += trx.Amount()
+	return nil
+}
+
+func (a *Account) handleTransferTx(trx *TransferTransaction) error {
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		if (a.balance - a.mbr) < trx.Amount() {
+			return fmt.Errorf("insufficient balance for transfer: current balance %.2f, mbr %.2f, transfer amount %.2f", a.balance, a.mbr, trx.Amount())
+		}
+		a.balance -= trx.Amount()
+	}
+	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		a.balance += trx.Amount()
+	}
+	return nil
+}
+
+func (a *Account) handleBurnTx(trx *BurnTransaction) error {
+	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		if (a.balance - a.mbr) < trx.Amount() {
+			return fmt.Errorf("insufficient balance for burn, can not burn more than balance: current balance %.2f, mbr %.2f, burn amount %.2f", a.balance, a.mbr, trx.Amount())
+		}
+		a.balance -= trx.Amount()
+	}
+	return nil
+}
+
+func (a *Account) handleMintTokenTx(trx *MintTokenTransaction) error {
+	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		if err := a.addToken(trx.Token()); err != nil {
+			return fmt.Errorf("failed to mint token: %w", err)
+		}
+	} else if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		return fmt.Errorf("sender should be nil for mint token transaction")
+	}
+	return nil
+}
+
+func (a *Account) handleTransferTokenTx(trx *TransferTokenTransaction) error {
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		_, exists := a.GetToken(trx.Token().ID())
+		if !exists {
+			return fmt.Errorf("token with ID %s does not exist in account %s", trx.Token().ID(), a.ID())
+		}
+		if err := a.removeToken(trx.Token().ID()); err != nil {
+			return fmt.Errorf("failed to transfer token: %w", err)
+		}
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		if err := a.addToken(trx.Token()); err != nil {
+			return fmt.Errorf("failed to transfer token: %w", err)
+		}
+	} else {
+		return fmt.Errorf("either sender or receiver must be this account for transfer token transaction")
+	}
+	return nil
+}
+
+func (a *Account) handleAuthorizeTokenTransferTx(trx *AuthorizeTokenTransferTransaction) error {
+	if trx.Sender() == nil || trx.Receiver() == nil || trx.Sender().ID() != a.ID() || trx.Receiver().ID() != a.ID() {
+		return fmt.Errorf("both sender and receiver must be this account for authorize token transfer transaction")
+	}
+
+	tokenId := *trx.TokenId()
+	if a.tokenStore[tokenId] == nil {
+		if (a.balance - a.mbr) < MBR_SLOT_COST {
+			return fmt.Errorf("insufficient balance to authorize token transfer: current balance %.2f, mbr %.2f, required mbr for authorizing token transfer %.2f", a.balance, a.mbr, MBR_SLOT_COST)
+		}
+		a.mbr += MBR_SLOT_COST
+		a.tokenStore[tokenId] = &Token{}
+	} else if !a.tokenStore[tokenId].Equal(&Token{}) {
+		return fmt.Errorf("token with ID %s is already owned by account %s, cannot authorize transfer", tokenId, a.ID())
+	}
+
+	// Token is already authorized but not owned — re-authorizing is a no-op; skip blockchain append.
+	a.blockchain.append(trx)
+	return errSkipAppend{}
 }
 
 func (a *Account) String() string {

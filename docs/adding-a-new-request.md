@@ -64,18 +64,35 @@ func (t *BurnTransaction) Amount() float64         { return t.amount }
 
 ### 1c. Handle the transaction in `account.go`
 
-Add a case to `Account.appendTransaction()`:
+`appendTransaction` dispatches to a handler map instead of a `switch` statement. Add a typed handler method on `*Account` and register it in `registerTxHandlers()`.
+
+**Add the handler method:**
 
 ```go
-case Burn:
-    tx := trx.(*BurnTransaction)
-    if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
-        if (a.balance - a.mbr) < tx.Amount() {
+func (a *Account) handleBurnTx(trx *BurnTransaction) error {
+    if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+        if (a.balance - a.mbr) < trx.Amount() {
             return fmt.Errorf("insufficient balance for burn")
         }
-        a.balance -= tx.Amount()
+        a.balance -= trx.Amount()
     }
+    return nil
+}
 ```
+
+**Register it in `registerTxHandlers()`:**
+
+```go
+func (a *Account) registerTxHandlers() {
+    a.txHandlers = make(map[TransactionType]txHandlerFunc)
+    // ... existing handlers ...
+    registerTxHandler(a.txHandlers, Burn, a.handleBurnTx) // <-- add this line
+}
+```
+
+The `registerTxHandler` generic helper wraps the typed handler in a type-asserting closure, so your method receives the concrete `*BurnTransaction` directly — no manual type assertion needed.
+
+> **Special case — skip blockchain append:** If your handler needs to conditionally skip the default `a.blockchain.append(trx)` call (e.g. for idempotent re-authorization), return `errSkipAppend{}` instead of `nil`. The handler is then responsible for calling `a.blockchain.append(trx)` itself when appropriate.
 
 ---
 
@@ -249,14 +266,14 @@ func (c *Client) BurnSigned(ctx context.Context, accountID scalegraph.Scalegraph
 |---|------|------------|
 | 1 | `scalegraph/transaction.go` | Add enum value + `String()` case (if new transaction type) |
 | 2 | `scalegraph/<name>_transaction.go` | Create transaction struct implementing `ITransaction` |
-| 3 | `scalegraph/account.go` | Add case to `appendTransaction()` |
+| 3 | `scalegraph/account.go` | Add `handleXxxTx` method + register in `registerTxHandlers()` |
 | 4 | `crypto/signer.go` | Add signable data struct with `Bytes()` (if signed) |
 | 5 | `scalegraph/requests.go` | Define `XxxRequest` / `XxxResponse`; implement `Verifiable` if signed |
 | 6 | `scalegraph/app.go` | Add app method: `(a *App) Xxx(ctx, *XxxRequest) (*XxxResponse, error)` |
 | 7 | `server/server.go` | Add handler method + register in `registerHandlers()` |
 | 8 | `server/client.go` | Add client convenience method using `Send[Req, Resp]` |
 
-**No enum to update. No switch case in the server. Signature verification is automatic.**
+**No switch case anywhere — not in the server, not in `account.go`. Signature verification is automatic.**
 
 ---
 
