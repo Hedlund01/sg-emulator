@@ -12,7 +12,6 @@ import (
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server"
-	"sg-emulator/internal/server/messages"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -49,30 +48,14 @@ type CreateSignedRequestArgs struct {
 }
 
 // RunHTTPServer starts an MCP server over HTTP with SSE transport.
-// This allows the MCP server to run alongside TUI since it doesn't use stdio.
-//
-// The server uses Server-Sent Events (SSE) transport which is compatible with
-// MCP clients like Claude Desktop, VS Code extensions, and direct HTTP clients.
-//
-// For Claude Desktop/VS Code configuration, add to your MCP settings:
-//
-//	{
-//	  "mcpServers": {
-//	    "sg-emulator": {
-//	      "url": "http://localhost:3000/sse"
-//	    }
-//	  }
-//	}
 func RunHTTPServer(ctx context.Context, addr string, client *server.Client, srv *server.Server, logger *slog.Logger) error {
 	logger.Info("MCP server starting", "address", addr)
 
 	// Create MCP server factory - returns the same server for all requests
-	// This maintains shared state across all MCP sessions
 	getServer := func(req *http.Request) *mcp.Server {
 		return createServer(client, srv, logger)
 	}
 
-	// Use the SSE transport handler which maintains session state per connection
 	handler := mcp.NewSSEHandler(getServer, nil)
 
 	httpServer := &http.Server{
@@ -112,8 +95,6 @@ func createServer(client *server.Client, srv *server.Server, logger *slog.Logger
 }
 
 // createSignedEnvelope is a generic helper that retrieves credentials and creates a signed envelope.
-// If the accountID matches the CA's system account, the CA's own private key and certificate are used
-// directly. Otherwise, account credentials are loaded from the store.
 func createSignedEnvelope[T crypto.SignableData](srv *server.Server, accountID string, payload T) (*crypto.SignedEnvelope[T], error) {
 	// Get the CA from server
 	ca := srv.CA()
@@ -163,22 +144,17 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		Name:        "create_account",
 		Description: "Create a new account with an optional initial balance. Returns account ID, balance, certificate, and private key location.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateAccountArgs) (*mcp.CallToolResult, any, error) {
-		// Note: For create_account, we create a signed request with a temporary account ID
-		// The server will validate the signature against the CA's certificate
 		createReq := &crypto.CreateAccountRequest{
 			InitialBalance: args.Balance,
 		}
 
-		// For account creation, we use the CA's account ID derived from its public key
 		systemAccountID := scalegraph.ScalegraphIdFromPublicKey(srv.CA().PublicKey())
 
-		// Create signed envelope for the create account request
 		signedEnvelope, err := createSignedEnvelope(srv, systemAccountID.String(), createReq)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
 		}
 
-		// Call CreateAccountWithCredentials with the signed request
 		resp, err := client.CreateAccountWithCredentials(context.Background(), args.Balance, signedEnvelope)
 		if err != nil {
 			return nil, nil, err
@@ -433,7 +409,6 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			}
 
 		case "get_account":
-
 			account, _ := scalegraph.ScalegraphIdFromString(args.AccountID)
 
 			// Create signable account request
@@ -441,20 +416,15 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 				AccountID: account.String(),
 			}
 
-			signedReq, err := createSignedEnvelope(srv,
-				args.AccountID,
-				accountReq,
-			)
-
-			payload := messages.GetAccountPayload{
-				AccountID:     account,
-				SignedRequest: signedReq,
+			signedReq, err := createSignedEnvelope(srv, args.AccountID, accountReq)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
 			}
 
 			// Marshal to JSON
 			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
-				"signed_envelope": payload.SignedRequest,
-				"account_id":      payload.AccountID.String(),
+				"signed_envelope": signedReq,
+				"account_id":      account.String(),
 			}, "", "  ")
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)

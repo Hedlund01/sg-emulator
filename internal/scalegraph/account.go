@@ -7,10 +7,20 @@ import (
 	"sync"
 )
 
+const (
+	// MBR (Minimum Balance Requirement) = MBR_SLOT_COST * number of authorized token transfers (i.e. number of &Token{} entries in the token store) + MBR_TOKEN_COST * number of tokens created by the account. Each token creation or authorization of token transfer will require the account to have at least MBR_SLOT_COST balance as MBR, which will be unfrozen when the burn token transaction is executed or the unauthorize token transfer transaction is executed. This is to prevent accounts to create DoS token transactions by authorizing unlimited token transfers or token creation transactions, which can cause the blockchain to grow indefinitely and consume all memory.
+
+	MBR_SLOT_COST = 0.5 // Each token transfer transaction will require the sender to have at least this balance as MBR, which will unfreeze when the unauthorize token transfer transaction is executed.
+
+	MBR_TOKEN_COST = 1.0 // Each token creation transaction will require the sender to have at least this balance as MBR, which will unfreeze when the burn token transaction is executed.
+
+)
+
 type Account struct {
 	mu          sync.RWMutex
 	id          ScalegraphId
 	balance     float64
+	mbr         float64
 	blockchain  IBlockchain
 	valuestore  map[string]string
 	publicKey   ed25519.PublicKey
@@ -89,7 +99,6 @@ func (a *Account) addToken(token *Token) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-
 	if !a.tokenStore[token.ID()].Equal(&Token{}) {
 		return fmt.Errorf("token with ID %s is not authorized to transfer to account %s", token.ID(), a.ID())
 	}
@@ -98,6 +107,16 @@ func (a *Account) addToken(token *Token) error {
 		return fmt.Errorf("token with ID %s already exists in account %s", token.ID(), a.ID())
 	}
 
+	signerID, err := ScalegraphIdFromString(token.Signature().SignerID)
+	if err != nil {
+		return fmt.Errorf("invalid signer ID in token signature: %w", err)
+	}
+	if signerID != a.ID() {
+		return fmt.Errorf("token with ID %s is signed by account %s, cannot be added to account %s", token.ID(), token.Signature().SignerID, a.ID())
+	}
+
+
+	a.mbr += MBR_TOKEN_COST
 	a.tokenStore[token.ID()] = token
 	return nil
 }
@@ -112,6 +131,33 @@ func (a *Account) removeToken(tokenId ScalegraphId) error {
 	delete(a.tokenStore, tokenId)
 	return nil
 }
+
+func (a *Account ) burnToken(tokenId ScalegraphId) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.tokenStore[tokenId] == nil {
+		return fmt.Errorf("token with ID %s does not exist in account %s", tokenId, a.ID())
+	}
+
+	if a.tokenStore[tokenId].Equal(&Token{}) {
+		return fmt.Errorf("token with ID %s is not owned by account %s, cannot be burned", tokenId, a.ID())
+	}
+
+	tokenSignerID, err := ScalegraphIdFromString(a.tokenStore[tokenId].Signature().SignerID)
+	if err != nil {
+		return fmt.Errorf("invalid signer ID in token signature: %w", err)
+	}
+	if tokenSignerID != a.ID() {
+		return fmt.Errorf("token with ID %s is signed by account %s, cannot be burned by account %s", tokenId, a.tokenStore[tokenId].Signature().SignerID, a.ID())
+	}
+
+	delete(a.tokenStore, tokenId)
+	a.mbr -= MBR_TOKEN_COST
+	return nil
+}
+
+
 
 func (a *Account) rollbacklatestTransaction(trx ITransaction) error {
 	a.mu.Lock()
@@ -140,9 +186,10 @@ func (a *Account) appendTransaction(trx ITransaction) error {
 	case Transfer:
 		tx := trx.(*TransferTransaction)
 		if tx.Sender() != nil && tx.Sender().ID() == a.ID() {
-			if a.balance < tx.Amount() {
-				return fmt.Errorf("insufficient balance for transfer: current balance %.2f, transfer amount %.2f", a.balance, tx.Amount())
+			if (a.balance - a.mbr) < tx.Amount() {
+				return fmt.Errorf("insufficient balance for transfer: current balance %.2f, mbr %.2f, transfer amount %.2f", a.balance, a.mbr, tx.Amount())
 			}
+
 			a.balance -= tx.Amount()
 		}
 		if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
@@ -151,8 +198,8 @@ func (a *Account) appendTransaction(trx ITransaction) error {
 	case Burn:
 		tx := trx.(*BurnTransaction)
 		if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
-			if a.balance < tx.Amount() {
-				return fmt.Errorf("insufficient balance for burn, can not burn more than balance: current balance %.2f, burn amount %.2f", a.balance, tx.Amount())
+			if (a.balance - a.mbr) < tx.Amount() {
+				return fmt.Errorf("insufficient balance for burn, can not burn more than balance: current balance %.2f, mbr %.2f, burn amount %.2f", a.balance, a.mbr, tx.Amount())
 			}
 			a.balance -= tx.Amount()
 		}
@@ -175,7 +222,7 @@ func (a *Account) appendTransaction(trx ITransaction) error {
 			if err := a.removeToken(tx.Token().ID()); err != nil {
 				return fmt.Errorf("failed to transfer token: %w", err)
 			}
-		} else if tx.Receiver() != nil && tx.Receiver().ID() == a.ID(){
+		} else if tx.Receiver() != nil && tx.Receiver().ID() == a.ID() {
 			if err := a.addToken(tx.Token()); err != nil {
 				return fmt.Errorf("failed to transfer token: %w", err)
 			}
@@ -188,11 +235,16 @@ func (a *Account) appendTransaction(trx ITransaction) error {
 		if tx.Sender() != nil && tx.Receiver() != nil && tx.Sender().ID() == a.ID() && tx.Receiver().ID() == a.ID() {
 			tokenId := *tx.TokenId()
 			if a.tokenStore[tokenId] == nil {
+				if (a.balance - a.mbr) < MBR_SLOT_COST {
+					return fmt.Errorf("insufficient balance to authorize token transfer: current balance %.2f, mbr %.2f, required mbr for authorizing token transfer %.2f", a.balance, a.mbr, MBR_SLOT_COST)
+				}
+
+				a.mbr += MBR_SLOT_COST
 				a.tokenStore[tokenId] = &Token{}
 			} else if a.tokenStore[tokenId] != nil && !a.tokenStore[tokenId].Equal(&Token{}) {
 				return fmt.Errorf("token with ID %s is already owned by account %s, cannot authorize transfer", tokenId, a.ID())
-			} 
-			
+			}
+
 			// If the token store entry is &Token{}, it means it's already authorized but not owned, so we can just return nil without error as we are authorizing again only
 			return nil
 		}

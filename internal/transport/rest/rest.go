@@ -14,7 +14,6 @@ import (
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server"
-	"sg-emulator/internal/server/messages"
 	_ "sg-emulator/internal/transport/rest/docs"
 )
 
@@ -154,9 +153,10 @@ func (t *Transport) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AccountRequest represents a request to access account data (must be signed)
-type AccountRequest struct {
-	AccountID string `json:"account_id" example:"6c439a07c32f7fb09c29403d8d2e4e47b8c5e8a9"`
+// GetMyAccountRequest is the incoming request body for the /accounts/me endpoint
+type GetMyAccountRequest struct {
+	AccountID     scalegraph.ScalegraphId                            `json:"account_id"`
+	SignedRequest *crypto.SignedEnvelope[*crypto.GetAccountRequest] `json:"signed_request"`
 }
 
 // AccountResponse represents account details with transaction history
@@ -171,12 +171,6 @@ type ErrorResponse struct {
 	Error string `json:"error" example:"Invalid request"`
 }
 
-// Bytes implements SignableData interface for AccountRequest
-func (a *AccountRequest) Bytes() []byte {
-	data, _ := json.Marshal(a)
-	return data
-}
-
 // handleGetMyAccount godoc
 // @Summary Get your own account details
 // @Description Get account details including balance and transaction history. Requires cryptographically signed request with Ed25519 signature and X.509 certificate.
@@ -186,7 +180,7 @@ func (a *AccountRequest) Bytes() []byte {
 // @Failure 404 {object} ErrorResponse "Account not found"
 // @Router /accounts/me [post]
 func (t *Transport) handleGetMyAccount(w http.ResponseWriter, r *http.Request) {
-	var req messages.GetAccountPayload
+	var req GetMyAccountRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body")
@@ -279,18 +273,10 @@ type TransferResponse struct {
 // handleTransfer godoc
 // @Summary Transfer funds between accounts
 // @Description Transfer funds from one account to another. Requires cryptographically signed request with Ed25519 signature.
-// @Description
-// @Description The request must be wrapped in a SignedEnvelope containing:
-// @Description - payload: TransferRequest with from (sender account ID), to (recipient account ID), amount, nonce (random 16-byte hex string), and timestamp
-// @Description - signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id (must match 'from'), and timestamp
-// @Description - certificate: PEM-encoded X.509 certificate of the sender
-// @Description
-// @Description The nonce prevents replay attacks. Each transfer must use a unique nonce.
-// @Description The signature is created by signing the canonical JSON bytes of the TransferRequest payload.
 // @Tags transfer
 // @Accept json
 // @Produce json
-// @Param request body SignedTransferRequest true "Signed transfer request with Ed25519 signature" SchemaExample({"signed_envelope": {"payload": {"from": "6a9449abe8d7a13b5ac7a24ad5d8e75af5e5d038", "to": "ba2119599402108cc4aa91b84dec4d5bc67ac8db", "amount": 20, "nonce": "39e9506a5b49a063aacd2a1359aed06e", "timestamp": 1770219384}, "signature": {"algorithm": "Ed25519", "value": "AdD3+ttskNv3b0PEkEt44AhpIHPOVwAdkSMB+Uac5sYvTHwls2wKXupLmxsVampMS69KNS7PmYszbPzO5Hk9Cw==", "signer_id": "6a9449abe8d7a13b5ac7a24ad5d8e75af5e5d038", "timestamp": 1770219384}, "certificate": "-----BEGIN CERTIFICATE-----\nMIIBzjCCAYCgAwIBAgIRAOihXziTU66Z6IuOTkN3iKUwBQYDK2VwMFYxHDAaBgNV\nBAoTE1NjYWxlZ3JhcGggRW11bGF0b3IxHjAcBgNVBAsTFUNlcnRpZmljYXRlIEF1\ndGhvcml0eTEWMBQGA1UEAxMNU2NhbGVncmFwaCBDQTAeFw0yNjAyMDQxNTM1NDRa\nFw0yNzAyMDQxNTM1NDRaMGMxHDAaBgNVBAoTE1NjYWxlZ3JhcGggRW11bGF0b3Ix\nEDAOBgNVBAsTB0FjY291bnQxMTAvBgNVBAMTKDZhOTQ0OWFiZThkN2ExM2I1YWM3\nYTI0YWQ1ZDhlNzVhZjVlNWQwMzgwKjAFBgMrZXADIQD7yeDwJUBfq6VN3Q19psz6\npJngu+eTv8htYRedY9+ohKNWMFQwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG\nCCsGAQUFBwMCMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUXrWTE8j1zlHmiT+L\ne9GT14eaBJswBQYDK2VwA0EA88Q8Dj7fefnb1P0YotpaYcPp2UVWQyh/H5gSbdAC\n7mImKcgSPXnKgQAV4OfnZ/B/XQBrhBaOMPTbIKvYu68yAQ==\n-----END CERTIFICATE-----\n"}})
+// @Param request body SignedTransferRequest true "Signed transfer request with Ed25519 signature"
 // @Success 200 {object} TransferResponse
 // @Failure 400 {object} ErrorResponse "Invalid request, missing fields, or transfer failed"
 // @Router /transfer [post]

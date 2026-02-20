@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"sg-emulator/internal/scalegraph"
 	mocks "sg-emulator/internal/server/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -489,12 +490,12 @@ func TestVirtualApp_ClientIntegration(t *testing.T) {
 	}
 
 	// Verify the account is in the shared app state
-	retrieved, err := srv.app.GetAccount(ctx, acc.ID())
+	getResp, err := srv.app.GetAccount(ctx, &scalegraph.GetAccountRequest{AccountID: acc.ID()})
 	if err != nil {
 		t.Errorf("GetAccount() error = %v", err)
 	}
 
-	if retrieved.ID() != acc.ID() {
+	if getResp.Account.ID() != acc.ID() {
 		t.Error("Virtual app created account not in shared state")
 	}
 }
@@ -528,9 +529,12 @@ func TestVirtualApp_MultipleVirtualApps(t *testing.T) {
 	}
 
 	// All should be in shared state
-	count := srv.app.AccountCount(ctx)
-	if count != 3 {
-		t.Errorf("AccountCount() = %d, want 3", count)
+	countResp, err := srv.app.AccountCount(ctx, &scalegraph.AccountCountRequest{})
+	if err != nil {
+		t.Fatalf("AccountCount() error = %v", err)
+	}
+	if countResp.Count != 3 {
+		t.Errorf("AccountCount() = %d, want 3", countResp.Count)
 	}
 }
 

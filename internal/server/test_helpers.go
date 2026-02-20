@@ -104,7 +104,6 @@ func createSignedAccountRequest(srv *Server, balance float64) (*crypto.SignedEnv
 
 // createTestAccount is a convenience wrapper that creates a signed account request,
 // calls CreateAccountWithCredentials, and returns the account.
-// This replaces the old client.CreateAccount() pattern in tests.
 func createTestAccount(ctx context.Context, srv *Server, client *Client, balance float64) (*scalegraph.Account, error) {
 	signedReq, err := createSignedAccountRequest(srv, balance)
 	if err != nil {

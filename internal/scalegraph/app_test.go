@@ -29,7 +29,9 @@ func TestCreateAccountWithKeys(t *testing.T) {
 	assert.Equal(t, 100.0, acc2.Balance())
 
 	// Test that accounts are stored
-	assert.Equal(t, 2, app.AccountCount(testCtx()))
+	countResp, err := app.AccountCount(testCtx(), &AccountCountRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, countResp.Count)
 
 	// Test that accounts have unique IDs
 	assert.NotEqual(t, acc1.ID(), acc2.ID(), "accounts should have unique IDs")
@@ -65,16 +67,18 @@ func TestGetAccounts(t *testing.T) {
 	app := testApp()
 
 	// Test empty app
-	accounts := app.GetAccounts(testCtx())
-	assert.Empty(t, accounts)
+	resp, err := app.GetAccounts(testCtx(), &GetAccountsRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Accounts)
 
 	// Create some accounts
 	acc1 := createTestAccountInApp(t, app, 50.0)
 	acc2 := createTestAccountInApp(t, app, 100.0)
 	acc3 := createTestAccountInApp(t, app, 150.0)
 
-	accounts = app.GetAccounts(testCtx())
-	assert.Len(t, accounts, 3)
+	resp, err = app.GetAccounts(testCtx(), &GetAccountsRequest{})
+	require.NoError(t, err)
+	assert.Len(t, resp.Accounts, 3)
 
 	// Verify all accounts are present (order doesn't matter)
 	ids := map[ScalegraphId]bool{
@@ -83,7 +87,7 @@ func TestGetAccounts(t *testing.T) {
 		acc3.ID(): true,
 	}
 
-	for _, acc := range accounts {
+	for _, acc := range resp.Accounts {
 		assert.True(t, ids[acc.ID()], "unexpected account ID: %s", acc.ID())
 	}
 }
@@ -93,28 +97,34 @@ func TestGetAccount(t *testing.T) {
 	acc := createTestAccountInApp(t, app, 100.0)
 
 	// Test getting existing account
-	retrieved, err := app.GetAccount(testCtx(), acc.ID())
+	resp, err := app.GetAccount(testCtx(), &GetAccountRequest{AccountID: acc.ID()})
 	require.NoError(t, err)
-	assert.Equal(t, acc.ID(), retrieved.ID())
-	assert.Equal(t, 100.0, retrieved.Balance())
+	assert.Equal(t, acc.ID(), resp.Account.ID())
+	assert.Equal(t, 100.0, resp.Account.Balance())
 
 	// Test getting non-existent account
 	fakeID, _ := NewScalegraphId()
-	_, err = app.GetAccount(testCtx(), fakeID)
+	_, err = app.GetAccount(testCtx(), &GetAccountRequest{AccountID: fakeID})
 	assert.Error(t, err, "should error for non-existent account")
 }
 
 func TestAccountCount(t *testing.T) {
 	app := testApp()
 
-	assert.Equal(t, 0, app.AccountCount(testCtx()))
+	resp, err := app.AccountCount(testCtx(), &AccountCountRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, resp.Count)
 
 	createTestAccountInApp(t, app, 10.0)
-	assert.Equal(t, 1, app.AccountCount(testCtx()))
+	resp, err = app.AccountCount(testCtx(), &AccountCountRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, resp.Count)
 
 	createTestAccountInApp(t, app, 20.0)
 	createTestAccountInApp(t, app, 30.0)
-	assert.Equal(t, 3, app.AccountCount(testCtx()))
+	resp, err = app.AccountCount(testCtx(), &AccountCountRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, 3, resp.Count)
 }
 
 func TestTransfer(t *testing.T) {
@@ -127,7 +137,7 @@ func TestTransfer(t *testing.T) {
 	nonce := acc1.GetNonce() + 1
 
 	// Test successful transfer
-	err := app.Transfer(testCtx(), acc1.ID(), acc2.ID(), 30.0, nonce)
+	_, err := app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 30.0, Nonce: nonce})
 	require.NoError(t, err)
 
 	assert.Equal(t, 70.0, acc1.Balance(), "sender balance after transfer")
@@ -135,7 +145,7 @@ func TestTransfer(t *testing.T) {
 
 	// Test transfer with insufficient funds
 	nonce = acc1.GetNonce() + 1
-	err = app.Transfer(testCtx(), acc1.ID(), acc2.ID(), 100.0, nonce)
+	_, err = app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 100.0, Nonce: nonce})
 	assert.Error(t, err, "should error for insufficient funds")
 
 	// Verify balances unchanged after failed transfer
@@ -144,12 +154,12 @@ func TestTransfer(t *testing.T) {
 
 	// Test transfer from non-existent account
 	fakeID, _ := NewScalegraphId()
-	err = app.Transfer(testCtx(), fakeID, acc2.ID(), 10.0, 1)
+	_, err = app.Transfer(testCtx(), &TransferRequest{From: fakeID, To: acc2.ID(), Amount: 10.0, Nonce: 1})
 	assert.Error(t, err, "should error for non-existent sender")
 
 	// Test transfer to non-existent account
 	nonce = acc1.GetNonce() + 1
-	err = app.Transfer(testCtx(), acc1.ID(), fakeID, 10.0, nonce)
+	_, err = app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: fakeID, Amount: 10.0, Nonce: nonce})
 	assert.Error(t, err, "should error for non-existent receiver")
 }
 
@@ -158,7 +168,7 @@ func TestTransferSelfTransfer(t *testing.T) {
 	acc := createTestAccountInApp(t, app, 100.0)
 
 	nonce := acc.GetNonce() + 1
-	err := app.Transfer(testCtx(), acc.ID(), acc.ID(), 10.0, nonce)
+	_, err := app.Transfer(testCtx(), &TransferRequest{From: acc.ID(), To: acc.ID(), Amount: 10.0, Nonce: nonce})
 	assert.Error(t, err, "self-transfer should not be allowed")
 	assert.Equal(t, 100.0, acc.Balance(), "balance should not change after rejected self-transfer")
 }
@@ -169,7 +179,7 @@ func TestTransferZeroAmount(t *testing.T) {
 	acc2 := createTestAccountInApp(t, app, 50.0)
 
 	nonce := acc1.GetNonce() + 1
-	err := app.Transfer(testCtx(), acc1.ID(), acc2.ID(), 0, nonce)
+	_, err := app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 0, Nonce: nonce})
 	require.NoError(t, err)
 
 	assert.Equal(t, 100.0, acc1.Balance(), "sender balance should not change for zero transfer")
@@ -182,7 +192,7 @@ func TestTransferNonceMismatch(t *testing.T) {
 	acc2 := createTestAccountInApp(t, app, 50.0)
 
 	// Use wrong nonce
-	err := app.Transfer(testCtx(), acc1.ID(), acc2.ID(), 10.0, 999)
+	_, err := app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 10.0, Nonce: 999})
 	assert.Error(t, err, "should error for nonce mismatch")
 	assert.Equal(t, 100.0, acc1.Balance(), "balance should not change after nonce mismatch")
 }
@@ -192,13 +202,13 @@ func TestMint(t *testing.T) {
 	acc := createTestAccountInApp(t, app, 100.0)
 
 	// Test minting funds
-	err := app.Mint(testCtx(), acc.ID(), 50.0)
+	err := app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 50.0})
 	require.NoError(t, err)
 	assert.Equal(t, 150.0, acc.Balance())
 
 	// Test minting to non-existent account
 	fakeID, _ := NewScalegraphId()
-	err = app.Mint(testCtx(), fakeID, 10.0)
+	err = app.Mint(testCtx(), &MintRequest{To: fakeID, Amount: 10.0})
 	assert.Error(t, err, "should error for non-existent account")
 }
 
@@ -211,7 +221,7 @@ func TestTransferAtomicity(t *testing.T) {
 
 	// Successful transfer should preserve total balance
 	nonce := acc1.GetNonce() + 1
-	err := app.Transfer(testCtx(), acc1.ID(), acc2.ID(), 25.0, nonce)
+	_, err := app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 25.0, Nonce: nonce})
 	require.NoError(t, err)
 
 	finalTotal := acc1.Balance() + acc2.Balance()
@@ -222,7 +232,7 @@ func TestTransferAtomicity(t *testing.T) {
 	beforeAcc2 := acc2.Balance()
 
 	nonce = acc1.GetNonce() + 1
-	err = app.Transfer(testCtx(), acc1.ID(), acc2.ID(), 1000.0, nonce)
+	_, err = app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 1000.0, Nonce: nonce})
 	assert.Error(t, err, "transfer should fail for insufficient funds")
 
 	assert.Equal(t, beforeAcc1, acc1.Balance(), "sender balance should not change after failed transfer")
@@ -236,5 +246,7 @@ func TestConcurrentAccountCreation(t *testing.T) {
 		createTestAccountInApp(t, app, float64(i))
 	})
 
-	assert.Equal(t, 100, app.AccountCount(testCtx()))
+	resp, err := app.AccountCount(testCtx(), &AccountCountRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, 100, resp.Count)
 }

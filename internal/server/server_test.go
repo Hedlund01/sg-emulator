@@ -136,7 +136,8 @@ func TestServer_RequestChannel(t *testing.T) {
 
 	reqChan := srv.RequestChannel()
 	assert.NotNil(t, reqChan, "RequestChannel() should not return nil")
-	assert.Equal(t, srv.requestChan, reqChan, "RequestChannel() should return the same channel")
+	// RequestChannel() returns chan<- (send-only), which is the same underlying channel
+	assert.Equal(t, (chan<- messages.Request)(srv.requestChan), reqChan, "RequestChannel() should return the same channel")
 }
 
 // TestServer_Registry verifies registry accessor
@@ -210,26 +211,25 @@ func TestServer_HandleRequest_CreateAccount(t *testing.T) {
 	}
 
 	req := messages.Request{
-		ID:   "test-req-1",
-		Type: messages.ReqCreateAccount,
-		Payload: &messages.CreateAccountWithKeysPayload{
+		ID: "test-req-1",
+		Payload: &scalegraph.CreateAccountRequest{
 			InitialBalance: 100.0,
-			SignedRequest:  signedReq,
+			SignedEnvelope: signedReq,
 		},
 		Context: context.Background(),
 	}
 
 	resp := srv.handleRequest(req)
 
-	if !resp.Success {
-		t.Errorf("handleRequest() failed: %s", resp.Error)
+	if resp.Error != nil {
+		t.Errorf("handleRequest() failed: %v", resp.Error)
 	}
 
 	if resp.Payload == nil {
 		t.Fatal("handleRequest() returned nil payload")
 	}
 
-	createResp, ok := resp.Payload.(messages.CreateAccountWithKeysResponse)
+	createResp, ok := resp.Payload.(*scalegraph.CreateAccountResponse)
 	if !ok {
 		t.Fatal("handleRequest() returned wrong payload type")
 	}
@@ -266,22 +266,21 @@ func TestServer_HandleRequest_GetAccount(t *testing.T) {
 	}
 
 	req := messages.Request{
-		ID:   "test-req-2",
-		Type: messages.ReqGetAccount,
-		Payload: &messages.GetAccountPayload{
-			AccountID:     acc.ID(),
-			SignedRequest: signedReq,
+		ID: "test-req-2",
+		Payload: &scalegraph.GetAccountRequest{
+			AccountID:      acc.ID(),
+			SignedEnvelope: signedReq,
 		},
 		Context: context.Background(),
 	}
 
 	resp := srv.handleRequest(req)
 
-	if !resp.Success {
-		t.Errorf("handleRequest() failed: %s", resp.Error)
+	if resp.Error != nil {
+		t.Errorf("handleRequest() failed: %v", resp.Error)
 	}
 
-	getResp := resp.Payload.(messages.GetAccountResponse)
+	getResp := resp.Payload.(*scalegraph.GetAccountResponse)
 	if getResp.Account.ID() != acc.ID() {
 		t.Error("handleRequest() returned wrong account")
 	}
@@ -301,15 +300,14 @@ func TestServer_HandleRequest_GetAccounts(t *testing.T) {
 
 	req := messages.Request{
 		ID:      "test-req-3",
-		Type:    messages.ReqGetAccounts,
-		Payload: messages.GetAccountsPayload{},
+		Payload: &scalegraph.GetAccountsRequest{},
 		Context: context.Background(),
 	}
 
 	resp := srv.handleRequest(req)
 
-	assert.True(t, resp.Success, "handleRequest() failed: %s", resp.Error)
-	getResp := resp.Payload.(messages.GetAccountsResponse)
+	assert.Nil(t, resp.Error, "handleRequest() failed: %v", resp.Error)
+	getResp := resp.Payload.(*scalegraph.GetAccountsResponse)
 	assert.Len(t, getResp.Accounts, 5, "handleRequest() should return 5 accounts")
 }
 
@@ -340,8 +338,8 @@ func TestServer_HandleRequest_Transfer(t *testing.T) {
 	}
 
 	// Verify balances
-	fromAcc, _ := srv.app.GetAccount(context.Background(), from.ID())
-	toAcc, _ := srv.app.GetAccount(context.Background(), to.ID())
+	fromAcc, _ := getTestAccount(ctx, srv, client, from.ID())
+	toAcc, _ := getTestAccount(ctx, srv, client, to.ID())
 
 	if fromAcc.Balance() != 70.0 {
 		t.Errorf("From balance = %.2f, want 70.00", fromAcc.Balance())
@@ -361,9 +359,8 @@ func TestServer_HandleRequest_Mint(t *testing.T) {
 	acc := createTestAccountDirect(t, srv.app, 100.0)
 
 	req := messages.Request{
-		ID:   "test-req-5",
-		Type: messages.ReqMint,
-		Payload: messages.MintPayload{
+		ID: "test-req-5",
+		Payload: &scalegraph.MintRequest{
 			To:     acc.ID(),
 			Amount: 50.0,
 		},
@@ -372,11 +369,11 @@ func TestServer_HandleRequest_Mint(t *testing.T) {
 
 	resp := srv.handleRequest(req)
 
-	assert.True(t, resp.Success, "handleRequest() failed: %s", resp.Error)
+	assert.Nil(t, resp.Error, "handleRequest() failed: %v", resp.Error)
 
 	// Verify balance
-	updated, _ := srv.app.GetAccount(context.Background(), acc.ID())
-	assert.Equal(t, 150.0, updated.Balance(), "Balance after mint")
+	getResp, _ := srv.app.GetAccount(context.Background(), &scalegraph.GetAccountRequest{AccountID: acc.ID()})
+	assert.Equal(t, 150.0, getResp.Account.Balance(), "Balance after mint")
 }
 
 // TestServer_HandleRequest_AccountCount verifies account counting
@@ -393,15 +390,14 @@ func TestServer_HandleRequest_AccountCount(t *testing.T) {
 
 	req := messages.Request{
 		ID:      "test-req-6",
-		Type:    messages.ReqAccountCount,
-		Payload: messages.AccountCountPayload{},
+		Payload: &scalegraph.AccountCountRequest{},
 		Context: context.Background(),
 	}
 
 	resp := srv.handleRequest(req)
 
-	assert.True(t, resp.Success, "handleRequest() failed: %s", resp.Error)
-	countResp := resp.Payload.(messages.AccountCountResponse)
+	assert.Nil(t, resp.Error, "handleRequest() failed: %v", resp.Error)
+	countResp := resp.Payload.(*scalegraph.AccountCountResponse)
 	assert.Equal(t, 3, countResp.Count, "Count")
 }
 
@@ -414,15 +410,13 @@ func TestServer_HandleRequest_UnknownType(t *testing.T) {
 
 	req := messages.Request{
 		ID:      "test-req-7",
-		Type:    99, // Invalid request type
-		Payload: nil,
+		Payload: "invalid payload",
 		Context: context.Background(),
 	}
 
 	resp := srv.handleRequest(req)
 
-	assert.False(t, resp.Success, "handleRequest() with unknown type should fail")
-	assert.NotEmpty(t, resp.Error, "handleRequest() with unknown type should return an error message")
+	assert.NotNil(t, resp.Error, "handleRequest() with unknown type should fail")
 }
 
 // TestServer_HandleRequest_Errors verifies error handling
@@ -436,18 +430,15 @@ func TestServer_HandleRequest_Errors(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		reqType messages.RequestType
 		payload any
 	}{
 		{
 			name:    "GetAccount non-existent",
-			reqType: messages.ReqGetAccount,
-			payload: &messages.GetAccountPayload{AccountID: idRandom1},
+			payload: &scalegraph.GetAccountRequest{AccountID: idRandom1},
 		},
 		{
-			name:    "Transfer insufficient funds",
-			reqType: messages.ReqTransfer,
-			payload: &messages.TransferPayload{
+			name: "Transfer insufficient funds",
+			payload: &scalegraph.TransferRequest{
 				From:   idRandom1,
 				To:     idRandom2,
 				Amount: 100.0,
@@ -455,9 +446,8 @@ func TestServer_HandleRequest_Errors(t *testing.T) {
 			},
 		},
 		{
-			name:    "Mint to non-existent",
-			reqType: messages.ReqMint,
-			payload: messages.MintPayload{
+			name: "Mint to non-existent",
+			payload: &scalegraph.MintRequest{
 				To:     idRandom1,
 				Amount: 100.0,
 			},
@@ -468,14 +458,13 @@ func TestServer_HandleRequest_Errors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := messages.Request{
 				ID:      "test-req",
-				Type:    tt.reqType,
 				Payload: tt.payload,
 				Context: context.Background(),
 			}
 
 			resp := srv.handleRequest(req)
 
-			if resp.Success {
+			if resp.Error == nil {
 				t.Error("handleRequest() succeeded, want error")
 			}
 		})
@@ -604,11 +593,10 @@ func BenchmarkServer_HandleRequest(b *testing.B) {
 	}
 
 	req := messages.Request{
-		ID:   "bench-req",
-		Type: messages.ReqCreateAccount,
-		Payload: &messages.CreateAccountWithKeysPayload{
+		ID: "bench-req",
+		Payload: &scalegraph.CreateAccountRequest{
 			InitialBalance: 100.0,
-			SignedRequest:  signedReq,
+			SignedEnvelope: signedReq,
 		},
 		Context: context.Background(),
 	}

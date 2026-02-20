@@ -43,7 +43,7 @@ func TestAccountBalance(t *testing.T) {
 	assert.Equal(t, 0.0, acc.Balance())
 
 	// Mint via app
-	err := app.Mint(testCtx(), acc.ID(), 100.0)
+	err := app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 100.0})
 	require.NoError(t, err)
 	assert.Equal(t, 100.0, acc.Balance())
 
@@ -58,14 +58,14 @@ func TestAccountMintViaApp(t *testing.T) {
 	acc := createTestAccountInApp(t, app, 0)
 
 	// Test minting positive amount
-	err := app.Mint(testCtx(), acc.ID(), 50.0)
+	err := app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 50.0})
 	require.NoError(t, err)
 	assert.Equal(t, 50.0, acc.Balance())
 
 	// Test multiple mints
-	err = app.Mint(testCtx(), acc.ID(), 30.0)
+	err = app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 30.0})
 	require.NoError(t, err)
-	err = app.Mint(testCtx(), acc.ID(), 20.0)
+	err = app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 20.0})
 	require.NoError(t, err)
 	assert.Equal(t, 100.0, acc.Balance())
 
@@ -78,7 +78,7 @@ func TestAccountMintZero(t *testing.T) {
 	app := testApp()
 	acc := createTestAccountInApp(t, app, 0)
 
-	err := app.Mint(testCtx(), acc.ID(), 0)
+	err := app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 0})
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, acc.Balance())
 }
@@ -95,7 +95,7 @@ func TestAccountBlockchain(t *testing.T) {
 
 	// Test that minting adds to blockchain
 	initialLen := blockchain.Len()
-	err := app.Mint(testCtx(), acc.ID(), 100.0)
+	err := app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 100.0})
 	require.NoError(t, err)
 	assert.Greater(t, blockchain.Len(), initialLen, "mint should add block to blockchain")
 }
@@ -116,7 +116,7 @@ func TestAccountGetNonce(t *testing.T) {
 	// Nonce is based on blockchain length
 	initialNonce := acc.GetNonce()
 
-	err := app.Mint(testCtx(), acc.ID(), 50.0)
+	err := app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 50.0})
 	require.NoError(t, err)
 
 	assert.Greater(t, acc.GetNonce(), initialNonce, "nonce should increase after transaction")
@@ -127,7 +127,7 @@ func TestAccountConcurrentMint(t *testing.T) {
 	acc := createTestAccountInApp(t, app, 0)
 
 	runConcurrent(t, 100, func(i int) {
-		err := app.Mint(testCtx(), acc.ID(), 1.0)
+		err := app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 1.0})
 		assert.NoError(t, err, "concurrent mint %d failed", i)
 	})
 
