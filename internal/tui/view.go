@@ -15,6 +15,7 @@ var menuItems = []string{
 	"View Account",
 	"Send Money",
 	"View Virtual Nodes",
+	"Token Operations",
 }
 
 // View renders the UI
@@ -42,6 +43,14 @@ func (m Model) View() string {
 		content = m.viewSendMoney()
 	case ViewVirtualNodes:
 		content = m.viewVirtualNodes()
+	case ViewTokenMenu:
+		content = m.viewTokenMenu()
+	case ViewMintToken:
+		content = m.viewMintToken()
+	case ViewAuthorizeTokenTransfer:
+		content = m.viewAuthorizeTokenTransfer()
+	case ViewTransferToken:
+		content = m.viewTransferToken()
 	}
 
 	return lipgloss.Place(
@@ -558,7 +567,7 @@ func (m Model) viewSendMoney() string {
 		for i, acc := range accounts {
 			cursor := "  "
 			line := fmt.Sprintf("%s  Balance: %.2f",
-				acc.ID().String()[:8]+"...",
+				m.getAccountDisplayName(acc),
 				acc.Balance())
 			if i == m.sendFromIndex {
 				cursor = "> "
@@ -567,7 +576,7 @@ func (m Model) viewSendMoney() string {
 			content += cursor + line + "\n"
 		}
 	case 1: // Select to account
-		content = fmt.Sprintf("From: %s\n\n", accounts[m.sendFromIndex].ID().String()[:8]+"...")
+		content = fmt.Sprintf("From: %s\n\n", m.getAccountDisplayName(accounts[m.sendFromIndex]))
 		content += "Select TO account:\n\n"
 		for i, acc := range accounts {
 			if i == m.sendFromIndex {
@@ -575,7 +584,7 @@ func (m Model) viewSendMoney() string {
 			}
 			cursor := "  "
 			line := fmt.Sprintf("%s  Balance: %.2f",
-				acc.ID().String()[:8]+"...",
+				m.getAccountDisplayName(acc),
 				acc.Balance())
 			if i == m.sendToIndex {
 				cursor = "> "
@@ -584,8 +593,8 @@ func (m Model) viewSendMoney() string {
 			content += cursor + line + "\n"
 		}
 	case 2: // Enter amount
-		content = fmt.Sprintf("From: %s\n", accounts[m.sendFromIndex].ID().String()[:8]+"...")
-		content += fmt.Sprintf("To: %s\n\n", accounts[m.sendToIndex].ID().String()[:8]+"...")
+		content = fmt.Sprintf("From: %s\n", m.getAccountDisplayName(accounts[m.sendFromIndex]))
+		content += fmt.Sprintf("To: %s\n\n", m.getAccountDisplayName(accounts[m.sendToIndex]))
 		content += "Enter amount: " + m.sendAmount + "█"
 	}
 
@@ -650,6 +659,261 @@ func (m Model) viewVirtualNodes() string {
 		"",
 		content,
 		"",
+		help,
+	)
+}
+
+func (m Model) viewTokenMenu() string {
+	title := titleStyle.Render("Token Operations")
+
+	tokenMenuItems := []string{
+		"Mint Token",
+		"Authorize Token Transfer",
+		"Transfer Token",
+	}
+
+	var content string
+	for i, item := range tokenMenuItems {
+		cursor := "  "
+		if i == m.tokenMenuCursor {
+			cursor = "> "
+			item = selectedStyle.Render(item)
+		}
+		content += cursor + item + "\n"
+	}
+
+	help := helpStyle.Render("↑/↓: navigate • enter: select • esc: back")
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		content,
+		"",
+		help,
+	)
+}
+
+func (m Model) viewMintToken() string {
+	title := titleStyle.Render("Mint Token")
+
+	accounts, err := m.app.GetAccounts(context.Background())
+	if err != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "Error: "+err.Error(), "", helpStyle.Render("esc: back"))
+	}
+	if len(accounts) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "No accounts available. Create an account first.", "", helpStyle.Render("esc: back"))
+	}
+
+	var content string
+
+	switch m.tokenStep {
+	case 0:
+		content = "Select account to mint token for:\n\n"
+		for i, acc := range accounts {
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenAccountIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+	case 1:
+		content = fmt.Sprintf("Account: %s\n\n", m.getAccountDisplayName(accounts[m.tokenAccountIndex]))
+		content += "Token value:\n"
+		content += m.tokenValueInput.View()
+	case 2:
+		content = fmt.Sprintf("Account: %s\n", m.getAccountDisplayName(accounts[m.tokenAccountIndex]))
+		content += fmt.Sprintf("Token value: %s\n\n", m.tokenValueInput.Value())
+		content += "Select clawback address (or none):\n\n"
+		// Index 0 = No clawback; index 1..N = other accounts
+		noClawbackCursor := "  "
+		noClawbackLabel := "No clawback"
+		if m.tokenClawbackIndex == 0 {
+			noClawbackCursor = "> "
+			noClawbackLabel = selectedStyle.Render(noClawbackLabel)
+		}
+		content += noClawbackCursor + noClawbackLabel + "\n"
+		clawbackIdx := 1
+		for i, acc := range accounts {
+			if i == m.tokenAccountIndex {
+				continue
+			}
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if clawbackIdx == m.tokenClawbackIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+			clawbackIdx++
+		}
+	}
+
+	help := helpStyle.Render("↑/↓: navigate • enter: confirm • esc: back")
+
+	status := ""
+	if m.statusMsg != "" {
+		status = statusStyle.Render(m.statusMsg)
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		content,
+		"",
+		status,
+		help,
+	)
+}
+
+func (m Model) viewAuthorizeTokenTransfer() string {
+	title := titleStyle.Render("Authorize Token Transfer")
+
+	accounts, err := m.app.GetAccounts(context.Background())
+	if err != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "Error: "+err.Error(), "", helpStyle.Render("esc: back"))
+	}
+	if len(accounts) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "No accounts available.", "", helpStyle.Render("esc: back"))
+	}
+
+	var content string
+
+	switch m.tokenStep {
+	case 0:
+		content = "Select account:\n\n"
+		for i, acc := range accounts {
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenAccountIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+	case 1:
+		acc := accounts[m.tokenAccountIndex]
+		content = fmt.Sprintf("Account: %s\n\n", m.getAccountDisplayName(acc))
+		tokens := acc.GetTokens()
+		if len(tokens) == 0 {
+			content += "No owned tokens found."
+		} else {
+			content += "Select token to authorize for transfer:\n\n"
+			for i, tok := range tokens {
+				cursor := "  "
+				line := fmt.Sprintf("Value: %-12s  ID: %s...", tok.Value(), tok.ID()[:8])
+				if i == m.tokenTokenIndex {
+					cursor = "> "
+					line = selectedStyle.Render(line)
+				}
+				content += cursor + line + "\n"
+			}
+		}
+	}
+
+	help := helpStyle.Render("↑/↓: navigate • enter: confirm • esc: back")
+
+	status := ""
+	if m.statusMsg != "" {
+		status = statusStyle.Render(m.statusMsg)
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		content,
+		"",
+		status,
+		help,
+	)
+}
+
+func (m Model) viewTransferToken() string {
+	title := titleStyle.Render("Transfer Token")
+
+	accounts, err := m.app.GetAccounts(context.Background())
+	if err != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "Error: "+err.Error(), "", helpStyle.Render("esc: back"))
+	}
+	if len(accounts) < 2 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "Need at least 2 accounts to transfer a token.", "", helpStyle.Render("esc: back"))
+	}
+
+	var content string
+
+	switch m.tokenStep {
+	case 0:
+		content = "Select FROM account:\n\n"
+		for i, acc := range accounts {
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenAccountIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+	case 1:
+		acc := accounts[m.tokenAccountIndex]
+		content = fmt.Sprintf("From: %s\n\n", m.getAccountDisplayName(acc))
+		tokens := acc.GetTokens()
+		if len(tokens) == 0 {
+			content += "No owned tokens found."
+		} else {
+			content += "Select token to transfer:\n\n"
+			for i, tok := range tokens {
+				cursor := "  "
+				line := fmt.Sprintf("Value: %-12s  ID: %s...", tok.Value(), tok.ID()[:8])
+				if i == m.tokenTokenIndex {
+					cursor = "> "
+					line = selectedStyle.Render(line)
+				}
+				content += cursor + line + "\n"
+			}
+		}
+	case 2:
+		fromAcc := accounts[m.tokenAccountIndex]
+		tokens := fromAcc.GetTokens()
+		var tokenLabel string
+		if len(tokens) > m.tokenTokenIndex {
+			tok := tokens[m.tokenTokenIndex]
+			tokenLabel = fmt.Sprintf("Value: %s  ID: %s...", tok.Value(), tok.ID()[:8])
+		}
+		content = fmt.Sprintf("From: %s\n", m.getAccountDisplayName(fromAcc))
+		content += fmt.Sprintf("Token: %s\n\n", tokenLabel)
+		content += "Select TO account:\n\n"
+		for i, acc := range accounts {
+			if i == m.tokenAccountIndex {
+				continue
+			}
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenToAccountIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+	}
+
+	help := helpStyle.Render("↑/↓: navigate • enter: confirm • esc: back")
+
+	status := ""
+	if m.statusMsg != "" {
+		status = statusStyle.Render(m.statusMsg)
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		content,
+		"",
+		status,
 		help,
 	)
 }

@@ -39,12 +39,36 @@ type MintArgs struct {
 	Amount float64 `json:"amount" jsonschema:"Amount to mint"`
 }
 
+// MintTokenArgs represents arguments for mint_token tool
+type MintTokenArgs struct {
+	AccountID       string `json:"account_id" jsonschema:"Account ID of the token minter (hex string)"`
+	TokenValue      string `json:"token_value" jsonschema:"The value/name of the token to mint"`
+	ClawbackAddress string `json:"clawback_address,omitempty" jsonschema:"Optional clawback address (hex string)"`
+}
+
+// AuthorizeTokenTransferArgs represents arguments for authorize_token_transfer tool
+type AuthorizeTokenTransferArgs struct {
+	AccountID string `json:"account_id" jsonschema:"Account ID that owns the token (hex string)"`
+	TokenID   string `json:"token_id" jsonschema:"The token ID to authorize for transfer"`
+}
+
+// TransferTokenArgs represents arguments for transfer_token tool
+type TransferTokenArgs struct {
+	FromAccountID string `json:"from_account_id" jsonschema:"Source account ID (hex string)"`
+	ToAccountID   string `json:"to_account_id" jsonschema:"Destination account ID (hex string)"`
+	TokenID       string `json:"token_id" jsonschema:"The token ID to transfer"`
+}
+
 // CreateSignedRequestArgs represents arguments for create_signed_request tool
 type CreateSignedRequestArgs struct {
-	Type      string  `json:"type" jsonschema:"Type of request: 'transfer' or 'get_account'"`
-	AccountID string  `json:"account_id" jsonschema:"Account ID that will sign the request (must have credentials)"`
-	ToID      string  `json:"to_id,omitempty" jsonschema:"Destination account ID (for transfer only)"`
-	Amount    float64 `json:"amount,omitempty" jsonschema:"Amount to transfer (for transfer only)"`
+	Type            string  `json:"type" jsonschema:"Type of request: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', or 'transfer_token'"`
+	AccountID       string  `json:"account_id" jsonschema:"Account ID that will sign the request (must have credentials)"`
+	ToID            string  `json:"to_id,omitempty" jsonschema:"Destination account ID (for transfer only)"`
+	Amount          float64 `json:"amount,omitempty" jsonschema:"Amount to transfer (for transfer only)"`
+	TokenValue      string  `json:"token_value,omitempty" jsonschema:"Token value/name (for mint_token only)"`
+	ClawbackAddress string  `json:"clawback_address,omitempty" jsonschema:"Optional clawback address hex string (for mint_token only)"`
+	TokenID         string  `json:"token_id,omitempty" jsonschema:"Token ID (for authorize_token_transfer and transfer_token)"`
+	ToAccountID     string  `json:"to_account_id,omitempty" jsonschema:"Destination account ID (for transfer_token only)"`
 }
 
 // RunHTTPServer starts an MCP server over HTTP with SSE transport.
@@ -293,6 +317,115 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		}, nil, nil
 	})
 
+	// mint_token tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "mint_token",
+		Description: "Mint a new token for an account. The signing account becomes the token owner. Optionally specify a clawback address.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args MintTokenArgs) (*mcp.CallToolResult, any, error) {
+		if _, err := scalegraph.ScalegraphIdFromString(args.AccountID); err != nil {
+			return nil, nil, fmt.Errorf("invalid account_id: %v", err)
+		}
+		if args.TokenValue == "" {
+			return nil, nil, fmt.Errorf("token_value is required")
+		}
+
+		var clawbackAddr *string
+		if args.ClawbackAddress != "" {
+			if _, err := scalegraph.ScalegraphIdFromString(args.ClawbackAddress); err != nil {
+				return nil, nil, fmt.Errorf("invalid clawback_address: %v", err)
+			}
+			clawbackAddr = &args.ClawbackAddress
+		}
+
+		payload := &crypto.MintTokenPayload{
+			TokenValue:      args.TokenValue,
+			ClawbackAddress: clawbackAddr,
+		}
+		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		resp, err := client.MintTokenSigned(context.Background(), signedEnvelope)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Token minted for account %s\nToken value: %s\nToken ID: %s", args.AccountID[:16]+"...", args.TokenValue, resp.TokenID)
+		if args.ClawbackAddress != "" {
+			text += fmt.Sprintf("\nClawback address: %s", args.ClawbackAddress[:16]+"...")
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
+	// authorize_token_transfer tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "authorize_token_transfer",
+		Description: "Authorize a token to be transferred from an account. Must be called by the token owner before transfer_token.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args AuthorizeTokenTransferArgs) (*mcp.CallToolResult, any, error) {
+		if _, err := scalegraph.ScalegraphIdFromString(args.AccountID); err != nil {
+			return nil, nil, fmt.Errorf("invalid account_id: %v", err)
+		}
+		if args.TokenID == "" {
+			return nil, nil, fmt.Errorf("token_id is required")
+		}
+
+		payload := &crypto.AuthorizeTokenTransferPayload{
+			AccountID: args.AccountID,
+			TokenID:   args.TokenID,
+		}
+		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		if _, err := client.AuthorizeTokenTransferSigned(context.Background(), signedEnvelope); err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Token %s authorized for transfer from account %s", args.TokenID, args.AccountID[:16]+"...")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
+	// transfer_token tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "transfer_token",
+		Description: "Transfer a token from one account to another. The token must first be authorized for transfer using authorize_token_transfer.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args TransferTokenArgs) (*mcp.CallToolResult, any, error) {
+		if _, err := scalegraph.ScalegraphIdFromString(args.FromAccountID); err != nil {
+			return nil, nil, fmt.Errorf("invalid from_account_id: %v", err)
+		}
+		if _, err := scalegraph.ScalegraphIdFromString(args.ToAccountID); err != nil {
+			return nil, nil, fmt.Errorf("invalid to_account_id: %v", err)
+		}
+		if args.TokenID == "" {
+			return nil, nil, fmt.Errorf("token_id is required")
+		}
+
+		payload := &crypto.TransferTokenPayload{
+			From:    args.FromAccountID,
+			To:      args.ToAccountID,
+			TokenID: args.TokenID,
+		}
+		signedEnvelope, err := createSignedEnvelope(srv, args.FromAccountID, payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		if _, err := client.TransferTokenSigned(context.Background(), signedEnvelope); err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Token %s transferred from %s to %s", args.TokenID, args.FromAccountID[:16]+"...", args.ToAccountID[:16]+"...")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
 	// get_virtual_nodes tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "get_virtual_nodes",
@@ -328,7 +461,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 	// create_signed_request tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "create_signed_request",
-		Description: "Create a cryptographically signed request for REST API endpoints. Generates a complete SignedEnvelope with Ed25519 signature and certificate. Supports 'transfer' and 'get_account' request types.",
+		Description: "Create a cryptographically signed request for REST API endpoints. Generates a complete SignedEnvelope with Ed25519 signature and certificate. Supports request types: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'transfer_token'.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateSignedRequestArgs) (*mcp.CallToolResult, any, error) {
 		// Validate account ID
 		_, err := scalegraph.ScalegraphIdFromString(args.AccountID)
@@ -429,8 +562,79 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
 			}
 
+		case "mint_token":
+			if args.TokenValue == "" {
+				return nil, nil, fmt.Errorf("token_value is required for mint_token requests")
+			}
+			var clawbackAddr *string
+			if args.ClawbackAddress != "" {
+				if _, err := scalegraph.ScalegraphIdFromString(args.ClawbackAddress); err != nil {
+					return nil, nil, fmt.Errorf("invalid clawback_address: %v", err)
+				}
+				clawbackAddr = &args.ClawbackAddress
+			}
+			payload := &crypto.MintTokenPayload{
+				TokenValue:      args.TokenValue,
+				ClawbackAddress: clawbackAddr,
+			}
+			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
+			}
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
+		case "authorize_token_transfer":
+			if args.TokenID == "" {
+				return nil, nil, fmt.Errorf("token_id is required for authorize_token_transfer requests")
+			}
+			payload := &crypto.AuthorizeTokenTransferPayload{
+				AccountID: args.AccountID,
+				TokenID:   args.TokenID,
+			}
+			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
+			}
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
+		case "transfer_token":
+			if args.TokenID == "" {
+				return nil, nil, fmt.Errorf("token_id is required for transfer_token requests")
+			}
+			if args.ToAccountID == "" {
+				return nil, nil, fmt.Errorf("to_account_id is required for transfer_token requests")
+			}
+			if _, err := scalegraph.ScalegraphIdFromString(args.ToAccountID); err != nil {
+				return nil, nil, fmt.Errorf("invalid to_account_id: %v", err)
+			}
+			payload := &crypto.TransferTokenPayload{
+				From:    args.AccountID,
+				To:      args.ToAccountID,
+				TokenID: args.TokenID,
+			}
+			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
+			}
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
 		default:
-			return nil, nil, fmt.Errorf("unsupported request type: %s (must be 'transfer' or 'get_account')", args.Type)
+			return nil, nil, fmt.Errorf("unsupported request type: %s (must be 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', or 'transfer_token')", args.Type)
 		}
 
 		text := fmt.Sprintf("Signed %s request created for account %s\n\n", args.Type, args.AccountID[:16]+"...")
@@ -439,10 +643,17 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		text += "\n\n"
 		text += "Instructions:\n"
 		text += "1. Open the Swagger UI (usually at http://localhost:8080/swagger/index.html)\n"
-		if args.Type == "transfer" {
+		switch args.Type {
+		case "transfer":
 			text += "2. Find the POST /transfer endpoint\n"
-		} else {
+		case "get_account":
 			text += "2. Find the POST /accounts/me endpoint\n"
+		case "mint_token":
+			text += "2. Find the POST /tokens/mint endpoint\n"
+		case "authorize_token_transfer":
+			text += "2. Find the POST /tokens/authorize endpoint\n"
+		case "transfer_token":
+			text += "2. Find the POST /tokens/transfer endpoint\n"
 		}
 		text += "3. Click 'Try it out'\n"
 		text += "4. Paste the entire JSON above into the request body\n"

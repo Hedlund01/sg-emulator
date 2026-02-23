@@ -209,7 +209,7 @@ func (a *App) MintToken(ctx context.Context, req *MintTokenRequest) (*MintTokenR
 	}
 
 	logger.Info("Mint token completed", "account_id", signerID, "token_value", req.TokenValue)
-	return &MintTokenResponse{}, nil
+	return &MintTokenResponse{TokenID: token.ID()}, nil
 }
 
 func (a *App) AuthorizeTokenTransfer(ctx context.Context, req *AuthorizeTokenTransferRequest) error {

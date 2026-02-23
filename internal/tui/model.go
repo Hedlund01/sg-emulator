@@ -21,6 +21,10 @@ const (
 	ViewTransactionDetail
 	ViewSendMoney
 	ViewVirtualNodes
+	ViewTokenMenu
+	ViewMintToken
+	ViewAuthorizeTokenTransfer
+	ViewTransferToken
 )
 
 // AccountCredentials caches loaded cryptographic credentials
@@ -67,6 +71,15 @@ type Model struct {
 	sendAmount    string
 	sendStep      int // 0=from, 1=to, 2=amount
 
+	// Token operations state
+	tokenMenuCursor     int
+	tokenStep           int
+	tokenAccountIndex   int // from-account or single-account selector
+	tokenToAccountIndex int // to-account selector (TransferToken step 2)
+	tokenClawbackIndex  int // 0 = "No clawback", 1+ = account index (MintToken step 2)
+	tokenTokenIndex     int // selected token index within an account's token list
+	tokenValueInput     textinput.Model
+
 	// Status message
 	statusMsg string
 }
@@ -85,6 +98,12 @@ func NewModel(application *server.Client, srv *server.Server) Model {
 	nameInput.CharLimit = 50
 	nameInput.Width = 40
 
+	// Initialize token value input
+	tokenValueInput := textinput.New()
+	tokenValueInput.Placeholder = "e.g. gold"
+	tokenValueInput.CharLimit = 100
+	tokenValueInput.Width = 40
+
 	return Model{
 		app:             application,
 		server:          srv,
@@ -93,6 +112,7 @@ func NewModel(application *server.Client, srv *server.Server) Model {
 		credentialCache: make(map[scalegraph.ScalegraphId]*AccountCredentials),
 		balanceInput:    balanceInput,
 		nameInput:       nameInput,
+		tokenValueInput: tokenValueInput,
 	}
 }
 

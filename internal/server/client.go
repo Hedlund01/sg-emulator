@@ -11,8 +11,8 @@ import (
 
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
-	"sg-emulator/internal/trace"
 	"sg-emulator/internal/server/messages"
+	"sg-emulator/internal/trace"
 )
 
 // requestIDCounter for generating unique request IDs
@@ -171,12 +171,7 @@ func (c *Client) GetAccounts(ctx context.Context) ([]*scalegraph.Account, error)
 	return resp.Accounts, nil
 }
 
-// Transfer transfers funds with a cryptographically signed request
-func (c *Client) Transfer(ctx context.Context, req *scalegraph.TransferRequest) (*scalegraph.TransferResponse, error) {
-	return Send[scalegraph.TransferRequest, scalegraph.TransferResponse](c, ctx, req)
-}
-
-// TransferSigned transfers funds with a cryptographically signed request (convenience wrapper)
+// TransferSigned transfers funds with a cryptographically signed request
 func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.ScalegraphId, amount float64, signedRequest *crypto.SignedEnvelope[*crypto.TransferPayload]) error {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"from", from, "to", to, "amount", amount, "signed", true}
@@ -225,4 +220,77 @@ func (c *Client) AccountCount(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	return resp.Count, nil
+}
+
+func (c *Client) MintTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.MintTokenPayload]) (*scalegraph.MintTokenResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"account_id", signedReq.Signature.SignerID, "token_id", string(signedReq.Signature.Value), "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Mint token requested", logAttrs...)
+	var clawBackAddr *scalegraph.ScalegraphId = nil
+	if signedReq.Payload.ClawbackAddress != nil {
+		addr, err := scalegraph.ScalegraphIdFromString(*signedReq.Payload.ClawbackAddress)
+		if err != nil {
+			c.logger.Error("Invalid clawback address", "error", err, "clawback_address", *signedReq.Payload.ClawbackAddress)
+			return nil, err
+		}
+		clawBackAddr = &addr
+	}
+	logAttrs = append(logAttrs, "clawback_address", clawBackAddr)
+
+	return Send[scalegraph.MintTokenRequest, scalegraph.MintTokenResponse](c, ctx, &scalegraph.MintTokenRequest{
+		TokenValue:      signedReq.Payload.TokenValue,
+		ClawbackAddress: clawBackAddr,
+		SignedEnvelope:  signedReq,
+	})
+}
+
+func (c *Client) AuthorizeTokenTransferSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload]) (*scalegraph.AuthorizeTokenTransferResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"account_id", signedReq.Payload.AccountID, "token_id", signedReq.Payload.TokenID, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Authorize token transfer requested", logAttrs...)
+
+	acc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.AccountID)
+	if err != nil {
+		c.logger.Error("Invalid account ID in signed request", "error", err, "account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+
+	return Send[scalegraph.AuthorizeTokenTransferRequest, scalegraph.AuthorizeTokenTransferResponse](c, ctx, &scalegraph.AuthorizeTokenTransferRequest{
+		AccountID:      acc,
+		TokenId:        signedReq.Payload.TokenID,
+		SignedEnvelope: signedReq,
+	})
+}
+
+func (c *Client) TransferTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.TransferTokenPayload]) (*scalegraph.TransferTokenResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"from", signedReq.Payload.From, "to", signedReq.Payload.To, "token_id", signedReq.Payload.TokenID, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Transfer token requested", logAttrs...)
+
+	fromAcc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.From)
+	if err != nil {
+		c.logger.Error("Invalid from account ID in signed request", "error", err, "from_account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+	toAcc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.To)
+	if err != nil {
+		c.logger.Error("Invalid to account ID in signed request", "error", err, "to_account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+
+	return Send[scalegraph.TransferTokenRequest, scalegraph.TransferTokenResponse](c, ctx, &scalegraph.TransferTokenRequest{
+		From:           fromAcc,
+		To:             toAcc,
+		TokenId:        signedReq.Payload.TokenID,
+		SignedEnvelope: signedReq,
+	})
 }

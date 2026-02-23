@@ -70,6 +70,13 @@ func (t *Transport) Start(ctx context.Context) error {
 	r.Post("/accounts/me", t.handleGetMyAccount) // Get own account (signed, authenticated)
 	r.Post("/transfer", t.handleTransfer)        // Transfer (signed, authenticated)
 
+	// Token routes
+	r.Route("/tokens", func(r chi.Router) {
+		r.Post("/mint", t.handleMintToken)                   // Mint a token (signed)
+		r.Post("/authorize", t.handleAuthorizeTokenTransfer) // Authorize token transfer (signed)
+		r.Post("/transfer", t.handleTransferToken)           // Transfer a token (signed)
+	})
+
 	t.server = &http.Server{
 		Addr:    t.address,
 		Handler: r,
@@ -318,6 +325,115 @@ func (t *Transport) handleTransfer(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, TransferResponse{
 		Status: "success",
 	})
+}
+
+// SignedMintTokenRequest represents the incoming signed mint token request
+type SignedMintTokenRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.MintTokenPayload] `json:"signed_envelope"`
+}
+
+// handleMintToken godoc
+// @Summary Mint a new token
+// @Description Mint a new token for an account. Requires a cryptographically signed request with Ed25519 signature.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedMintTokenRequest true "Signed mint token request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or mint failed"
+// @Router /tokens/mint [post]
+func (t *Transport) handleMintToken(w http.ResponseWriter, r *http.Request) {
+	var req SignedMintTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.MintTokenSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Mint token failed", "error", err,
+			"signer", req.SignedEnvelope.Signature.SignerID,
+			"token_value", req.SignedEnvelope.Payload.TokenValue)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedAuthorizeTokenTransferRequest represents the incoming signed authorize token transfer request
+type SignedAuthorizeTokenTransferRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload] `json:"signed_envelope"`
+}
+
+// handleAuthorizeTokenTransfer godoc
+// @Summary Authorize a token transfer
+// @Description Authorize a token to be transferred from an account. Must be called before /tokens/transfer. Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedAuthorizeTokenTransferRequest true "Signed authorize token transfer request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or authorization failed"
+// @Router /tokens/authorize [post]
+func (t *Transport) handleAuthorizeTokenTransfer(w http.ResponseWriter, r *http.Request) {
+	var req SignedAuthorizeTokenTransferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.AuthorizeTokenTransferSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Authorize token transfer failed", "error", err,
+			"account_id", req.SignedEnvelope.Payload.AccountID,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedTransferTokenRequest represents the incoming signed transfer token request
+type SignedTransferTokenRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferTokenPayload] `json:"signed_envelope"`
+}
+
+// handleTransferToken godoc
+// @Summary Transfer a token between accounts
+// @Description Transfer a token from one account to another. The token must first be authorized for transfer using /tokens/authorize. Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedTransferTokenRequest true "Signed transfer token request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or transfer failed"
+// @Router /tokens/transfer [post]
+func (t *Transport) handleTransferToken(w http.ResponseWriter, r *http.Request) {
+	var req SignedTransferTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.TransferTokenSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Transfer token failed", "error", err,
+			"from", req.SignedEnvelope.Payload.From,
+			"to", req.SignedEnvelope.Payload.To,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
 }
 
 // respondJSON writes a JSON response

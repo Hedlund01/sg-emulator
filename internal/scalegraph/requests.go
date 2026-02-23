@@ -120,7 +120,9 @@ type MintTokenRequest struct {
 }
 
 // MintTokenResponse is the response from minting a token.
-type MintTokenResponse struct{}
+type MintTokenResponse struct {
+	TokenID string
+}
 
 func (r *MintTokenRequest) RequiresSignature() bool { return true }
 

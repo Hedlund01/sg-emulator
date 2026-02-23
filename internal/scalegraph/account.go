@@ -131,6 +131,21 @@ func (a *Account) GetToken(tokenId string) (*Token, bool) {
 	return token, exists
 }
 
+// GetTokens returns all fully owned tokens in this account's token store.
+// It excludes tokens that are only authorized-but-not-owned (represented by &Token{} entries).
+func (a *Account) GetTokens() []*Token {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	var tokens []*Token
+	for _, t := range a.tokenStore {
+		if t != nil && !t.Equal(&Token{}) {
+			tokens = append(tokens, t)
+		}
+	}
+	return tokens
+}
+
 func (a *Account) addToken(token *Token) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

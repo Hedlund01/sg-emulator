@@ -39,6 +39,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSendMoney(msg)
 		case ViewVirtualNodes:
 			return m.updateVirtualNodes(msg)
+		case ViewTokenMenu:
+			return m.updateTokenMenu(msg)
+		case ViewMintToken:
+			return m.updateMintToken(msg)
+		case ViewAuthorizeTokenTransfer:
+			return m.updateAuthorizeTokenTransfer(msg)
+		case ViewTransferToken:
+			return m.updateTransferToken(msg)
 		}
 
 	case tea.WindowSizeMsg:
@@ -90,6 +98,9 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 4: // View Virtual Nodes
 			m.view = ViewVirtualNodes
 			m.sendAmount = ""
+		case 5: // Token Operations
+			m.view = ViewTokenMenu
+			m.tokenMenuCursor = 0
 		}
 	}
 	return m, nil
@@ -505,4 +516,369 @@ func (m *Model) getCredentials(accountID scalegraph.ScalegraphId) (*AccountCrede
 	}
 	m.credentialCache[accountID] = creds
 	return creds, nil
+}
+
+func (m Model) updateTokenMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	const tokenMenuItemCount = 3
+	switch msg.String() {
+	case "esc":
+		m.view = ViewMenu
+		m.statusMsg = ""
+	case "up", "k":
+		if m.tokenMenuCursor > 0 {
+			m.tokenMenuCursor--
+		}
+	case "down", "j":
+		if m.tokenMenuCursor < tokenMenuItemCount-1 {
+			m.tokenMenuCursor++
+		}
+	case "enter":
+		m.tokenStep = 0
+		m.tokenAccountIndex = 0
+		m.tokenToAccountIndex = 0
+		m.tokenClawbackIndex = 0
+		m.tokenTokenIndex = 0
+		m.statusMsg = ""
+		switch m.tokenMenuCursor {
+		case 0:
+			m.view = ViewMintToken
+			m.tokenValueInput.SetValue("")
+			m.tokenValueInput.Blur()
+		case 1:
+			m.view = ViewAuthorizeTokenTransfer
+		case 2:
+			m.view = ViewTransferToken
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateMintToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	accounts, err := m.app.GetAccounts(context.Background())
+	if err != nil {
+		m.statusMsg = err.Error()
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		if m.tokenStep > 0 {
+			m.tokenStep--
+			m.statusMsg = ""
+			if m.tokenStep == 1 {
+				m.tokenValueInput.Focus()
+			}
+		} else {
+			m.view = ViewTokenMenu
+		}
+		return m, nil
+	}
+
+	switch m.tokenStep {
+	case 0:
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenAccountIndex > 0 {
+				m.tokenAccountIndex--
+			}
+		case "down", "j":
+			if m.tokenAccountIndex < len(accounts)-1 {
+				m.tokenAccountIndex++
+			}
+		case "enter":
+			m.tokenStep = 1
+			m.tokenValueInput.SetValue("")
+			m.tokenValueInput.Focus()
+		}
+	case 1:
+		switch msg.String() {
+		case "enter":
+			if m.tokenValueInput.Value() == "" {
+				m.statusMsg = "Token value cannot be empty"
+				return m, nil
+			}
+			m.tokenStep = 2
+			m.tokenClawbackIndex = 0
+			m.tokenValueInput.Blur()
+		default:
+			var cmd tea.Cmd
+			m.tokenValueInput, cmd = m.tokenValueInput.Update(msg)
+			return m, cmd
+		}
+	case 2:
+		// clawback list size: 1 ("No clawback") + len(accounts) - 1 (skip minting account)
+		clawbackCount := len(accounts)
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenClawbackIndex > 0 {
+				m.tokenClawbackIndex--
+			}
+		case "down", "j":
+			if m.tokenClawbackIndex < clawbackCount-1 {
+				m.tokenClawbackIndex++
+			}
+		case "enter":
+			// Resolve clawback address (nil if index 0)
+			var clawbackAddr *scalegraph.ScalegraphId
+			if m.tokenClawbackIndex > 0 {
+				idx := 0
+				for i, acc := range accounts {
+					if i == m.tokenAccountIndex {
+						continue
+					}
+					idx++
+					if idx == m.tokenClawbackIndex {
+						id := acc.ID()
+						clawbackAddr = &id
+						break
+					}
+				}
+			}
+
+			signerID := accounts[m.tokenAccountIndex].ID()
+			creds, err := m.getCredentials(signerID)
+			if err != nil {
+				m.statusMsg = "Failed to load credentials: " + err.Error()
+				return m, nil
+			}
+			privKey, err := crypto.DecodePrivateKeyPEM([]byte(creds.PrivateKeyPEM))
+			if err != nil {
+				m.statusMsg = "Failed to parse private key: " + err.Error()
+				return m, nil
+			}
+
+			payload := &crypto.MintTokenPayload{
+				TokenValue: m.tokenValueInput.Value(),
+			}
+			if clawbackAddr != nil {
+				clawbackStr := clawbackAddr.String()
+				payload.ClawbackAddress = &clawbackStr
+			}
+			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, signerID.String(), creds.CertificatePEM)
+			if err != nil {
+				m.statusMsg = "Failed to sign request: " + err.Error()
+				return m, nil
+			}
+
+			resp, err := m.app.MintTokenSigned(context.Background(), signedEnvelope)
+			if err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+
+			tokenIDPreview := resp.TokenID
+			if len(tokenIDPreview) > 8 {
+				tokenIDPreview = tokenIDPreview[:8] + "..."
+			}
+			m.statusMsg = "Token minted! ID: " + tokenIDPreview
+			m.view = ViewTokenMenu
+			m.tokenStep = 0
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateAuthorizeTokenTransfer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	accounts, err := m.app.GetAccounts(context.Background())
+	if err != nil {
+		m.statusMsg = err.Error()
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		if m.tokenStep > 0 {
+			m.tokenStep--
+			m.statusMsg = ""
+		} else {
+			m.view = ViewTokenMenu
+		}
+		return m, nil
+	}
+
+	switch m.tokenStep {
+	case 0:
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenAccountIndex > 0 {
+				m.tokenAccountIndex--
+			}
+		case "down", "j":
+			if m.tokenAccountIndex < len(accounts)-1 {
+				m.tokenAccountIndex++
+			}
+		case "enter":
+			tokens := accounts[m.tokenAccountIndex].GetTokens()
+			if len(tokens) == 0 {
+				m.statusMsg = "This account has no owned tokens"
+				return m, nil
+			}
+			m.tokenStep = 1
+			m.tokenTokenIndex = 0
+			m.statusMsg = ""
+		}
+	case 1:
+		tokens := accounts[m.tokenAccountIndex].GetTokens()
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenTokenIndex > 0 {
+				m.tokenTokenIndex--
+			}
+		case "down", "j":
+			if m.tokenTokenIndex < len(tokens)-1 {
+				m.tokenTokenIndex++
+			}
+		case "enter":
+			selectedToken := tokens[m.tokenTokenIndex]
+			accountID := accounts[m.tokenAccountIndex].ID()
+			creds, err := m.getCredentials(accountID)
+			if err != nil {
+				m.statusMsg = "Failed to load credentials: " + err.Error()
+				return m, nil
+			}
+			privKey, err := crypto.DecodePrivateKeyPEM([]byte(creds.PrivateKeyPEM))
+			if err != nil {
+				m.statusMsg = "Failed to parse private key: " + err.Error()
+				return m, nil
+			}
+			payload := &crypto.AuthorizeTokenTransferPayload{
+				AccountID: accountID.String(),
+				TokenID:   selectedToken.ID(),
+			}
+			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, accountID.String(), creds.CertificatePEM)
+			if err != nil {
+				m.statusMsg = "Failed to sign request: " + err.Error()
+				return m, nil
+			}
+			if _, err := m.app.AuthorizeTokenTransferSigned(context.Background(), signedEnvelope); err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+			m.statusMsg = "Token authorized for transfer!"
+			m.view = ViewTokenMenu
+			m.tokenStep = 0
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateTransferToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	accounts, err := m.app.GetAccounts(context.Background())
+	if err != nil {
+		m.statusMsg = err.Error()
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		if m.tokenStep > 0 {
+			m.tokenStep--
+			m.statusMsg = ""
+		} else {
+			m.view = ViewTokenMenu
+		}
+		return m, nil
+	}
+
+	switch m.tokenStep {
+	case 0:
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenAccountIndex > 0 {
+				m.tokenAccountIndex--
+			}
+		case "down", "j":
+			if m.tokenAccountIndex < len(accounts)-1 {
+				m.tokenAccountIndex++
+			}
+		case "enter":
+			tokens := accounts[m.tokenAccountIndex].GetTokens()
+			if len(tokens) == 0 {
+				m.statusMsg = "This account has no owned tokens"
+				return m, nil
+			}
+			m.tokenStep = 1
+			m.tokenTokenIndex = 0
+			m.statusMsg = ""
+		}
+	case 1:
+		tokens := accounts[m.tokenAccountIndex].GetTokens()
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenTokenIndex > 0 {
+				m.tokenTokenIndex--
+			}
+		case "down", "j":
+			if m.tokenTokenIndex < len(tokens)-1 {
+				m.tokenTokenIndex++
+			}
+		case "enter":
+			m.tokenStep = 2
+			m.tokenToAccountIndex = 0
+			if m.tokenToAccountIndex == m.tokenAccountIndex {
+				m.tokenToAccountIndex = 1
+			}
+			m.statusMsg = ""
+		}
+	case 2:
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenToAccountIndex > 0 {
+				m.tokenToAccountIndex--
+				if m.tokenToAccountIndex == m.tokenAccountIndex {
+					if m.tokenToAccountIndex > 0 {
+						m.tokenToAccountIndex--
+					} else {
+						m.tokenToAccountIndex++
+					}
+				}
+			}
+		case "down", "j":
+			if m.tokenToAccountIndex < len(accounts)-1 {
+				m.tokenToAccountIndex++
+				if m.tokenToAccountIndex == m.tokenAccountIndex {
+					if m.tokenToAccountIndex < len(accounts)-1 {
+						m.tokenToAccountIndex++
+					} else {
+						m.tokenToAccountIndex--
+					}
+				}
+			}
+		case "enter":
+			fromAcc := accounts[m.tokenAccountIndex]
+			toAcc := accounts[m.tokenToAccountIndex]
+			tokens := fromAcc.GetTokens()
+			selectedToken := tokens[m.tokenTokenIndex]
+			fromID := fromAcc.ID()
+			toID := toAcc.ID()
+			creds, err := m.getCredentials(fromID)
+			if err != nil {
+				m.statusMsg = "Failed to load credentials: " + err.Error()
+				return m, nil
+			}
+			privKey, err := crypto.DecodePrivateKeyPEM([]byte(creds.PrivateKeyPEM))
+			if err != nil {
+				m.statusMsg = "Failed to parse private key: " + err.Error()
+				return m, nil
+			}
+			payload := &crypto.TransferTokenPayload{
+				From:    fromID.String(),
+				To:      toID.String(),
+				TokenID: selectedToken.ID(),
+			}
+			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, fromID.String(), creds.CertificatePEM)
+			if err != nil {
+				m.statusMsg = "Failed to sign request: " + err.Error()
+				return m, nil
+			}
+			if _, err := m.app.TransferTokenSigned(context.Background(), signedEnvelope); err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+			m.statusMsg = "Token transferred!"
+			m.view = ViewTokenMenu
+			m.tokenStep = 0
+		}
+	}
+	return m, nil
 }

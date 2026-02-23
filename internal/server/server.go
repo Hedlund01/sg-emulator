@@ -62,13 +62,19 @@ func NewWithCA(logger *slog.Logger, certAuth *ca.CA) *Server {
 }
 
 func (s *Server) registerHandlers() {
+
+	// Money
+	RegisterHandler(s, s.handleTransfer)
+	RegisterHandler(s, s.handleMint)
+
+	//Accounts
+	RegisterHandler(s, s.handleAccountCount)
 	RegisterHandler(s, s.handleCreateAccount)
 	RegisterHandler(s, s.handleGetAccount)
 	RegisterHandler(s, s.handleGetAccounts)
-	RegisterHandler(s, s.handleTransfer)
-	RegisterHandler(s, s.handleMint)
+
+	//Tokens
 	RegisterHandler(s, s.handleMintToken)
-	RegisterHandler(s, s.handleAccountCount)
 	RegisterHandler(s, s.handleAuthorizeTokenTransfer)
 	RegisterHandler(s, s.handleTransferToken)
 }
@@ -262,7 +268,7 @@ func (s *Server) drainRequests() {
 }
 
 // handleRequest processes a single request and returns the response
-func (s *Server)  handleRequest(req messages.Request) messages.Response {
+func (s *Server) handleRequest(req messages.Request) messages.Response {
 	traceID := trace.GetTraceID(req.Context)
 	logger := s.logger
 	if traceID != "" {
