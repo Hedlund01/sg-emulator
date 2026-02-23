@@ -11,7 +11,7 @@ import (
 // Signed by the CA.
 type CreateAccountRequest struct {
 	InitialBalance float64
-	SignedEnvelope *crypto.SignedEnvelope[*crypto.CreateAccountRequest]
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.CreateAccountPayload]
 }
 
 // CreateAccountResponse is the response from creating a new account.
@@ -26,7 +26,7 @@ func (r *CreateAccountRequest) RequiresSignature() bool { return true }
 
 func (r *CreateAccountRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, "",
-		func(signed *crypto.CreateAccountRequest) error {
+		func(signed *crypto.CreateAccountPayload) error {
 			if signed.InitialBalance != r.InitialBalance {
 				return fmt.Errorf("InitialBalance mismatch")
 			}
@@ -38,7 +38,7 @@ func (r *CreateAccountRequest) Verify(verifier *crypto.Verifier, caPublicKey ed2
 // Signed by the account owner.
 type GetAccountRequest struct {
 	AccountID      ScalegraphId
-	SignedEnvelope *crypto.SignedEnvelope[*crypto.GetAccountRequest]
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.GetAccountPayload]
 }
 
 // GetAccountResponse is the response from getting account details.
@@ -50,7 +50,7 @@ func (r *GetAccountRequest) RequiresSignature() bool { return true }
 
 func (r *GetAccountRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
-		func(signed *crypto.GetAccountRequest) error {
+		func(signed *crypto.GetAccountPayload) error {
 			if signed.AccountID != r.AccountID.String() {
 				return fmt.Errorf("AccountID mismatch")
 			}
@@ -74,7 +74,7 @@ type TransferRequest struct {
 	To             ScalegraphId
 	Amount         float64
 	Nonce          uint64
-	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferRequest]
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferPayload]
 }
 
 // TransferResponse is the response from a transfer.
@@ -84,7 +84,7 @@ func (r *TransferRequest) RequiresSignature() bool { return true }
 
 func (r *TransferRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.From.String(),
-		func(signed *crypto.TransferRequest) error {
+		func(signed *crypto.TransferPayload) error {
 			if signed.From != r.From.String() {
 				return fmt.Errorf("From mismatch")
 			}
@@ -116,7 +116,7 @@ type MintResponse struct{}
 type MintTokenRequest struct {
 	TokenValue      string
 	ClawbackAddress *ScalegraphId
-	SignedEnvelope  *crypto.SignedEnvelope[*crypto.MintTokenRequest]
+	SignedEnvelope  *crypto.SignedEnvelope[*crypto.MintTokenPayload]
 }
 
 // MintTokenResponse is the response from minting a token.
@@ -128,7 +128,7 @@ func (r *MintTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519
 	// Signer ID comes from the signed envelope
 	signerID := r.SignedEnvelope.Signature.SignerID
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, signerID,
-		func(signed *crypto.MintTokenRequest) error {
+		func(signed *crypto.MintTokenPayload) error {
 			if signed.TokenValue != r.TokenValue {
 				return fmt.Errorf("TokenValue mismatch")
 			}
@@ -144,6 +144,56 @@ func (r *MintTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519
 			return nil
 		})
 }
+
+type TransferTokenRequest struct {
+	From           ScalegraphId
+	To             ScalegraphId
+	TokenId        string
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferTokenPayload]
+}
+
+func (r *TransferTokenRequest) RequiresSignature() bool { return true }
+
+func (r *TransferTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.From.String(),
+		func(signed *crypto.TransferTokenPayload) error {
+			if signed.TokenID != r.TokenId {
+				return fmt.Errorf("TokenId mismatch")
+			}
+			if signed.From != r.From.String() {
+				return fmt.Errorf("From mismatch")
+			}
+			if signed.To != r.To.String() {
+				return fmt.Errorf("To mismatch")
+			}
+			return nil
+		})
+}
+
+type TransferTokenResponse struct{}
+
+type AuthorizeTokenTransferRequest struct {
+	AccountID      ScalegraphId
+	TokenId        string
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload]
+}
+
+func (r *AuthorizeTokenTransferRequest) RequiresSignature() bool { return true }
+
+func (r *AuthorizeTokenTransferRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
+		func(signed *crypto.AuthorizeTokenTransferPayload) error {
+			if signed.TokenID != r.TokenId {
+				return fmt.Errorf("TokenId mismatch")
+			}
+			if signed.AccountID != r.AccountID.String() {
+				return fmt.Errorf("From mismatch")
+			}
+			return nil
+		})
+}
+
+type AuthorizeTokenTransferResponse struct{}
 
 // AccountCountRequest is the request to get the number of accounts.
 // Not signed.

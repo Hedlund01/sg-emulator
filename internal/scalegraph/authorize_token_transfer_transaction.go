@@ -1,18 +1,16 @@
 package scalegraph
 
 type AuthorizeTokenTransferTransaction struct {
-	id       ScalegraphId
-	sender   *Account
-	receiver *Account
-	tokenId *ScalegraphId
+	id      ScalegraphId
+	account *Account
+	tokenId *string
 }
 
-func newAuthorizeTokenTransferTransaction(receiver *Account, tokenId *ScalegraphId) *AuthorizeTokenTransferTransaction {
+func newAuthorizeTokenTransferTransaction(account *Account, tokenId *string) *AuthorizeTokenTransferTransaction {
 	txId, _ := NewScalegraphId()
 	return &AuthorizeTokenTransferTransaction{
-		id:       txId,
-		sender:   receiver,
-		receiver: receiver,
+		id:      txId,
+		account: account,
 		tokenId: tokenId,
 	}
 }
@@ -27,13 +25,13 @@ func (t *AuthorizeTokenTransferTransaction) Type() TransactionType {
 }
 
 func (t *AuthorizeTokenTransferTransaction) Sender() *Account {
-	return t.sender
+	return t.account
 }
 
 func (t *AuthorizeTokenTransferTransaction) Receiver() *Account {
-	return t.receiver
+	return t.account
 }
 
-func (t *AuthorizeTokenTransferTransaction) TokenId() *ScalegraphId {
+func (t *AuthorizeTokenTransferTransaction) TokenId() *string {
 	return t.tokenId
 }

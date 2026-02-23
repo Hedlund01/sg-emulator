@@ -69,6 +69,8 @@ func (s *Server) registerHandlers() {
 	RegisterHandler(s, s.handleMint)
 	RegisterHandler(s, s.handleMintToken)
 	RegisterHandler(s, s.handleAccountCount)
+	RegisterHandler(s, s.handleAuthorizeTokenTransfer)
+	RegisterHandler(s, s.handleTransferToken)
 }
 
 func (s *Server) handleCreateAccount(ctx context.Context, req *scalegraph.CreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {
@@ -130,6 +132,22 @@ func (s *Server) handleMintToken(ctx context.Context, req *scalegraph.MintTokenR
 
 func (s *Server) handleAccountCount(ctx context.Context, req *scalegraph.AccountCountRequest) (*scalegraph.AccountCountResponse, error) {
 	return s.app.AccountCount(ctx, req)
+}
+
+func (s *Server) handleAuthorizeTokenTransfer(ctx context.Context, req *scalegraph.AuthorizeTokenTransferRequest) (*scalegraph.AuthorizeTokenTransferResponse, error) {
+	err := s.app.AuthorizeTokenTransfer(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &scalegraph.AuthorizeTokenTransferResponse{}, nil
+}
+
+func (s *Server) handleTransferToken(ctx context.Context, req *scalegraph.TransferTokenRequest) (*scalegraph.TransferTokenResponse, error) {
+	err := s.app.TransferToken(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &scalegraph.TransferTokenResponse{}, nil
 }
 
 // CA returns the server's Certificate Authority (may be nil)

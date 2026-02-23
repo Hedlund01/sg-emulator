@@ -144,7 +144,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		Name:        "create_account",
 		Description: "Create a new account with an optional initial balance. Returns account ID, balance, certificate, and private key location.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateAccountArgs) (*mcp.CallToolResult, any, error) {
-		createReq := &crypto.CreateAccountRequest{
+		createReq := &crypto.CreateAccountPayload{
 			InitialBalance: args.Balance,
 		}
 
@@ -208,7 +208,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("invalid account ID: %v", err)
 		}
 
-		signedReq, err := createSignedEnvelope(srv, id.String(), &crypto.GetAccountRequest{AccountID: id.String()})
+		signedReq, err := createSignedEnvelope(srv, id.String(), &crypto.GetAccountPayload{AccountID: id.String()})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
 		}
@@ -239,7 +239,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("invalid 'to' account ID: %v", err)
 		}
 
-		signedReq, err := createSignedEnvelope(srv, fromID.String(), &crypto.GetAccountRequest{AccountID: fromID.String()})
+		signedReq, err := createSignedEnvelope(srv, fromID.String(), &crypto.GetAccountPayload{AccountID: fromID.String()})
 
 		// Get account to calculate nonce
 		fromAccount, err := client.GetAccount(context.Background(), fromID, signedReq)
@@ -249,8 +249,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		nonce := fromAccount.GetNonce() + 1
 
 		// Create transfer request
-		transferReq := &crypto.TransferRequest{
-			From:      args.From,
+		transferReq := &crypto.TransferPayload{
 			To:        args.To,
 			Amount:    args.Amount,
 			Nonce:     nonce,
@@ -386,7 +385,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			nonce++
 
 			// Create transfer request
-			transferReq := &crypto.TransferRequest{
+			transferReq := &crypto.TransferPayload{
 				From:      args.AccountID,
 				To:        args.ToID,
 				Amount:    args.Amount,
@@ -412,7 +411,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			account, _ := scalegraph.ScalegraphIdFromString(args.AccountID)
 
 			// Create signable account request
-			accountReq := &crypto.GetAccountRequest{
+			accountReq := &crypto.GetAccountPayload{
 				AccountID: account.String(),
 			}
 
@@ -461,7 +460,7 @@ func getAccountNonce(client *server.Client, srv *server.Server, accountID string
 		return 0, fmt.Errorf("invalid account ID: %v", err)
 	}
 
-	signedReq, err := createSignedEnvelope(srv, id.String(), &crypto.GetAccountRequest{AccountID: id.String()})
+	signedReq, err := createSignedEnvelope(srv, id.String(), &crypto.GetAccountPayload{AccountID: id.String()})
 	if err != nil {
 		return 0, fmt.Errorf("failed to create signed request: %v", err)
 	}

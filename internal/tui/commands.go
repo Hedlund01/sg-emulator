@@ -44,7 +44,7 @@ func (m Model) createAccountWithCA(ctx context.Context, balance float64) (*scale
 	systemAccountID := scalegraph.ScalegraphIdFromPublicKey(ca.PublicKey())
 	accountIDStr := systemAccountID.String()
 
-	createReq := &crypto.CreateAccountRequest{
+	createReq := &crypto.CreateAccountPayload{
 		InitialBalance: balance,
 	}
 

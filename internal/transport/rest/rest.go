@@ -155,8 +155,8 @@ func (t *Transport) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // GetMyAccountRequest is the incoming request body for the /accounts/me endpoint
 type GetMyAccountRequest struct {
-	AccountID     scalegraph.ScalegraphId                            `json:"account_id"`
-	SignedRequest *crypto.SignedEnvelope[*crypto.GetAccountRequest] `json:"signed_request"`
+	AccountID     scalegraph.ScalegraphId                           `json:"account_id"`
+	SignedRequest *crypto.SignedEnvelope[*crypto.GetAccountPayload] `json:"signed_request"`
 }
 
 // AccountResponse represents account details with transaction history
@@ -262,7 +262,7 @@ func (t *Transport) handleGetMyAccount(w http.ResponseWriter, r *http.Request) {
 
 // SignedTransferRequest represents the incoming signed transfer request
 type SignedTransferRequest struct {
-	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferRequest] `json:"signed_envelope"`
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferPayload] `json:"signed_envelope"`
 }
 
 // TransferResponse represents a successful transfer response

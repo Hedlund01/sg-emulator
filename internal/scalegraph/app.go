@@ -212,32 +212,57 @@ func (a *App) MintToken(ctx context.Context, req *MintTokenRequest) (*MintTokenR
 	return &MintTokenResponse{}, nil
 }
 
-// TransferToken transfers a token between accounts
-func (a *App) TransferToken(ctx context.Context, from, to, tokenId ScalegraphId) error {
+func (a *App) AuthorizeTokenTransfer(ctx context.Context, req *AuthorizeTokenTransferRequest) error {
 	logger := a.logger
 	if traceID := trace.GetTraceID(ctx); traceID != "" {
 		logger = logger.With("trace_id", traceID)
 	}
-	logger.Debug("Transfer token operation initiated", "from", from, "to", to, "token_id", tokenId)
+	logger.Debug("Authorize token transfer operation initiated", "account_id", req.AccountID, "token_id", req.TokenId)
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	fromAcc, exists := a.accounts[from]
+	acc, exists := a.accounts[req.AccountID]
 	if !exists {
-		logger.Warn("Source account not found for token transfer", "from", from)
-		return fmt.Errorf("source account not found: %s", from)
+		logger.Warn("Account not found for authorize token transfer", "account_id", req.AccountID)
+		return fmt.Errorf("account not found: %s", req.AccountID)
 	}
 
-	toAcc, exists := a.accounts[to]
-	if !exists {
-		logger.Warn("Destination account not found for token transfer", "to", to)
-		return fmt.Errorf("destination account not found: %s", to)
+	authorizeTx := newAuthorizeTokenTransferTransaction(acc, &req.TokenId)
+	if err := acc.appendTransaction(authorizeTx); err != nil {
+		logger.Error("Failed to append authorize token transfer transaction", "error", err)
+		return err
 	}
 
-	token, exists := fromAcc.GetToken(tokenId)
+	logger.Info("Authorize token transfer completed", "account_id", req.AccountID, "token_id", req.TokenId)
+	return nil
+}
+
+// TransferToken transfers a token between accounts
+func (a *App) TransferToken(ctx context.Context, req *TransferTokenRequest) error {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+	logger.Debug("Transfer token operation initiated", "from", req.From, "to", req.To, "token_id", req.TokenId)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	fromAcc, exists := a.accounts[req.From]
 	if !exists {
-		logger.Warn("Token not found in source account", "token_id", tokenId, "from_account", from)
-		return fmt.Errorf("token not found in source account: %s", tokenId)
+		logger.Warn("Source account not found for token transfer", "from", req.From)
+		return fmt.Errorf("source account not found: %s", req.From)
+	}
+
+	toAcc, exists := a.accounts[req.To]
+	if !exists {
+		logger.Warn("Destination account not found for token transfer", "to", req.To)
+		return fmt.Errorf("destination account not found: %s", req.To)
+	}
+
+	token, exists := fromAcc.GetToken(req.TokenId)
+	if !exists {
+		logger.Warn("Token not found in source account", "token_id", req.TokenId, "from_account", req.From)
+		return fmt.Errorf("token not found in source account: %s", req.TokenId)
 	}
 
 	transferTokenTx := newTransferTokenTransaction(fromAcc, toAcc, token)
@@ -254,7 +279,7 @@ func (a *App) TransferToken(ctx context.Context, from, to, tokenId ScalegraphId)
 		return err
 	}
 
-	logger.Info("Transfer token completed", "from", from, "to", to, "token_id", tokenId)
+	logger.Info("Transfer token completed", "from", req.From, "to", req.To, "token_id", token.ID())
 	return nil
 }
 

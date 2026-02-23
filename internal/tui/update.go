@@ -421,7 +421,7 @@ func (m Model) updateSendMoney(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 
 			// Create and sign transfer request
-			transferReq := &crypto.TransferRequest{
+			transferReq := &crypto.TransferPayload{
 				From:      fromID.String(),
 				To:        toID.String(),
 				Amount:    amount,

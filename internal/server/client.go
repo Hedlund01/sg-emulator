@@ -11,8 +11,8 @@ import (
 
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
-	"sg-emulator/internal/server/messages"
 	"sg-emulator/internal/trace"
+	"sg-emulator/internal/server/messages"
 )
 
 // requestIDCounter for generating unique request IDs
@@ -122,7 +122,7 @@ func (c *Client) sendRequest(ctx context.Context, payload any) (messages.Respons
 
 // CreateAccountWithCredentials creates a new account and returns the full response
 // including the certificate and private key
-func (c *Client) CreateAccountWithCredentials(ctx context.Context, initialBalance float64, signedReq *crypto.SignedEnvelope[*crypto.CreateAccountRequest]) (*scalegraph.CreateAccountResponse, error) {
+func (c *Client) CreateAccountWithCredentials(ctx context.Context, initialBalance float64, signedReq *crypto.SignedEnvelope[*crypto.CreateAccountPayload]) (*scalegraph.CreateAccountResponse, error) {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"initial_balance", initialBalance}
 	if traceID != "" {
@@ -137,7 +137,7 @@ func (c *Client) CreateAccountWithCredentials(ctx context.Context, initialBalanc
 }
 
 // GetAccount retrieves an account by ID
-func (c *Client) GetAccount(ctx context.Context, id scalegraph.ScalegraphId, signedReq *crypto.SignedEnvelope[*crypto.GetAccountRequest]) (*scalegraph.Account, error) {
+func (c *Client) GetAccount(ctx context.Context, id scalegraph.ScalegraphId, signedReq *crypto.SignedEnvelope[*crypto.GetAccountPayload]) (*scalegraph.Account, error) {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"account_id", id}
 	if traceID != "" {
@@ -177,7 +177,7 @@ func (c *Client) Transfer(ctx context.Context, req *scalegraph.TransferRequest) 
 }
 
 // TransferSigned transfers funds with a cryptographically signed request (convenience wrapper)
-func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.ScalegraphId, amount float64, signedRequest *crypto.SignedEnvelope[*crypto.TransferRequest]) error {
+func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.ScalegraphId, amount float64, signedRequest *crypto.SignedEnvelope[*crypto.TransferPayload]) error {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"from", from, "to", to, "amount", amount, "signed", true}
 	if traceID != "" {

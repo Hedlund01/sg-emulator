@@ -7,7 +7,7 @@ import (
 )
 
 type IToken interface {
-	ID() ScalegraphId
+	ID() string
 	Value() string
 	Signature() crypto.Signature
 	ClawbackAddress() *ScalegraphId
@@ -50,24 +50,21 @@ func TokenString(t IToken) string {
 }
 
 type Token struct {
-	id              ScalegraphId
 	value           string
 	signature       crypto.Signature
 	clawbackAddress *ScalegraphId
 }
 
 func newToken(value string, signature crypto.Signature, clawbackAddress *ScalegraphId) *Token {
-	id, _ := NewScalegraphId()
 	return &Token{
-		id:              id,
 		value:           value,
 		signature:       signature,
 		clawbackAddress: clawbackAddress,
 	}
 }
 
-func (t *Token) ID() ScalegraphId {
-	return t.id
+func (t *Token) ID() string {
+	return string(t.signature.Value[:]) // Using the raw signature bytes as the unique ID
 }
 
 func (t *Token) Value() string {

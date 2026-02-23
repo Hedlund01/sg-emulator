@@ -49,7 +49,7 @@ type Account struct {
 	valuestore  map[string]string
 	publicKey   ed25519.PublicKey
 	certificate *x509.Certificate
-	tokenStore  map[ScalegraphId]*Token // &Token{} means authorized but not owned, nil means not authorized, non-nil means owned
+	tokenStore  map[string]*Token // &Token{} means authorized but not owned, nil means not authorized, non-nil means owned
 	txHandlers  map[TransactionType]txHandlerFunc
 }
 
@@ -119,7 +119,7 @@ func (a *Account) GetNonce() uint64 {
 // GetToken returns the token with the given ID if it exists in the account's token store.
 // Returns the token and true if found, or nil and false if not found.
 // Returns nil and false if the token is not authorized for this account (i.e. token store entry is &Token{}), or if the token does not exist (i.e. token store entry is nil).
-func (a *Account) GetToken(tokenId ScalegraphId) (*Token, bool) {
+func (a *Account) GetToken(tokenId string) (*Token, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	if !a.tokenStore[tokenId].Equal(&Token{}) {
@@ -156,7 +156,7 @@ func (a *Account) addToken(token *Token) error {
 	return nil
 }
 
-func (a *Account) removeToken(tokenId ScalegraphId) error {
+func (a *Account) removeToken(tokenId string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -167,7 +167,7 @@ func (a *Account) removeToken(tokenId ScalegraphId) error {
 	return nil
 }
 
-func (a *Account) burnToken(tokenId ScalegraphId) error {
+func (a *Account) burnToken(tokenId string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

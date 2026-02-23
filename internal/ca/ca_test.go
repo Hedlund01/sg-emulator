@@ -159,7 +159,7 @@ func TestVerifier(t *testing.T) {
 	}
 
 	// Create and sign a transfer request
-	payload := &crypto.TransferRequest{
+	payload := &crypto.TransferPayload{
 		From:      accountID,
 		To:        "destination-account",
 		Amount:    100.0,
