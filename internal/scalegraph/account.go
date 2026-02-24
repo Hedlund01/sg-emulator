@@ -12,6 +12,11 @@ import (
 // Handlers that manage their own blockchain appending (e.g. AuthorizeTokenTransfer) should return errSkipAppend.
 type txHandlerFunc func(trx ITransaction) error
 
+// txRollbackFunc is a function that reverses the state changes made by the corresponding txHandlerFunc.
+// It is called by rollbacklatestTransaction after the block has been removed from the blockchain.
+// Rollback handlers must not acquire a.mu (the caller already holds it).
+type txRollbackFunc func(trx ITransaction) error
+
 // errSkipAppend is a sentinel error returned by a txHandlerFunc to signal that
 // the handler has already managed blockchain state and the caller should skip the
 // default a.blockchain.append(trx) step.
@@ -31,6 +36,18 @@ func registerTxHandler[T ITransaction](handlers map[TransactionType]txHandlerFun
 	}
 }
 
+// registerTxRollbackHandler registers a typed rollback handler for a specific transaction type.
+// The handler receives the concrete transaction type T and reverses the state changes of the apply handler.
+func registerTxRollbackHandler[T ITransaction](handlers map[TransactionType]txRollbackFunc, txType TransactionType, handler func(trx T) error) {
+	handlers[txType] = func(trx ITransaction) error {
+		typed, ok := trx.(T)
+		if !ok {
+			return fmt.Errorf("invalid transaction type for rollback: got %T, want %T", trx, *new(T))
+		}
+		return handler(typed)
+	}
+}
+
 const (
 	// MBR (Minimum Balance Requirement) = MBR_SLOT_COST * number of authorized token transfers (i.e. number of &Token{} entries in the token store) + MBR_TOKEN_COST * number of tokens created by the account. Each token creation or authorization of token transfer will require the account to have at least MBR_SLOT_COST balance as MBR, which will be unfrozen when the burn token transaction is executed or the unauthorize token transfer transaction is executed. This is to prevent accounts to create DoS token transactions by authorizing unlimited token transfers or token creation transactions, which can cause the blockchain to grow indefinitely and consume all memory.
 
@@ -41,16 +58,17 @@ const (
 )
 
 type Account struct {
-	mu          sync.RWMutex
-	id          ScalegraphId
-	balance     float64
-	mbr         float64
-	blockchain  IBlockchain
-	valuestore  map[string]string
-	publicKey   ed25519.PublicKey
-	certificate *x509.Certificate
-	tokenStore  map[string]*Token // &Token{} means authorized but not owned, nil means not authorized, non-nil means owned
-	txHandlers  map[TransactionType]txHandlerFunc
+	mu                 sync.RWMutex
+	id                 ScalegraphId
+	balance            float64
+	mbr                float64
+	blockchain         IBlockchain
+	valuestore         map[string]string
+	publicKey          ed25519.PublicKey
+	certificate        *x509.Certificate
+	tokenStore         map[string]*Token // &Token{} means authorized but not owned, nil means not authorized, non-nil means owned
+	txHandlers         map[TransactionType]txHandlerFunc
+	txRollbackHandlers map[TransactionType]txRollbackFunc
 }
 
 // newAccountWithPublicKey creates a new account with a public key and certificate
@@ -63,10 +81,12 @@ func newAccountWithPublicKey(pubKey ed25519.PublicKey, cert *x509.Certificate) (
 		balance:     0,
 		blockchain:  newBlockchain(),
 		valuestore:  make(map[string]string),
+		tokenStore:  make(map[string]*Token),
 		publicKey:   pubKey,
 		certificate: cert,
 	}
 	acc.registerTxHandlers()
+	acc.registerTxRollbackHandlers()
 
 	return acc, nil
 }
@@ -79,6 +99,16 @@ func (a *Account) registerTxHandlers() {
 	registerTxHandler(a.txHandlers, MintToken, a.handleMintTokenTx)
 	registerTxHandler(a.txHandlers, TransferToken, a.handleTransferTokenTx)
 	registerTxHandler(a.txHandlers, AuthorizeTokenTransfer, a.handleAuthorizeTokenTransferTx)
+}
+
+func (a *Account) registerTxRollbackHandlers() {
+	a.txRollbackHandlers = make(map[TransactionType]txRollbackFunc)
+	registerTxRollbackHandler(a.txRollbackHandlers, Mint, a.rollbackMintTx)
+	registerTxRollbackHandler(a.txRollbackHandlers, Transfer, a.rollbackTransferTx)
+	registerTxRollbackHandler(a.txRollbackHandlers, Burn, a.rollbackBurnTx)
+	registerTxRollbackHandler(a.txRollbackHandlers, MintToken, a.rollbackMintTokenTx)
+	registerTxRollbackHandler(a.txRollbackHandlers, TransferToken, a.rollbackTransferTokenTx)
+	registerTxRollbackHandler(a.txRollbackHandlers, AuthorizeTokenTransfer, a.rollbackAuthorizeTokenTransferTx)
 }
 
 // PublicKey returns the account's public key (may be nil for legacy accounts)
@@ -103,6 +133,13 @@ func (a *Account) Balance() float64 {
 	return a.balance
 }
 
+// MBR returns the account's current Minimum Balance Requirement
+func (a *Account) MBR() float64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.mbr
+}
+
 // Blockchain returns the account's blockchain
 func (a *Account) Blockchain() IBlockchain {
 	return a.blockchain
@@ -122,13 +159,11 @@ func (a *Account) GetNonce() uint64 {
 func (a *Account) GetToken(tokenId string) (*Token, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	if !a.tokenStore[tokenId].Equal(&Token{}) {
+	token := a.tokenStore[tokenId]
+	if token == nil || token.Equal(&Token{}) {
 		return nil, false
 	}
-
-	token, exists := a.tokenStore[tokenId]
-
-	return token, exists
+	return token, true
 }
 
 // GetTokens returns all fully owned tokens in this account's token store.
@@ -146,14 +181,9 @@ func (a *Account) GetTokens() []*Token {
 	return tokens
 }
 
-func (a *Account) addToken(token *Token) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if !a.tokenStore[token.ID()].Equal(&Token{}) {
-		return fmt.Errorf("token with ID %s is not authorized to transfer to account %s", token.ID(), a.ID())
-	}
-
+// mintToken adds a newly minted token directly into the account.
+// Unlike addTokenFromTransfer, no pre-authorized &Token{} slot is required.
+func (a *Account) mintToken(token *Token) error {
 	if a.tokenStore[token.ID()] != nil {
 		return fmt.Errorf("token with ID %s already exists in account %s", token.ID(), a.ID())
 	}
@@ -163,7 +193,11 @@ func (a *Account) addToken(token *Token) error {
 		return fmt.Errorf("invalid signer ID in token signature: %w", err)
 	}
 	if signerID != a.ID() {
-		return fmt.Errorf("token with ID %s is signed by account %s, cannot be added to account %s", token.ID(), token.Signature().SignerID, a.ID())
+		return fmt.Errorf("token with ID %s is signed by account %s, cannot be minted to account %s", token.ID(), token.Signature().SignerID, a.ID())
+	}
+
+	if (a.balance - a.mbr) < MBR_TOKEN_COST {
+		return fmt.Errorf("insufficient balance to mint token: current balance %.2f, mbr %.2f, required %.2f", a.balance, a.mbr, MBR_TOKEN_COST)
 	}
 
 	a.mbr += MBR_TOKEN_COST
@@ -171,9 +205,20 @@ func (a *Account) addToken(token *Token) error {
 	return nil
 }
 
+// addTokenFromTransfer adds a token received via a transfer.
+// The receiving account must have previously authorized the transfer by setting
+// a &Token{} placeholder for this token ID.
+func (a *Account) addTokenFromTransfer(token *Token) error {
+	slot := a.tokenStore[token.ID()]
+	if slot == nil || !slot.Equal(&Token{}) {
+		return fmt.Errorf("token with ID %s is not authorized to transfer to account %s", token.ID(), a.ID())
+	}
+
+	a.tokenStore[token.ID()] = token
+	return nil
+}
+
 func (a *Account) removeToken(tokenId string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 
 	if a.tokenStore[tokenId] == nil {
 		return fmt.Errorf("token with ID %s does not exist in account %s", tokenId, a.ID())
@@ -183,8 +228,6 @@ func (a *Account) removeToken(tokenId string) error {
 }
 
 func (a *Account) burnToken(tokenId string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 
 	if a.tokenStore[tokenId] == nil {
 		return fmt.Errorf("token with ID %s does not exist in account %s", tokenId, a.ID())
@@ -216,11 +259,20 @@ func (a *Account) rollbacklatestTransaction(trx ITransaction) error {
 	}
 
 	latest := a.blockchain.Tail()
-	if latest.ID() != trx.ID() {
+	if latest.Transaction() == nil || latest.Transaction().ID() != trx.ID() {
 		return fmt.Errorf("transaction to remove is not the latest transaction in the blockchain")
 	}
 
+	rollback, ok := a.txRollbackHandlers[trx.Type()]
+	if !ok {
+		return fmt.Errorf("no rollback handler registered for transaction type: %s", trx.Type())
+	}
+
 	a.blockchain.removeLatestBlock()
+
+	if err := rollback(trx); err != nil {
+		return fmt.Errorf("rollback handler failed for transaction type %s: %w", trx.Type(), err)
+	}
 	return nil
 }
 
@@ -274,7 +326,7 @@ func (a *Account) handleBurnTx(trx *BurnTransaction) error {
 
 func (a *Account) handleMintTokenTx(trx *MintTokenTransaction) error {
 	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
-		if err := a.addToken(trx.Token()); err != nil {
+		if err := a.mintToken(trx.Token()); err != nil {
 			return fmt.Errorf("failed to mint token: %w", err)
 		}
 	} else if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
@@ -285,16 +337,16 @@ func (a *Account) handleMintTokenTx(trx *MintTokenTransaction) error {
 
 func (a *Account) handleTransferTokenTx(trx *TransferTokenTransaction) error {
 	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
-		_, exists := a.GetToken(trx.Token().ID())
-		if !exists {
+		_, ok := a.tokenStore[trx.Token().ID()]
+		if !ok {
 			return fmt.Errorf("token with ID %s does not exist in account %s", trx.Token().ID(), a.ID())
 		}
 		if err := a.removeToken(trx.Token().ID()); err != nil {
-			return fmt.Errorf("failed to transfer token: %w", err)
+			return fmt.Errorf("failed to remove token: %w", err)
 		}
 	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
-		if err := a.addToken(trx.Token()); err != nil {
-			return fmt.Errorf("failed to transfer token: %w", err)
+		if err := a.addTokenFromTransfer(trx.Token()); err != nil {
+			return fmt.Errorf("failed to add token: %w", err)
 		}
 	} else {
 		return fmt.Errorf("either sender or receiver must be this account for transfer token transaction")
@@ -317,10 +369,71 @@ func (a *Account) handleAuthorizeTokenTransferTx(trx *AuthorizeTokenTransferTran
 	} else if !a.tokenStore[tokenId].Equal(&Token{}) {
 		return fmt.Errorf("token with ID %s is already owned by account %s, cannot authorize transfer", tokenId, a.ID())
 	}
+	return nil
+}
 
-	// Token is already authorized but not owned — re-authorizing is a no-op; skip blockchain append.
-	a.blockchain.append(trx)
-	return errSkipAppend{}
+// --- Rollback handlers ---
+// These mirror their handleXxx counterparts and must be called with a.mu already held.
+
+func (a *Account) rollbackMintTx(trx *MintTransaction) error {
+	a.balance -= trx.Amount()
+	return nil
+}
+
+func (a *Account) rollbackTransferTx(trx *TransferTransaction) error {
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		a.balance += trx.Amount()
+	}
+	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		a.balance -= trx.Amount()
+	}
+	return nil
+}
+
+func (a *Account) rollbackBurnTx(trx *BurnTransaction) error {
+	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		a.balance += trx.Amount()
+	}
+	return nil
+}
+
+// rollbackMintTokenTx reverses a MintToken: removes the token and decrements mbr.
+// MBR is decremented here because mintToken incremented it; no burn transaction is created.
+func (a *Account) rollbackMintTokenTx(trx *MintTokenTransaction) error {
+	if trx.Receiver() == nil || trx.Receiver().ID() != a.ID() {
+		return nil
+	}
+	tokenId := trx.Token().ID()
+	if a.tokenStore[tokenId] == nil {
+		return fmt.Errorf("cannot rollback mint token: token %s not found in account %s", tokenId, a.ID())
+	}
+	delete(a.tokenStore, tokenId)
+	a.mbr -= MBR_TOKEN_COST
+	return nil
+}
+
+// rollbackTransferTokenTx reverses a TransferToken.
+// Sender: restore the token pointer back into tokenStore (no MBR change; removeToken did not touch MBR).
+// Receiver: revert the slot back to the &Token{} placeholder and decrement mbr
+//
+//	(addTokenFromTransfer replaced the placeholder with the real token and incremented mbr).
+func (a *Account) rollbackTransferTokenTx(trx *TransferTokenTransaction) error {
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		a.tokenStore[trx.Token().ID()] = trx.Token()
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		a.tokenStore[trx.Token().ID()] = &Token{}
+		a.mbr -= MBR_TOKEN_COST
+	}
+	return nil
+}
+
+// rollbackAuthorizeTokenTransferTx reverses an AuthorizeTokenTransfer:
+// removes the &Token{} placeholder and decrements mbr by MBR_SLOT_COST.
+func (a *Account) rollbackAuthorizeTokenTransferTx(trx *AuthorizeTokenTransferTransaction) error {
+	tokenId := *trx.TokenId()
+	delete(a.tokenStore, tokenId)
+	a.mbr -= MBR_SLOT_COST
+	return nil
 }
 
 func (a *Account) String() string {

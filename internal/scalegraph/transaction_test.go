@@ -207,3 +207,76 @@ func TestTransactionTypeEnumIndex(t *testing.T) {
 	assert.Equal(t, 1, Mint.EnumIndex())
 	assert.Equal(t, 2, Burn.EnumIndex())
 }
+
+// --- MintTokenTransaction Tests ---
+
+func TestNewMintTokenTransactionHasNilSender(t *testing.T) {
+	// Regression: newMintTokenTransaction was setting sender = receiver instead of nil.
+	// A mint has no sender — only a receiver.
+	acc, _ := testCreateAccount(t)
+	token := &Token{}
+
+	tx := newMintTokenTransaction(acc, token)
+
+	require.NotNil(t, tx)
+	assert.Nil(t, tx.Sender(), "mint token transaction should have nil sender")
+	assert.Equal(t, acc, tx.Receiver(), "mint token transaction should have the correct receiver")
+}
+
+func TestMintTokenTransactionType(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+	tx := newMintTokenTransaction(acc, &Token{})
+
+	assert.Equal(t, MintToken, tx.Type())
+}
+
+func TestMintTokenTransactionUniqueIDs(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+
+	tx1 := newMintTokenTransaction(acc, &Token{})
+	tx2 := newMintTokenTransaction(acc, &Token{})
+
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two mint token transactions should have unique IDs")
+	assert.NotEqual(t, ScalegraphId{}, tx1.ID(), "transaction ID should not be zero value")
+}
+
+// --- TransferTokenTransaction Tests ---
+
+func TestTransferTokenTransactionFields(t *testing.T) {
+	sender, receiver := testCreateTwoAccounts(t)
+	token := &Token{}
+
+	tx := newTransferTokenTransaction(sender, receiver, token)
+
+	require.NotNil(t, tx)
+	assert.Equal(t, TransferToken, tx.Type())
+	assert.Equal(t, sender, tx.Sender())
+	assert.Equal(t, receiver, tx.Receiver())
+	assert.Equal(t, token, tx.Token())
+	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
+}
+
+func TestTransferTokenTransactionUniqueIDs(t *testing.T) {
+	sender, receiver := testCreateTwoAccounts(t)
+
+	tx1 := newTransferTokenTransaction(sender, receiver, &Token{})
+	tx2 := newTransferTokenTransaction(sender, receiver, &Token{})
+
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two transfer token transactions should have unique IDs")
+}
+
+// --- AuthorizeTokenTransferTransaction Tests ---
+
+func TestAuthorizeTokenTransferTransactionFields(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+	tokenId := "some-token-id"
+
+	tx := newAuthorizeTokenTransferTransaction(acc, &tokenId)
+
+	require.NotNil(t, tx)
+	assert.Equal(t, AuthorizeTokenTransfer, tx.Type())
+	assert.Equal(t, acc, tx.Sender(), "sender should be the account")
+	assert.Equal(t, acc, tx.Receiver(), "receiver should be the same account")
+	assert.Equal(t, &tokenId, tx.TokenId())
+	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
+}

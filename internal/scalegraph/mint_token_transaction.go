@@ -14,7 +14,7 @@ func newMintTokenTransaction(receiver *Account, token *Token) *MintTokenTransact
 	}
 	return &MintTokenTransaction{
 		id:       txId,
-		sender:   receiver,
+		sender:   nil,
 		receiver: receiver,
 		token:    token,
 	}

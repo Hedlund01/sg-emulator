@@ -3,6 +3,8 @@ package scalegraph
 import (
 	"testing"
 
+	sgcrypto "sg-emulator/internal/crypto"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -195,4 +197,160 @@ func TestAccountAppendTransactionBurnInsufficientBalance(t *testing.T) {
 	err := acc.appendTransaction(burnTx)
 	assert.Error(t, err, "should fail when burning more than balance")
 	assert.Equal(t, 0.0, acc.Balance())
+}
+
+// --- Token tests ---
+
+func TestAccountTokenStoreInitialized(t *testing.T) {
+	// Regression: tokenStore was never initialized in newAccountWithPublicKey,
+	// causing a nil-map panic on any token operation.
+	acc, kp := testCreateAccount(t)
+
+	require.NotPanics(t, func() {
+		testMintTokenIntoAccount(t, acc, kp.PrivateKey)
+	}, "minting a token should not panic")
+}
+
+func TestGetTokenReturnsNilForPlaceholder(t *testing.T) {
+	// Regression: GetToken guard was inverted — it returned the &Token{} placeholder
+	// (authorized-but-not-owned) as if it were a real token.
+	acc, _ := testCreateAccount(t)
+	tokenId := "placeholder-token-id"
+	testAuthorizeTokenTransfer(t, acc, tokenId)
+
+	token, ok := acc.GetToken(tokenId)
+	assert.False(t, ok, "GetToken should return false for a placeholder slot")
+	assert.Nil(t, token, "GetToken should return nil for a placeholder slot")
+}
+
+func TestGetTokenReturnsTokenWhenOwned(t *testing.T) {
+	// Regression: the same inverted guard in GetToken prevented real tokens from
+	// being found after a successful mint.
+	acc, kp := testCreateAccount(t)
+	minted := testMintTokenIntoAccount(t, acc, kp.PrivateKey)
+
+	token, ok := acc.GetToken(minted.ID())
+	assert.True(t, ok, "GetToken should return true for an owned token")
+	assert.Equal(t, minted, token, "GetToken should return the minted token")
+}
+
+func TestGetTokensExcludesPlaceholders(t *testing.T) {
+	acc, kp := testCreateAccount(t)
+
+	// Authorize a slot but don't mint — the store only has a placeholder.
+	// We need a token ID to authorize; use one derived from a token we'll create
+	// but NOT append.
+	fakeToken := testCreateToken(t, acc, kp.PrivateKey)
+	testAuthorizeTokenTransfer(t, acc, fakeToken.ID())
+
+	tokens := acc.GetTokens()
+	assert.Empty(t, tokens, "GetTokens should not return placeholder slots")
+}
+
+func TestAuthorizeTokenTransferRequiresSufficientBalance(t *testing.T) {
+	// Account with 0 balance cannot cover MBR_SLOT_COST.
+	acc, _ := testCreateAccount(t)
+	tokenId := "some-token-id"
+
+	tx := newAuthorizeTokenTransferTransaction(acc, &tokenId)
+	err := acc.appendTransaction(tx)
+	assert.Error(t, err, "authorizing a token slot with 0 balance should fail")
+	assert.Equal(t, 0.0, acc.Balance(), "balance should be unchanged after failed authorization")
+}
+
+func TestMintTokenIncreasesBlockchainLength(t *testing.T) {
+	acc, kp := testCreateAccount(t)
+	initialLen := acc.Blockchain().Len()
+
+	testMintTokenIntoAccount(t, acc, kp.PrivateKey)
+
+	// The helper appends a mint-balance tx + a mint-token tx, so length grows by 2.
+	assert.Equal(t, initialLen+2, acc.Blockchain().Len(), "blockchain should grow by 2 after minting a token")
+}
+
+// --- Rollback handler tests ---
+
+func TestRollbackMintTokenRestoresState(t *testing.T) {
+	acc, kp := testCreateAccount(t)
+
+	// Give balance for two token mints.
+	require.NoError(t, acc.appendTransaction(newMintTransaction(acc, MBR_TOKEN_COST*2)))
+
+	// Mint first token.
+	tok1 := testCreateToken(t, acc, kp.PrivateKey)
+	mintTx1 := newMintTokenTransaction(acc, tok1)
+	require.NoError(t, acc.appendTransaction(mintTx1))
+
+	mbrAfterFirstMint := acc.mbr
+	lenAfterFirstMint := acc.Blockchain().Len()
+
+	// Mint a second token with a different value so it gets a different ID.
+	payload2 := &sgcrypto.MintTokenPayload{TokenValue: "other-value"}
+	sig2, err := sgcrypto.Sign(payload2, kp.PrivateKey, acc.ID().String())
+	require.NoError(t, err)
+	tok2 := newToken("other-value", *sig2, nil)
+	mintTx2 := newMintTokenTransaction(acc, tok2)
+	require.NoError(t, acc.appendTransaction(mintTx2))
+	require.Equal(t, 2, len(acc.GetTokens()), "should have two tokens before rollback")
+
+	// Roll back the second mint.
+	require.NoError(t, acc.rollbacklatestTransaction(mintTx2))
+
+	assert.Equal(t, lenAfterFirstMint, acc.Blockchain().Len(), "blockchain length restored")
+	assert.Equal(t, mbrAfterFirstMint, acc.mbr, "mbr restored after rollback of second mint")
+	assert.Equal(t, 1, len(acc.GetTokens()), "token count restored to 1")
+	_, ok := acc.GetToken(tok2.ID())
+	assert.False(t, ok, "rolled-back token should not be present")
+	_, ok = acc.GetToken(tok1.ID())
+	assert.True(t, ok, "first token should still be present")
+}
+
+func TestRollbackAuthorizeTokenTransferRestoresState(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+	// Give enough balance to cover MBR_SLOT_COST.
+	require.NoError(t, acc.appendTransaction(newMintTransaction(acc, 10.0)))
+
+	tokenId := "some-token-id"
+	authTx := newAuthorizeTokenTransferTransaction(acc, &tokenId)
+	require.NoError(t, acc.appendTransaction(authTx))
+
+	assert.Equal(t, MBR_SLOT_COST, acc.mbr, "mbr should equal MBR_SLOT_COST after authorization")
+	assert.NotNil(t, acc.tokenStore[tokenId], "placeholder slot should exist after authorization")
+
+	require.NoError(t, acc.rollbacklatestTransaction(authTx))
+
+	assert.Equal(t, 0.0, acc.mbr, "mbr should be 0 after rolling back authorization")
+	assert.Nil(t, acc.tokenStore[tokenId], "placeholder slot should be removed after rollback")
+}
+
+func TestRollbackTransferTokenRestoresSenderToken(t *testing.T) {
+	// This is the core regression: a failed transfer (receiver not authorized)
+	// must leave the sender's token intact.
+	sender, kp := testCreateAccount(t)
+	receiver, _ := testCreateAccount(t)
+
+	// Give sender balance and mint a token directly (no helper so we control the tail).
+	require.NoError(t, sender.appendTransaction(newMintTransaction(sender, MBR_TOKEN_COST)))
+	tok := testCreateToken(t, sender, kp.PrivateKey)
+	mintTx := newMintTokenTransaction(sender, tok)
+	require.NoError(t, sender.appendTransaction(mintTx))
+
+	// Attempt a transfer without the receiver having an authorization slot.
+	transferTx := newTransferTokenTransaction(sender, receiver, tok)
+
+	// Sender side succeeds (removes token from tokenStore).
+	require.NoError(t, sender.appendTransaction(transferTx))
+	_, senderHasToken := sender.GetToken(tok.ID())
+	assert.False(t, senderHasToken, "token should be gone from sender mid-transfer")
+
+	// Receiver side fails because no authorization slot exists.
+	err := receiver.appendTransaction(transferTx)
+	require.Error(t, err, "receiver should reject transfer without authorization slot")
+
+	// Roll back the sender.
+	require.NoError(t, sender.rollbacklatestTransaction(transferTx))
+
+	_, senderHasToken = sender.GetToken(tok.ID())
+	assert.True(t, senderHasToken, "token should be restored to sender after rollback")
+	assert.Equal(t, tok, sender.tokenStore[tok.ID()], "restored token should be the original pointer")
 }

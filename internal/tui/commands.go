@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 )
@@ -22,14 +20,6 @@ type (
 // Error implements the error interface for ErrMsg
 func (e ErrMsg) Error() string {
 	return e.Err.Error()
-}
-
-// Example command that returns a status message
-func doSomethingAsync() tea.Cmd {
-	return func() tea.Msg {
-		// Perform async operation here
-		return StatusMsg("Operation completed")
-	}
 }
 
 // createAccountWithCA creates a new account using the server's CA to sign the request.

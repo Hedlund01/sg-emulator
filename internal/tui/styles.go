@@ -37,8 +37,7 @@ var (
 
 	// Status message style
 	statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFCC00")).
-			MarginTop(1)
+			Foreground(lipgloss.Color("#FFCC00"))
 
 	// Input label styles
 	focusedLabelStyle = lipgloss.NewStyle().

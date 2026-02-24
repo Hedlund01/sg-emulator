@@ -1,7 +1,10 @@
 package scalegraph
 
 import (
+	"encoding/pem"
 	"testing"
+
+	sgcrypto "sg-emulator/internal/crypto"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -249,4 +252,99 @@ func TestConcurrentAccountCreation(t *testing.T) {
 	resp, err := app.AccountCount(testCtx(), &AccountCountRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, 100, resp.Count)
+}
+
+// --- Token end-to-end tests ---
+
+func TestMintTokenEndToEnd(t *testing.T) {
+	// Regression: minting a token via App.MintToken crashed due to:
+	//   1. tokenStore never initialized (nil map panic)
+	//   2. addToken guard inverted (token rejected even when slot was authorized)
+	//   3. newMintTokenTransaction set sender = receiver instead of nil
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	// Create account with enough balance to cover MBR_TOKEN_COST
+	acc, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	// Build a real signed envelope (same path as the TUI/REST transport)
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "hello-token"}
+	certDER := cert.Raw
+	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
+	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
+	require.NoError(t, err)
+
+	req := &MintTokenRequest{
+		TokenValue:      "hello-token",
+		ClawbackAddress: nil,
+		SignedEnvelope:  envelope,
+	}
+
+	resp, err := app.MintToken(testCtx(), req)
+	require.NoError(t, err, "MintToken should not return an error")
+	assert.NotEmpty(t, resp.TokenID, "response should contain a non-empty token ID")
+
+	// The token must be retrievable from the account
+	token, ok := acc.GetToken(resp.TokenID)
+	assert.True(t, ok, "GetToken should return true for the minted token")
+	assert.NotNil(t, token, "GetToken should return the minted token, not nil")
+	assert.Equal(t, "hello-token", token.Value(), "token value should match the minted value")
+}
+
+func TestMintTokenEndToEndWithClawback(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	acc, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	// Use the account itself as the clawback address
+	clawbackID := acc.ID()
+
+	clawbackStr := clawbackID.String()
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "clawback-token", ClawbackAddress: &clawbackStr}
+	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
+	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
+	require.NoError(t, err)
+
+	req := &MintTokenRequest{
+		TokenValue:      "clawback-token",
+		ClawbackAddress: &clawbackID,
+		SignedEnvelope:  envelope,
+	}
+
+	resp, err := app.MintToken(testCtx(), req)
+	require.NoError(t, err, "MintToken with clawback address should not return an error")
+	assert.NotEmpty(t, resp.TokenID)
+
+	token, ok := acc.GetToken(resp.TokenID)
+	assert.True(t, ok)
+	require.NotNil(t, token)
+	assert.Equal(t, "clawback-token", token.Value())
+	require.NotNil(t, token.ClawbackAddress(), "clawback address should be set")
+	assert.Equal(t, clawbackID, *token.ClawbackAddress())
+}
+
+func TestMintTokenInsufficientBalanceForMBR(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	// Create account with 0 balance — cannot cover MBR_TOKEN_COST
+	acc, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, 0)
+	require.NoError(t, err)
+
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "some-token"}
+	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
+	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
+	require.NoError(t, err)
+
+	req := &MintTokenRequest{
+		TokenValue:     "some-token",
+		SignedEnvelope: envelope,
+	}
+
+	_, err = app.MintToken(testCtx(), req)
+	assert.Error(t, err, "MintToken should fail when account has insufficient balance for MBR")
+	assert.Empty(t, acc.GetTokens(), "no tokens should be stored after a failed mint")
 }

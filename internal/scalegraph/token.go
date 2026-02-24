@@ -2,6 +2,7 @@ package scalegraph
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"sg-emulator/internal/crypto"
 )
@@ -64,7 +65,7 @@ func newToken(value string, signature crypto.Signature, clawbackAddress *Scalegr
 }
 
 func (t *Token) ID() string {
-	return string(t.signature.Value[:]) // Using the raw signature bytes as the unique ID
+	return hex.EncodeToString(t.signature.Value) // Using the hex-encoded signature bytes as the unique ID
 }
 
 func (t *Token) Value() string {
