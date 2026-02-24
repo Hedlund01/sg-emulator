@@ -29,7 +29,7 @@ func testCtx() context.Context {
 
 // testApp creates a new App instance with a test logger
 func testApp() *App {
-	return New(testLogger())
+	return NewApp(testLogger())
 }
 
 // testKeyPairAndCert generates a fresh Ed25519 key pair and a self-signed test certificate.
@@ -113,6 +113,53 @@ func getTransactionAmount(tx ITransaction) float64 {
 	default:
 		return 0
 	}
+}
+
+// testCreateToken creates a Token signed by acc using privKey.
+// The token has value "test-value" and no clawback address.
+// The account must have enough balance to cover MBR_TOKEN_COST before calling
+// appendTransaction with the resulting MintTokenTransaction.
+func testCreateToken(t *testing.T, acc *Account, privKey ed25519.PrivateKey) *Token {
+	t.Helper()
+
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "test-value"}
+	sig, err := sgcrypto.Sign(payload, privKey, acc.ID().String())
+	require.NoError(t, err, "failed to sign token payload")
+
+	return newToken("test-value", *sig, nil)
+}
+
+// testMintTokenIntoAccount mints a token directly into acc by appending a
+// MintTokenTransaction. It first credits MBR_TOKEN_COST balance so the MBR
+// check passes. Returns the minted token.
+func testMintTokenIntoAccount(t *testing.T, acc *Account, privKey ed25519.PrivateKey) *Token {
+	t.Helper()
+
+	// Ensure the account has enough balance for the MBR
+	mintTx := newMintTransaction(acc, MBR_TOKEN_COST)
+	err := acc.appendTransaction(mintTx)
+	require.NoError(t, err, "failed to mint MBR balance before token mint")
+
+	token := testCreateToken(t, acc, privKey)
+	tx := newMintTokenTransaction(acc, token)
+	err = acc.appendTransaction(tx)
+	require.NoError(t, err, "failed to append mint token transaction")
+
+	return token
+}
+
+// testAuthorizeTokenTransfer authorizes a token-transfer slot on acc for the
+// given tokenId. It first credits MBR_SLOT_COST balance so the MBR check passes.
+func testAuthorizeTokenTransfer(t *testing.T, acc *Account, tokenId string) {
+	t.Helper()
+
+	mintTx := newMintTransaction(acc, MBR_SLOT_COST)
+	err := acc.appendTransaction(mintTx)
+	require.NoError(t, err, "failed to mint MBR_SLOT_COST balance before authorize")
+
+	tx := newAuthorizeTokenTransferTransaction(acc, &tokenId)
+	err = acc.appendTransaction(tx)
+	require.NoError(t, err, "failed to append authorize token transfer transaction")
 }
 
 // runConcurrent runs fn concurrently n times and waits for all goroutines to finish.

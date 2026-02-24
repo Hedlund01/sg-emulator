@@ -6,63 +6,57 @@ import (
 	"testing"
 	"time"
 
+	"sg-emulator/internal/scalegraph"
 	mocks "sg-emulator/internal/server/mocks"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
 // TestVirtualApp_ID verifies ID accessor
 func TestVirtualApp_ID(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	vapp, err := srv.CreateVirtualApp()
-	if err != nil {
-		t.Fatalf("CreateVirtualApp() error = %v", err)
-	}
+	assert.NoError(t, err)
 
 	id := vapp.ID()
-	if id.String() == "" {
-		t.Error("VirtualApp ID is empty")
-	}
+	assert.NotEmpty(t, id.String(), "VirtualApp ID should not be empty")
 
 	// ID should be stable
-	id2 := vapp.ID()
-	if id != id2 {
-		t.Error("VirtualApp ID changed between calls")
-	}
+	assert.Equal(t, id, vapp.ID(), "VirtualApp ID should be stable between calls")
 }
 
 // TestVirtualApp_Client verifies client accessor
 func TestVirtualApp_Client(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	vapp, _ := srv.CreateVirtualApp()
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	client := vapp.Client()
-	if client == nil {
-		t.Error("VirtualApp Client() returned nil")
-	}
-
-	// Client should be stable
-	client2 := vapp.Client()
-	if client != client2 {
-		t.Error("VirtualApp Client() returned different instance")
-	}
+	assert.NotNil(t, client, "VirtualApp Client() should not return nil")
+	assert.Same(t, client, vapp.Client(), "VirtualApp Client() should return the same instance")
 }
 
 // TestVirtualApp_Context verifies context accessor
 func TestVirtualApp_Context(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	vapp, _ := srv.CreateVirtualApp()
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	ctx := vapp.Context()
-	if ctx == nil {
-		t.Error("VirtualApp Context() returned nil")
-	}
+	assert.NotNil(t, ctx, "VirtualApp Context() should not return nil")
 
 	// Context should not be cancelled initially
 	select {
@@ -76,59 +70,61 @@ func TestVirtualApp_Context(t *testing.T) {
 // TestVirtualApp_AddTransport verifies transport addition
 func TestVirtualApp_AddTransport(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	mockTransport := mocks.NewMockTransport(t)
-
 	vapp.AddTransport(mockTransport)
 
 	transports := vapp.Transports()
-	if len(transports) != 1 {
-		t.Errorf("Transports() count = %d, want 1", len(transports))
-	}
-
-	if transports[0] != mockTransport {
-		t.Error("Transports() returned wrong transport")
-	}
+	assert.Len(t, transports, 1, "Transports() count")
+	assert.Equal(t, mockTransport, transports[0], "Transports() should return the added transport")
 }
 
 // TestVirtualApp_AddTransport_Multiple verifies multiple transports
 func TestVirtualApp_AddTransport_Multiple(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	// Add multiple mock transports
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
+
 	count := 3
 	for i := 0; i < count; i++ {
-		mockTransport := mocks.NewMockTransport(t)
-		vapp.AddTransport(mockTransport)
+		vapp.AddTransport(mocks.NewMockTransport(t))
 	}
 
-	transports := vapp.Transports()
-	if len(transports) != count {
-		t.Errorf("Transports() count = %d, want %d", len(transports), count)
-	}
+	assert.Len(t, vapp.Transports(), count, "Transports() count")
 }
 
 // TestVirtualApp_Transports_Empty verifies empty transport list
 func TestVirtualApp_Transports_Empty(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	transports := vapp.Transports()
-	if len(transports) != 0 {
-		t.Errorf("Transports() count = %d, want 0", len(transports))
-	}
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
+
+	assert.Empty(t, vapp.Transports(), "Transports() should be empty initially")
 }
 
 // TestVirtualApp_Addresses verifies address map generation
 func TestVirtualApp_Addresses(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	// Add mock transports with different types and addresses
 	mockREST := mocks.NewMockTransport(t)
@@ -144,36 +140,33 @@ func TestVirtualApp_Addresses(t *testing.T) {
 
 	addresses := vapp.Addresses()
 
-	if len(addresses) != 2 {
-		t.Errorf("Addresses() count = %d, want 2", len(addresses))
-	}
-
-	if addresses["REST"] != "localhost:8080" {
-		t.Errorf("Addresses()[REST] = %s, want localhost:8080", addresses["REST"])
-	}
-
-	if addresses["gRPC"] != "localhost:50051" {
-		t.Errorf("Addresses()[gRPC] = %s, want localhost:50051", addresses["gRPC"])
-	}
+	assert.Len(t, addresses, 2, "Addresses() count")
+	assert.Equal(t, "localhost:8080", addresses["REST"], "Addresses()[REST]")
+	assert.Equal(t, "localhost:50051", addresses["gRPC"], "Addresses()[gRPC]")
 }
 
 // TestVirtualApp_Addresses_Empty verifies empty address map
 func TestVirtualApp_Addresses_Empty(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	addresses := vapp.Addresses()
-	if len(addresses) != 0 {
-		t.Errorf("Addresses() count = %d, want 0", len(addresses))
-	}
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
+
+	assert.Empty(t, vapp.Addresses(), "Addresses() should be empty with no transports")
 }
 
 // TestVirtualApp_Start verifies transport startup
 func TestVirtualApp_Start(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	mockTransport := mocks.NewMockTransport(t)
 	mockTransport.EXPECT().Start(mock.Anything).Return(nil).Once()
@@ -192,8 +185,12 @@ func TestVirtualApp_Start(t *testing.T) {
 // TestVirtualApp_Start_MultipleTransports verifies all transports start
 func TestVirtualApp_Start_MultipleTransports(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	// Add multiple transports
 	mock1 := mocks.NewMockTransport(t)
@@ -221,8 +218,12 @@ func TestVirtualApp_Start_MultipleTransports(t *testing.T) {
 // TestVirtualApp_Start_NoTransports verifies start with no transports
 func TestVirtualApp_Start_NoTransports(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	// Start with no transports should not panic
 	vapp.Start()
@@ -233,8 +234,12 @@ func TestVirtualApp_Start_NoTransports(t *testing.T) {
 // TestVirtualApp_Stop verifies transport shutdown
 func TestVirtualApp_Stop(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	mockTransport := mocks.NewMockTransport(t)
 	mockTransport.EXPECT().Start(mock.Anything).Return(nil).Once()
@@ -258,8 +263,12 @@ func TestVirtualApp_Stop(t *testing.T) {
 // TestVirtualApp_Stop_Multiple verifies multiple Stop calls are safe
 func TestVirtualApp_Stop_Multiple(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	mockTransport := mocks.NewMockTransport(t)
 	mockTransport.EXPECT().Start(mock.Anything).Return(nil).Once()
@@ -281,8 +290,12 @@ func TestVirtualApp_Stop_Multiple(t *testing.T) {
 // TestVirtualApp_Stop_WithoutStart verifies Stop before Start
 func TestVirtualApp_Stop_WithoutStart(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	mockTransport := mocks.NewMockTransport(t)
 	// Stop should be called even if Start wasn't
@@ -297,8 +310,12 @@ func TestVirtualApp_Stop_WithoutStart(t *testing.T) {
 // TestVirtualApp_Start_TransportError verifies transport start error handling
 func TestVirtualApp_Start_TransportError(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	mockTransport := mocks.NewMockTransport(t)
 	mockTransport.EXPECT().Start(mock.Anything).Return(errors.New("start failed")).Once()
@@ -317,8 +334,12 @@ func TestVirtualApp_Start_TransportError(t *testing.T) {
 // TestVirtualApp_Stop_TransportError verifies transport stop error handling
 func TestVirtualApp_Stop_TransportError(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	mockTransport := mocks.NewMockTransport(t)
 	mockTransport.EXPECT().Start(mock.Anything).Return(nil).Once()
@@ -335,8 +356,12 @@ func TestVirtualApp_Stop_TransportError(t *testing.T) {
 // TestVirtualApp_Start_MixedTransportSuccess verifies partial failures
 func TestVirtualApp_Start_MixedTransportSuccess(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	// One transport succeeds
 	mock1 := mocks.NewMockTransport(t)
@@ -361,8 +386,12 @@ func TestVirtualApp_Start_MixedTransportSuccess(t *testing.T) {
 // TestVirtualApp_ContextCancellation verifies context propagation
 func TestVirtualApp_ContextCancellation(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	mockTransport := mocks.NewMockTransport(t)
 
@@ -406,8 +435,12 @@ func TestVirtualApp_ContextCancellation(t *testing.T) {
 // TestVirtualApp_AddTransport_AfterStart verifies adding transport after start
 func TestVirtualApp_AddTransport_AfterStart(t *testing.T) {
 	logger := newTestLogger()
-	srv := New(logger)
-	vapp, _ := srv.CreateVirtualApp()
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
+
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	mock1 := mocks.NewMockTransport(t)
 	mock1.EXPECT().Start(mock.Anything).Return(nil).Once()
@@ -425,9 +458,7 @@ func TestVirtualApp_AddTransport_AfterStart(t *testing.T) {
 	vapp.AddTransport(mock2)
 
 	// Verify both transports present
-	if len(vapp.Transports()) != 2 {
-		t.Errorf("Transports() count = %d, want 2", len(vapp.Transports()))
-	}
+	assert.Len(t, vapp.Transports(), 2, "Transports() count")
 
 	vapp.Stop()
 }
@@ -459,12 +490,12 @@ func TestVirtualApp_ClientIntegration(t *testing.T) {
 	}
 
 	// Verify the account is in the shared app state
-	retrieved, err := srv.app.GetAccount(ctx, acc.ID())
+	getResp, err := srv.app.GetAccount(ctx, &scalegraph.GetAccountRequest{AccountID: acc.ID()})
 	if err != nil {
 		t.Errorf("GetAccount() error = %v", err)
 	}
 
-	if retrieved.ID() != acc.ID() {
+	if getResp.Account.ID() != acc.ID() {
 		t.Error("Virtual app created account not in shared state")
 	}
 }
@@ -498,16 +529,23 @@ func TestVirtualApp_MultipleVirtualApps(t *testing.T) {
 	}
 
 	// All should be in shared state
-	count := srv.app.AccountCount(ctx)
-	if count != 3 {
-		t.Errorf("AccountCount() = %d, want 3", count)
+	countResp, err := srv.app.AccountCount(ctx, &scalegraph.AccountCountRequest{})
+	if err != nil {
+		t.Fatalf("AccountCount() error = %v", err)
+	}
+	if countResp.Count != 3 {
+		t.Errorf("AccountCount() = %d, want 3", countResp.Count)
 	}
 }
 
 // BenchmarkVirtualApp_Start benchmarks startup
 func BenchmarkVirtualApp_Start(b *testing.B) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer cleanup()
 
 	// Pre-create virtual apps to exclude creation/mock setup from benchmark
 	vapps := make([]*VirtualApp, 0, 1000)

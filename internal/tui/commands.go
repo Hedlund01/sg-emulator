@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 )
@@ -24,14 +22,6 @@ func (e ErrMsg) Error() string {
 	return e.Err.Error()
 }
 
-// Example command that returns a status message
-func doSomethingAsync() tea.Cmd {
-	return func() tea.Msg {
-		// Perform async operation here
-		return StatusMsg("Operation completed")
-	}
-}
-
 // createAccountWithCA creates a new account using the server's CA to sign the request.
 // This replaces the old direct CreateAccount call that was removed in the x509-refactor.
 func (m Model) createAccountWithCA(ctx context.Context, balance float64) (*scalegraph.Account, error) {
@@ -44,7 +34,7 @@ func (m Model) createAccountWithCA(ctx context.Context, balance float64) (*scale
 	systemAccountID := scalegraph.ScalegraphIdFromPublicKey(ca.PublicKey())
 	accountIDStr := systemAccountID.String()
 
-	createReq := &crypto.CreateAccountRequest{
+	createReq := &crypto.CreateAccountPayload{
 		InitialBalance: balance,
 	}
 

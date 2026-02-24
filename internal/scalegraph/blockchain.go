@@ -8,6 +8,7 @@ import (
 // IBlockchain defines the interface for blockchain operations
 type IBlockchain interface {
 	append(trx ITransaction) *Block
+	removeLatestBlock()
 	Head() *Block
 	Tail() *Block
 	GetBlocks() []*Block
@@ -43,6 +44,17 @@ func (bc *Blockchain) append(trx ITransaction) *Block {
 	bc.tail = newBlock
 	bc.length++
 	return newBlock
+}
+
+func (bc *Blockchain) removeLatestBlock(){
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	if bc.length <= 1 {
+		return // Can't remove genesis block
+	}
+	bc.tail = bc.tail.PrevBlock()
+	bc.length--
 }
 
 // Len returns the number of blocks in the chain (including genesis)

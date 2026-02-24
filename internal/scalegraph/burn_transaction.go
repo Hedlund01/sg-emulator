@@ -1,7 +1,7 @@
 package scalegraph
 
 type BurnTransaction struct {
-	id       *ScalegraphId
+	id       ScalegraphId
 	sender   *Account
 	receiver *Account
 	amount   float64
@@ -10,20 +10,20 @@ type BurnTransaction struct {
 func newBurnTransaction(receiver *Account, amount float64) *BurnTransaction {
 	txId, _ := NewScalegraphId()
 	return &BurnTransaction{
-		id:       &txId,
+		id:       txId,
 		sender:   nil,
 		receiver: receiver,
 		amount:   amount,
 	}
 }
 
-func (t *BurnTransaction) ID() *ScalegraphId {
+func (t *BurnTransaction) ID() ScalegraphId {
 	return t.id
 }
 
-func (t *BurnTransaction) Type() *TransactionType {
+func (t *BurnTransaction) Type() TransactionType {
 	tt := Burn
-	return &tt
+	return tt
 }
 
 func (t *BurnTransaction) Sender() *Account {

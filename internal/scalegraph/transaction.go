@@ -8,6 +8,8 @@ const (
 	Burn
 	MintToken
 	BurnToken
+	TransferToken
+	AuthorizeTokenTransfer
 )
 
 func (tt TransactionType) String() string {
@@ -22,6 +24,10 @@ func (tt TransactionType) String() string {
 		return "MintToken"
 	case BurnToken:
 		return "BurnToken"
+	case TransferToken:
+		return "TransferToken"
+	case AuthorizeTokenTransfer:
+		return "AuthorizeTokenTransfer"
 	default:
 		return "Unknown"
 	}
@@ -32,8 +38,8 @@ func (tt TransactionType) EnumIndex() int {
 }
 
 type ITransaction interface {
-	ID() *ScalegraphId
-	Type() *TransactionType
+	ID() ScalegraphId
+	Type() TransactionType
 	Sender() *Account
 	Receiver() *Account
 }

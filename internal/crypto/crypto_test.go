@@ -87,8 +87,7 @@ func TestSignAndVerify(t *testing.T) {
 		t.Fatalf("GenerateKeyPair failed: %v", err)
 	}
 
-	// Create test payload
-	payload := &TransferRequest{
+	payload := &TransferPayload{
 		From:      "test-from",
 		To:        "test-to",
 		Amount:    100.0,
@@ -122,8 +121,8 @@ func TestSignAndVerify(t *testing.T) {
 	}
 }
 
-func TestTransferRequestBytes(t *testing.T) {
-	req := &TransferRequest{
+func TestTransferPayloadBytes(t *testing.T) {
+	req := &TransferPayload{
 		From:      "abc123",
 		To:        "def456",
 		Amount:    50.5,

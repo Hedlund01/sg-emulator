@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"sg-emulator/internal/scalegraph"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // Test fixtures with known XOR relationships
@@ -62,9 +64,7 @@ func TestXORDistance_Identity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			distance := xorDistance(tt.id, tt.id)
-			if distance.Cmp(big.NewInt(0)) != 0 {
-				t.Errorf("xorDistance(%s, %s) = %v, want 0", tt.id, tt.id, distance)
-			}
+			assert.Equal(t, 0, distance.Cmp(big.NewInt(0)), "xorDistance(%s, %s) = %v, want 0", tt.id, tt.id, distance)
 		})
 	}
 }
@@ -85,10 +85,8 @@ func TestXORDistance_Symmetry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d1 := xorDistance(tt.a, tt.b)
 			d2 := xorDistance(tt.b, tt.a)
-			if d1.Cmp(d2) != 0 {
-				t.Errorf("xorDistance not symmetric: d(%s, %s) = %v, d(%s, %s) = %v",
-					tt.a, tt.b, d1, tt.b, tt.a, d2)
-			}
+			assert.Equal(t, 0, d1.Cmp(d2), "xorDistance not symmetric: d(%s, %s) = %v, d(%s, %s) = %v",
+				tt.a, tt.b, d1, tt.b, tt.a, d2)
 		})
 	}
 }
@@ -107,9 +105,7 @@ func TestXORDistance_NonNegativity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			distance := xorDistance(tt.a, tt.b)
-			if distance.Sign() < 0 {
-				t.Errorf("xorDistance(%s, %s) = %v, want non-negative", tt.a, tt.b, distance)
-			}
+			assert.GreaterOrEqual(t, distance.Sign(), 0, "xorDistance(%s, %s) = %v, want non-negative", tt.a, tt.b, distance)
 		})
 	}
 }
@@ -158,9 +154,7 @@ func TestXORDistance_KnownValues(t *testing.T) {
 			distance := xorDistance(tt.a, tt.b)
 			expected := new(big.Int)
 			expected.SetString(tt.expected, 16)
-			if distance.Cmp(expected) != 0 {
-				t.Errorf("xorDistance(%s, %s) = %x, want %x", tt.a, tt.b, distance, expected)
-			}
+			assert.Equal(t, 0, distance.Cmp(expected), "xorDistance(%s, %s) = %x, want %x", tt.a, tt.b, distance, expected)
 		})
 	}
 }
@@ -186,10 +180,9 @@ func TestXORDistance_Ordering(t *testing.T) {
 
 	// Verify distances are in ascending order
 	for i := 0; i < len(distances)-1; i++ {
-		if distances[i].Cmp(distances[i+1]) > 0 {
-			t.Errorf("Distance ordering incorrect: distance[%d]=%x > distance[%d]=%x",
-				i, distances[i], i+1, distances[i+1])
-		}
+		assert.LessOrEqual(t, distances[i].Cmp(distances[i+1]), 0,
+			"Distance ordering incorrect: distance[%d]=%x > distance[%d]=%x",
+			i, distances[i], i+1, distances[i+1])
 	}
 }
 
@@ -198,18 +191,9 @@ func TestNewRegistry(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
 
-	if reg == nil {
-		t.Fatal("NewRegistry() returned nil")
-	}
-
-	if reg.Count() != 0 {
-		t.Errorf("NewRegistry().Count() = %d, want 0", reg.Count())
-	}
-
-	apps := reg.List()
-	if len(apps) != 0 {
-		t.Errorf("NewRegistry().List() returned %d apps, want 0", len(apps))
-	}
+	assert.NotNil(t, reg, "NewRegistry() should not return nil")
+	assert.Equal(t, 0, reg.Count(), "NewRegistry().Count() should be 0")
+	assert.Empty(t, reg.List(), "NewRegistry().List() should be empty")
 }
 
 // TestRegistry_Register verifies app registration
@@ -218,90 +202,81 @@ func TestRegistry_Register(t *testing.T) {
 	reg := NewRegistry(logger)
 
 	// Create a test virtual app
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err, "Failed to create test server: %v", err)
+
 	vapp, err := srv.CreateVirtualApp()
-	if err != nil {
-		t.Fatalf("Failed to create virtual app: %v", err)
-	}
+	assert.NoError(t, err, "Failed to create virtual app")
 
 	// Register the app
-	err = reg.Register(vapp)
-	if err != nil {
-		t.Errorf("Register() error = %v, want nil", err)
-	}
+	assert.NoError(t, reg.Register(vapp), "Register() should succeed")
 
 	// Verify count
-	if reg.Count() != 1 {
-		t.Errorf("Count() = %d, want 1", reg.Count())
-	}
+	assert.Equal(t, 1, reg.Count(), "Count() after registration")
 
 	// Verify it can be retrieved
 	retrieved, exists := reg.GetByID(vapp.ID())
-	if !exists {
-		t.Error("GetByID() returned false after registration")
-	}
-	if retrieved != vapp {
-		t.Error("GetByID() returned different VirtualApp instance")
-	}
+	assert.True(t, exists, "GetByID() should return true after registration")
+	assert.Same(t, vapp, retrieved, "GetByID() should return the same VirtualApp instance")
 }
 
 // TestRegistry_Register_Duplicate verifies duplicate registration fails
 func TestRegistry_Register_Duplicate(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	vapp, _ := srv.CreateVirtualApp()
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
 
 	// First registration should succeed
-	err := reg.Register(vapp)
-	if err != nil {
-		t.Fatalf("First Register() error = %v, want nil", err)
-	}
+	err = reg.Register(vapp)
+	assert.NoError(t, err, "First Register() should succeed")
 
 	// Second registration should fail
 	err = reg.Register(vapp)
-	if err == nil {
-		t.Error("Register() duplicate succeeded, want error")
-	}
+	assert.Error(t, err, "Register() duplicate should fail")
 
 	// Count should still be 1
-	if reg.Count() != 1 {
-		t.Errorf("Count() after duplicate = %d, want 1", reg.Count())
-	}
+	assert.Equal(t, 1, reg.Count(), "Count() after duplicate")
 }
 
 // TestRegistry_Unregister verifies app removal
 func TestRegistry_Unregister(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	vapp, _ := srv.CreateVirtualApp()
-	reg.Register(vapp)
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
+	assert.NoError(t, reg.Register(vapp))
 
 	// Unregister the app
 	reg.Unregister(vapp.ID())
 
 	// Verify it's gone
-	if reg.Count() != 0 {
-		t.Errorf("Count() after Unregister() = %d, want 0", reg.Count())
-	}
+	assert.Equal(t, 0, reg.Count(), "Count() after Unregister()")
 
 	_, exists := reg.GetByID(vapp.ID())
-	if exists {
-		t.Error("GetByID() returned true after Unregister()")
-	}
+	assert.False(t, exists, "GetByID() should return false after Unregister()")
 }
 
 // TestRegistry_Unregister_Idempotent verifies unregister is safe to call multiple times
 func TestRegistry_Unregister_Idempotent(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	vapp, _ := srv.CreateVirtualApp()
-	reg.Register(vapp)
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
+	assert.NoError(t, reg.Register(vapp))
 
 	// Unregister multiple times
 	reg.Unregister(vapp.ID())
@@ -309,9 +284,7 @@ func TestRegistry_Unregister_Idempotent(t *testing.T) {
 	reg.Unregister(vapp.ID())
 
 	// Should not panic or cause issues
-	if reg.Count() != 0 {
-		t.Errorf("Count() = %d, want 0", reg.Count())
-	}
+	assert.Equal(t, 0, reg.Count(), "Count() after multiple Unregister()")
 }
 
 // TestRegistry_GetByID_NotFound verifies behavior for non-existent ID
@@ -322,34 +295,31 @@ func TestRegistry_GetByID_NotFound(t *testing.T) {
 	nonExistentID := idRandom1
 
 	vapp, exists := reg.GetByID(nonExistentID)
-	if exists {
-		t.Error("GetByID() for non-existent ID returned true")
-	}
-	if vapp != nil {
-		t.Error("GetByID() for non-existent ID returned non-nil VirtualApp")
-	}
+	assert.False(t, exists, "GetByID() for non-existent ID should return false")
+	assert.Nil(t, vapp, "GetByID() for non-existent ID should return nil")
 }
 
 // TestRegistry_List verifies listing all apps
 func TestRegistry_List(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	// Register multiple apps
 	count := 5
 	vapps := make([]*VirtualApp, count)
 	for i := 0; i < count; i++ {
-		vapp, _ := srv.CreateVirtualApp()
+		vapp, err := srv.CreateVirtualApp()
+		assert.NoError(t, err)
 		vapps[i] = vapp
-		reg.Register(vapp)
+		assert.NoError(t, reg.Register(vapp))
 	}
 
 	// Get list
 	list := reg.List()
-	if len(list) != count {
-		t.Errorf("List() returned %d apps, want %d", len(list), count)
-	}
+	assert.Len(t, list, count, "List() should return all registered apps")
 
 	// Verify all apps are present
 	found := make(map[scalegraph.ScalegraphId]bool)
@@ -358,9 +328,7 @@ func TestRegistry_List(t *testing.T) {
 	}
 
 	for _, vapp := range vapps {
-		if !found[vapp.ID()] {
-			t.Errorf("List() missing VirtualApp with ID %s", vapp.ID())
-		}
+		assert.True(t, found[vapp.ID()], "List() missing VirtualApp with ID %s", vapp.ID())
 	}
 }
 
@@ -368,13 +336,16 @@ func TestRegistry_List(t *testing.T) {
 func TestRegistry_GetKClosest_Basic(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	// Register 10 apps
 	count := 10
 	for i := 0; i < count; i++ {
-		vapp, _ := srv.CreateVirtualApp()
-		reg.Register(vapp)
+		vapp, err := srv.CreateVirtualApp()
+		assert.NoError(t, err)
+		assert.NoError(t, reg.Register(vapp))
 	}
 
 	// Get 5 closest to a random target
@@ -382,13 +353,8 @@ func TestRegistry_GetKClosest_Basic(t *testing.T) {
 	k := 5
 
 	closest, err := reg.GetKClosest(target, k)
-	if err != nil {
-		t.Fatalf("GetKClosest() error = %v, want nil", err)
-	}
-
-	if len(closest) != k {
-		t.Errorf("GetKClosest() returned %d apps, want %d", len(closest), k)
-	}
+	assert.NoError(t, err)
+	assert.Len(t, closest, k, "GetKClosest() should return k apps")
 
 	// Verify results are sorted by distance
 	distances := make([]*big.Int, len(closest))
@@ -397,10 +363,9 @@ func TestRegistry_GetKClosest_Basic(t *testing.T) {
 	}
 
 	for i := 0; i < len(distances)-1; i++ {
-		if distances[i].Cmp(distances[i+1]) > 0 {
-			t.Errorf("GetKClosest() results not sorted: distance[%d]=%x > distance[%d]=%x",
-				i, distances[i], i+1, distances[i+1])
-		}
+		assert.LessOrEqual(t, distances[i].Cmp(distances[i+1]), 0,
+			"GetKClosest() results not sorted: distance[%d]=%x > distance[%d]=%x",
+			i, distances[i], i+1, distances[i+1])
 	}
 }
 
@@ -413,23 +378,21 @@ func TestRegistry_GetKClosest_Empty(t *testing.T) {
 	k := 5
 
 	closest, err := reg.GetKClosest(target, k)
-	if err != nil {
-		t.Fatalf("GetKClosest() on empty registry error = %v, want nil", err)
-	}
-
-	if len(closest) != 0 {
-		t.Errorf("GetKClosest() on empty registry returned %d apps, want 0", len(closest))
-	}
+	assert.NoError(t, err, "GetKClosest() on empty registry should not error")
+	assert.Empty(t, closest, "GetKClosest() on empty registry should return empty slice")
 }
 
 // TestRegistry_GetKClosest_InvalidK verifies error handling for invalid k
 func TestRegistry_GetKClosest_InvalidK(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
-	vapp, _ := srv.CreateVirtualApp()
-	reg.Register(vapp)
+	vapp, err := srv.CreateVirtualApp()
+	assert.NoError(t, err)
+	assert.NoError(t, reg.Register(vapp))
 
 	target := idRandom1
 
@@ -445,9 +408,7 @@ func TestRegistry_GetKClosest_InvalidK(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := reg.GetKClosest(target, tt.k)
-			if err == nil {
-				t.Error("GetKClosest() with invalid k succeeded, want error")
-			}
+			assert.Error(t, err, "GetKClosest() with invalid k should fail")
 		})
 	}
 }
@@ -456,13 +417,16 @@ func TestRegistry_GetKClosest_InvalidK(t *testing.T) {
 func TestRegistry_GetKClosest_KGreaterThanCount(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	// Register 3 apps
 	count := 3
 	for i := 0; i < count; i++ {
-		vapp, _ := srv.CreateVirtualApp()
-		reg.Register(vapp)
+		vapp, err := srv.CreateVirtualApp()
+		assert.NoError(t, err)
+		assert.NoError(t, reg.Register(vapp))
 	}
 
 	// Request more than available
@@ -470,14 +434,9 @@ func TestRegistry_GetKClosest_KGreaterThanCount(t *testing.T) {
 	k := 10
 
 	closest, err := reg.GetKClosest(target, k)
-	if err != nil {
-		t.Fatalf("GetKClosest() error = %v, want nil", err)
-	}
-
+	assert.NoError(t, err)
 	// Should return all available apps
-	if len(closest) != count {
-		t.Errorf("GetKClosest() returned %d apps, want %d (all available)", len(closest), count)
-	}
+	assert.Len(t, closest, count, "GetKClosest() should return all available apps when k > count")
 }
 
 // TestRegistry_GetKClosest_Ordering verifies correct distance-based ordering
@@ -499,20 +458,21 @@ func TestRegistry_GetKClosest_Ordering(t *testing.T) {
 	// We need to create virtual apps with specific IDs
 	// Since we can't control ID generation in CreateVirtualApp,
 	// we'll test the xorDistance ordering separately
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 	vapps := make([]*VirtualApp, len(testIDs))
 	for i := range testIDs {
-		vapp, _ := srv.CreateVirtualApp()
+		vapp, err := srv.CreateVirtualApp()
+		assert.NoError(t, err)
 		vapps[i] = vapp
-		reg.Register(vapp)
+		assert.NoError(t, reg.Register(vapp))
 	}
 
 	// Get all apps sorted by distance
 	k := len(vapps)
 	closest, err := reg.GetKClosest(target, k)
-	if err != nil {
-		t.Fatalf("GetKClosest() error = %v", err)
-	}
+	assert.NoError(t, err)
 
 	// Calculate actual distances
 	distances := make([]*big.Int, len(closest))
@@ -522,10 +482,9 @@ func TestRegistry_GetKClosest_Ordering(t *testing.T) {
 
 	// Verify monotonic ordering
 	for i := 0; i < len(distances)-1; i++ {
-		if distances[i].Cmp(distances[i+1]) > 0 {
-			t.Errorf("GetKClosest() not properly ordered: distance[%d]=%x > distance[%d]=%x",
-				i, distances[i], i+1, distances[i+1])
-		}
+		assert.LessOrEqual(t, distances[i].Cmp(distances[i+1]), 0,
+			"GetKClosest() not properly ordered: distance[%d]=%x > distance[%d]=%x",
+			i, distances[i], i+1, distances[i+1])
 	}
 }
 
@@ -533,7 +492,9 @@ func TestRegistry_GetKClosest_Ordering(t *testing.T) {
 func TestRegistry_Concurrent(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, 100)
@@ -563,21 +524,22 @@ func TestRegistry_Concurrent(t *testing.T) {
 	}
 
 	// Verify final count
-	if reg.Count() != 50 {
-		t.Errorf("Count() after concurrent registrations = %d, want 50", reg.Count())
-	}
+	assert.Equal(t, 50, reg.Count(), "Count() after concurrent registrations")
 }
 
 // TestRegistry_ConcurrentGetKClosest verifies concurrent GetKClosest calls
 func TestRegistry_ConcurrentGetKClosest(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	// Populate registry
 	for i := 0; i < 20; i++ {
-		vapp, _ := srv.CreateVirtualApp()
-		reg.Register(vapp)
+		vapp, err := srv.CreateVirtualApp()
+		assert.NoError(t, err)
+		assert.NoError(t, reg.Register(vapp))
 	}
 
 	var wg sync.WaitGroup
@@ -609,23 +571,24 @@ func TestRegistry_ConcurrentGetKClosest(t *testing.T) {
 		errorCount++
 	}
 
-	if errorCount > 0 {
-		t.Errorf("Concurrent GetKClosest had %d errors", errorCount)
-	}
+	assert.Equal(t, 0, errorCount, "Concurrent GetKClosest should have no errors")
 }
 
 // TestRegistry_ConcurrentMixed verifies mixed read/write operations
 func TestRegistry_ConcurrentMixed(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	// Pre-populate with some apps
 	initialApps := make([]*VirtualApp, 10)
 	for i := 0; i < 10; i++ {
-		vapp, _ := srv.CreateVirtualApp()
+		vapp, err := srv.CreateVirtualApp()
+		assert.NoError(t, err)
 		initialApps[i] = vapp
-		reg.Register(vapp)
+		assert.NoError(t, reg.Register(vapp))
 	}
 
 	var wg sync.WaitGroup
@@ -686,9 +649,7 @@ func TestRegistry_ConcurrentMixed(t *testing.T) {
 
 	// Verify registry is still functional
 	count := reg.Count()
-	if count < 0 {
-		t.Error("Invalid count after concurrent operations")
-	}
+	assert.GreaterOrEqual(t, count, 0, "Invalid count after concurrent operations")
 }
 
 // BenchmarkXORDistance benchmarks distance calculation
@@ -715,10 +676,19 @@ func BenchmarkGetKClosest(b *testing.B) {
 			b.Run(name, func(b *testing.B) {
 				// Setup
 				reg := NewRegistry(logger)
-				srv := New(logger)
+				srv, cleanup, err := newTestServer(logger)
+				if err != nil {
+					b.Fatal(err)
+				}
+				defer cleanup()
 				for i := 0; i < size; i++ {
-					vapp, _ := srv.CreateVirtualApp()
-					reg.Register(vapp)
+					vapp, err := srv.CreateVirtualApp()
+					if err != nil {
+						b.Fatal(err)
+					}
+					if err := reg.Register(vapp); err != nil {
+						b.Fatal(err)
+					}
 				}
 
 				for b.Loop() {
@@ -732,13 +702,20 @@ func BenchmarkGetKClosest(b *testing.B) {
 // BenchmarkRegistry_Register benchmarks registration
 func BenchmarkRegistry_Register(b *testing.B) {
 	logger := newTestLogger()
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer cleanup()
 	reg := NewRegistry(logger)
 
 	// Pre-create apps to exclude creation time from benchmark
 	apps := make([]*VirtualApp, 0, 1000)
 	for i := 0; i < 1000; i++ {
-		vapp, _ := srv.CreateVirtualApp()
+		vapp, err := srv.CreateVirtualApp()
+		if err != nil {
+			b.Fatal(err)
+		}
 		apps = append(apps, vapp)
 	}
 
@@ -753,12 +730,21 @@ func BenchmarkRegistry_Register(b *testing.B) {
 func BenchmarkRegistry_List(b *testing.B) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer cleanup()
 
 	// Populate registry
 	for i := 0; i < 1000; i++ {
-		vapp, _ := srv.CreateVirtualApp()
-		reg.Register(vapp)
+		vapp, err := srv.CreateVirtualApp()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := reg.Register(vapp); err != nil {
+			b.Fatal(err)
+		}
 	}
 
 	for b.Loop() {
@@ -770,15 +756,18 @@ func BenchmarkRegistry_List(b *testing.B) {
 func TestRegistry_GetKClosest_StableSort(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	// Register apps
 	count := 10
 	vapps := make([]*VirtualApp, count)
 	for i := 0; i < count; i++ {
-		vapp, _ := srv.CreateVirtualApp()
+		vapp, err := srv.CreateVirtualApp()
+		assert.NoError(t, err)
 		vapps[i] = vapp
-		reg.Register(vapp)
+		assert.NoError(t, reg.Register(vapp))
 	}
 
 	target := idRandom1
@@ -787,19 +776,17 @@ func TestRegistry_GetKClosest_StableSort(t *testing.T) {
 	// Call GetKClosest multiple times
 	results := make([][]*VirtualApp, 5)
 	for i := range results {
-		closest, _ := reg.GetKClosest(target, k)
+		closest, err := reg.GetKClosest(target, k)
+		assert.NoError(t, err)
 		results[i] = closest
 	}
 
 	// All results should be identical (stable sort with same input)
 	for i := 1; i < len(results); i++ {
-		if len(results[i]) != len(results[0]) {
-			t.Fatalf("Result %d has different length than result 0", i)
-		}
+		assert.Len(t, results[i], len(results[0]), "Result %d has different length than result 0", i)
 		for j := range results[i] {
-			if results[i][j].ID() != results[0][j].ID() {
-				t.Errorf("GetKClosest() not stable: result %d differs at position %d", i, j)
-			}
+			assert.Equal(t, results[0][j].ID(), results[i][j].ID(),
+				"GetKClosest() not stable: result %d differs at position %d", i, j)
 		}
 	}
 }
@@ -835,9 +822,7 @@ func TestXORDistance_BitPatterns(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := xorDistance(tt.a, tt.b)
 			// Just verify it's non-negative and computable
-			if d.Sign() < 0 {
-				t.Errorf("xorDistance returned negative value for %s", tt.desc)
-			}
+			assert.GreaterOrEqual(t, d.Sign(), 0, "xorDistance returned negative value for %s", tt.desc)
 		})
 	}
 }
@@ -856,21 +841,22 @@ func isSorted(distances []*big.Int) bool {
 func TestGetKClosest_VerifiesCompleteSorting(t *testing.T) {
 	logger := newTestLogger()
 	reg := NewRegistry(logger)
-	srv := New(logger)
+	srv, cleanup, err := newTestServer(logger)
+	defer cleanup()
+	assert.NoError(t, err)
 
 	// Register 100 apps for thorough testing
 	for i := 0; i < 100; i++ {
-		vapp, _ := srv.CreateVirtualApp()
-		reg.Register(vapp)
+		vapp, err := srv.CreateVirtualApp()
+		assert.NoError(t, err)
+		assert.NoError(t, reg.Register(vapp))
 	}
 
 	target := idRandom1
 	k := 50
 
 	closest, err := reg.GetKClosest(target, k)
-	if err != nil {
-		t.Fatalf("GetKClosest() error = %v", err)
-	}
+	assert.NoError(t, err)
 
 	// Calculate all distances
 	distances := make([]*big.Int, len(closest))
@@ -879,9 +865,7 @@ func TestGetKClosest_VerifiesCompleteSorting(t *testing.T) {
 	}
 
 	// Verify sorting
-	if !isSorted(distances) {
-		t.Error("GetKClosest() results are not properly sorted")
-	}
+	assert.True(t, isSorted(distances), "GetKClosest() results are not properly sorted")
 
 	// Also verify these are actually the k closest
 	// Get all apps and their distances
@@ -898,9 +882,8 @@ func TestGetKClosest_VerifiesCompleteSorting(t *testing.T) {
 
 	// Compare first k of sorted all vs returned closest
 	for i := 0; i < k; i++ {
-		if distances[i].Cmp(allDistances[i]) != 0 {
-			t.Errorf("GetKClosest() result[%d] distance %x != expected %x",
-				i, distances[i], allDistances[i])
-		}
+		assert.Equal(t, 0, distances[i].Cmp(allDistances[i]),
+			"GetKClosest() result[%d] distance %x != expected %x",
+			i, distances[i], allDistances[i])
 	}
 }

@@ -49,8 +49,24 @@ func (c *Client) SetTimeout(d time.Duration) {
 	c.timeout = d
 }
 
+// Send is the generic, type-safe way to send requests.
+func Send[Req, Resp any](c *Client, ctx context.Context, req *Req) (*Resp, error) {
+	resp, err := c.sendRequest(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+	result, ok := resp.Payload.(*Resp)
+	if !ok {
+		return nil, fmt.Errorf("unexpected response type %T", resp.Payload)
+	}
+	return result, nil
+}
+
 // sendRequest sends a request and waits for the response
-func (c *Client) sendRequest(ctx context.Context, reqType messages.RequestType, payload any) (messages.Response, error) {
+func (c *Client) sendRequest(ctx context.Context, payload any) (messages.Response, error) {
 	traceID := trace.GetTraceID(ctx)
 	reqID := generateRequestID()
 
@@ -72,7 +88,6 @@ func (c *Client) sendRequest(ctx context.Context, reqType messages.RequestType, 
 
 	req := messages.Request{
 		ID:           reqID,
-		Type:         reqType,
 		ResponseChan: respChan,
 		Payload:      payload,
 		Context:      ctx,
@@ -107,53 +122,37 @@ func (c *Client) sendRequest(ctx context.Context, reqType messages.RequestType, 
 
 // CreateAccountWithCredentials creates a new account and returns the full response
 // including the certificate and private key
-func (c *Client) CreateAccountWithCredentials(ctx context.Context, initialBalance float64, signedReq *crypto.SignedEnvelope[*crypto.CreateAccountRequest]) (*messages.CreateAccountWithKeysResponse, error) {
+func (c *Client) CreateAccountWithCredentials(ctx context.Context, initialBalance float64, signedReq *crypto.SignedEnvelope[*crypto.CreateAccountPayload]) (*scalegraph.CreateAccountResponse, error) {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"initial_balance", initialBalance}
 	if traceID != "" {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Creating account with credentials", logAttrs...)
-	resp, err := c.sendRequest(ctx, messages.ReqCreateAccount, &messages.CreateAccountWithKeysPayload{
+
+	return Send[scalegraph.CreateAccountRequest, scalegraph.CreateAccountResponse](c, ctx, &scalegraph.CreateAccountRequest{
 		InitialBalance: initialBalance,
-		SignedRequest:  signedReq,
+		SignedEnvelope: signedReq,
 	})
-	if err != nil {
-		logAttrs = append(logAttrs, "error", err)
-		c.logger.Error("Failed to create account", logAttrs...)
-		return nil, err
-	}
-	if !resp.Success {
-		logAttrs = append(logAttrs, "error", resp.Error)
-		c.logger.Error("Account creation failed", logAttrs...)
-		return nil, errors.New(resp.Error)
-	}
-	result := resp.Payload.(messages.CreateAccountWithKeysResponse)
-	logAttrs = append([]any{"account_id", result.Account.ID(), "balance", result.Account.Balance(), "has_cert", result.Certificate != ""}, logAttrs...)
-	c.logger.Info("Account created with credentials", logAttrs...)
-	return &result, nil
 }
 
 // GetAccount retrieves an account by ID
-func (c *Client) GetAccount(ctx context.Context, id scalegraph.ScalegraphId, signedReq *crypto.SignedEnvelope[*crypto.GetAccountRequest]) (*scalegraph.Account, error) {
+func (c *Client) GetAccount(ctx context.Context, id scalegraph.ScalegraphId, signedReq *crypto.SignedEnvelope[*crypto.GetAccountPayload]) (*scalegraph.Account, error) {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"account_id", id}
 	if traceID != "" {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Getting account", logAttrs...)
-	resp, err := c.sendRequest(ctx, messages.ReqGetAccount, &messages.GetAccountPayload{AccountID: id, SignedRequest: signedReq})
+
+	resp, err := Send[scalegraph.GetAccountRequest, scalegraph.GetAccountResponse](c, ctx, &scalegraph.GetAccountRequest{
+		AccountID:      id,
+		SignedEnvelope: signedReq,
+	})
 	if err != nil {
-		logAttrs = append(logAttrs, "error", err)
-		c.logger.Error("Failed to get account", logAttrs...)
 		return nil, err
 	}
-	if !resp.Success {
-		logAttrs = append(logAttrs, "error", resp.Error)
-		c.logger.Warn("Account not found", logAttrs...)
-		return nil, errors.New(resp.Error)
-	}
-	return resp.Payload.(messages.GetAccountResponse).Account, nil
+	return resp.Account, nil
 }
 
 // GetAccounts retrieves all accounts
@@ -164,25 +163,16 @@ func (c *Client) GetAccounts(ctx context.Context) ([]*scalegraph.Account, error)
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Getting all accounts", logAttrs...)
-	resp, err := c.sendRequest(ctx, messages.ReqGetAccounts, messages.GetAccountsPayload{})
+
+	resp, err := Send[scalegraph.GetAccountsRequest, scalegraph.GetAccountsResponse](c, ctx, &scalegraph.GetAccountsRequest{})
 	if err != nil {
-		logAttrs = append(logAttrs, "error", err)
-		c.logger.Error("Failed to get accounts", logAttrs...)
 		return nil, err
 	}
-	if !resp.Success {
-		logAttrs = append(logAttrs, "error", resp.Error)
-		c.logger.Error("Get accounts failed", logAttrs...)
-		return nil, errors.New(resp.Error)
-	}
-	accounts := resp.Payload.(messages.GetAccountsResponse).Accounts
-	logAttrs = append([]any{"count", len(accounts)}, logAttrs...)
-	c.logger.Debug("Retrieved accounts", logAttrs...)
-	return accounts, nil
+	return resp.Accounts, nil
 }
 
 // TransferSigned transfers funds with a cryptographically signed request
-func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.ScalegraphId, amount float64, signedRequest *crypto.SignedEnvelope[*crypto.TransferRequest]) error {
+func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.ScalegraphId, amount float64, signedRequest *crypto.SignedEnvelope[*crypto.TransferPayload]) error {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"from", from, "to", to, "amount", amount, "signed", true}
 	if traceID != "" {
@@ -190,25 +180,14 @@ func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.Scalegr
 	}
 	c.logger.Debug("Signed transfer requested", logAttrs...)
 
-	resp, err := c.sendRequest(ctx, messages.ReqTransfer, &messages.TransferPayload{
-		From:          from,
-		To:            to,
-		Amount:        amount,
-		Nonce:         signedRequest.Payload.Nonce,
-		SignedRequest: signedRequest,
+	_, err := Send[scalegraph.TransferRequest, scalegraph.TransferResponse](c, ctx, &scalegraph.TransferRequest{
+		From:           from,
+		To:             to,
+		Amount:         amount,
+		Nonce:          signedRequest.Payload.Nonce,
+		SignedEnvelope: signedRequest,
 	})
-	if err != nil {
-		logAttrs = append(logAttrs, "error", err)
-		c.logger.Error("Signed transfer failed", logAttrs...)
-		return err
-	}
-	if !resp.Success {
-		logAttrs = append(logAttrs, "error", resp.Error)
-		c.logger.Warn("Signed transfer rejected", logAttrs...)
-		return errors.New(resp.Error)
-	}
-	c.logger.Info("Signed transfer completed", logAttrs...)
-	return nil
+	return err
 }
 
 // Mint creates new funds in an account
@@ -219,22 +198,12 @@ func (c *Client) Mint(ctx context.Context, to scalegraph.ScalegraphId, amount fl
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Mint requested", logAttrs...)
-	resp, err := c.sendRequest(ctx, messages.ReqMint, messages.MintPayload{
+
+	_, err := Send[scalegraph.MintRequest, scalegraph.MintResponse](c, ctx, &scalegraph.MintRequest{
 		To:     to,
 		Amount: amount,
 	})
-	if err != nil {
-		logAttrs = append(logAttrs, "error", err)
-		c.logger.Error("Mint failed", logAttrs...)
-		return err
-	}
-	if !resp.Success {
-		logAttrs = append(logAttrs, "error", resp.Error)
-		c.logger.Warn("Mint rejected", logAttrs...)
-		return errors.New(resp.Error)
-	}
-	c.logger.Info("Mint completed", logAttrs...)
-	return nil
+	return err
 }
 
 // AccountCount returns the total number of accounts
@@ -245,19 +214,83 @@ func (c *Client) AccountCount(ctx context.Context) (int, error) {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Getting account count", logAttrs...)
-	resp, err := c.sendRequest(ctx, messages.ReqAccountCount, messages.AccountCountPayload{})
+
+	resp, err := Send[scalegraph.AccountCountRequest, scalegraph.AccountCountResponse](c, ctx, &scalegraph.AccountCountRequest{})
 	if err != nil {
-		logAttrs = append(logAttrs, "error", err)
-		c.logger.Error("Failed to get account count", logAttrs...)
 		return 0, err
 	}
-	if !resp.Success {
-		logAttrs = append(logAttrs, "error", resp.Error)
-		c.logger.Error("Account count failed", logAttrs...)
-		return 0, errors.New(resp.Error)
+	return resp.Count, nil
+}
+
+func (c *Client) MintTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.MintTokenPayload]) (*scalegraph.MintTokenResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"account_id", signedReq.Signature.SignerID, "token_id", string(signedReq.Signature.Value), "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
-	count := resp.Payload.(messages.AccountCountResponse).Count
-	logAttrs = append([]any{"count", count}, logAttrs...)
-	c.logger.Debug("Account count retrieved", logAttrs...)
-	return count, nil
+	c.logger.Debug("Mint token requested", logAttrs...)
+	var clawBackAddr *scalegraph.ScalegraphId = nil
+	if signedReq.Payload.ClawbackAddress != nil {
+		addr, err := scalegraph.ScalegraphIdFromString(*signedReq.Payload.ClawbackAddress)
+		if err != nil {
+			c.logger.Error("Invalid clawback address", "error", err, "clawback_address", *signedReq.Payload.ClawbackAddress)
+			return nil, err
+		}
+		clawBackAddr = &addr
+	}
+	logAttrs = append(logAttrs, "clawback_address", clawBackAddr)
+
+	return Send[scalegraph.MintTokenRequest, scalegraph.MintTokenResponse](c, ctx, &scalegraph.MintTokenRequest{
+		TokenValue:      signedReq.Payload.TokenValue,
+		ClawbackAddress: clawBackAddr,
+		SignedEnvelope:  signedReq,
+	})
+}
+
+func (c *Client) AuthorizeTokenTransferSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload]) (*scalegraph.AuthorizeTokenTransferResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"account_id", signedReq.Payload.AccountID, "token_id", signedReq.Payload.TokenID, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Authorize token transfer requested", logAttrs...)
+
+	acc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.AccountID)
+	if err != nil {
+		c.logger.Error("Invalid account ID in signed request", "error", err, "account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+
+	return Send[scalegraph.AuthorizeTokenTransferRequest, scalegraph.AuthorizeTokenTransferResponse](c, ctx, &scalegraph.AuthorizeTokenTransferRequest{
+		AccountID:      acc,
+		TokenId:        signedReq.Payload.TokenID,
+		SignedEnvelope: signedReq,
+	})
+}
+
+func (c *Client) TransferTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.TransferTokenPayload]) (*scalegraph.TransferTokenResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"from", signedReq.Payload.From, "to", signedReq.Payload.To, "token_id", signedReq.Payload.TokenID, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Transfer token requested", logAttrs...)
+
+	fromAcc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.From)
+	if err != nil {
+		c.logger.Error("Invalid from account ID in signed request", "error", err, "from_account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+	toAcc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.To)
+	if err != nil {
+		c.logger.Error("Invalid to account ID in signed request", "error", err, "to_account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+
+	return Send[scalegraph.TransferTokenRequest, scalegraph.TransferTokenResponse](c, ctx, &scalegraph.TransferTokenRequest{
+		From:           fromAcc,
+		To:             toAcc,
+		TokenId:        signedReq.Payload.TokenID,
+		SignedEnvelope: signedReq,
+	})
 }

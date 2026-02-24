@@ -70,7 +70,7 @@ func main() {
 
 	// Initialize Certificate Authority
 	caLogger := rootLogger.With("component", "ca")
-	certAuth, err := ca.New(cwd, caLogger)
+	certAuth, err := ca.NewCA(cwd, caLogger)
 	if err != nil {
 		slog.Error("Failed to initialize Certificate Authority", "error", err)
 		os.Exit(1)

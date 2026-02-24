@@ -2,9 +2,9 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 
 	"sg-emulator/internal/ca"
@@ -14,19 +14,7 @@ import (
 	"sg-emulator/internal/trace"
 )
 
-// Signature verification errors
-var (
-	// ErrNoVerifier indicates the server was not configured with a CA for signature verification
-	ErrNoVerifier = errors.New("server not configured with certificate authority for signature verification")
-	// ErrMissingSignature indicates a required signature was not provided
-	ErrMissingSignature = errors.New("signature required but not provided")
-	// ErrInvalidSignature indicates the signature verification failed
-	ErrInvalidSignature = errors.New("signature verification failed")
-	// ErrSignerMismatch indicates the signer ID does not match the expected account
-	ErrSignerMismatch = errors.New("signer ID does not match expected account")
-	// ErrPayloadMismatch indicates the payload data does not match the signed data
-	ErrPayloadMismatch = errors.New("payload data does not match signed data")
-)
+type handlerFunc func(ctx context.Context, payload any) (any, error)
 
 // Server wraps a scalegraph.App and processes requests in its own goroutine.
 // It also manages VirtualApps through its Registry.
@@ -40,26 +28,26 @@ type Server struct {
 	logger      *slog.Logger
 	ca          *ca.CA
 	verifier    *crypto.Verifier
+	handlers    map[reflect.Type]handlerFunc
 }
 
-// New creates a new Server with a fresh App and Registry
-func New(logger *slog.Logger) *Server {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{
-		app:         scalegraph.New(logger.With("component", "app")),
-		registry:    NewRegistry(logger.With("component", "registry")),
-		requestChan: make(chan messages.Request, 1000),
-		ctx:         ctx,
-		cancel:      cancel,
-		logger:      logger,
+// RegisterHandler registers a typed handler for a request type.
+func RegisterHandler[Req, Resp any](s *Server, handler func(ctx context.Context, req *Req) (*Resp, error)) {
+	reqType := reflect.TypeOf((*Req)(nil))
+	s.handlers[reqType] = func(ctx context.Context, payload any) (any, error) {
+		req, ok := payload.(*Req)
+		if !ok {
+			return nil, fmt.Errorf("invalid payload type: got %T, want *%s", payload, reqType.Elem().Name())
+		}
+		return handler(ctx, req)
 	}
 }
 
 // NewWithCA creates a new Server with a Certificate Authority
 func NewWithCA(logger *slog.Logger, certAuth *ca.CA) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{
-		app:         scalegraph.New(logger.With("component", "app")),
+	s := &Server{
+		app:         scalegraph.NewApp(logger.With("component", "app")),
 		registry:    NewRegistry(logger.With("component", "registry")),
 		requestChan: make(chan messages.Request, 1000),
 		ctx:         ctx,
@@ -67,7 +55,105 @@ func NewWithCA(logger *slog.Logger, certAuth *ca.CA) *Server {
 		logger:      logger,
 		ca:          certAuth,
 		verifier:    certAuth.NewVerifier(),
+		handlers:    make(map[reflect.Type]handlerFunc),
 	}
+	s.registerHandlers()
+	return s
+}
+
+func (s *Server) registerHandlers() {
+
+	// Money
+	RegisterHandler(s, s.handleTransfer)
+	RegisterHandler(s, s.handleMint)
+
+	//Accounts
+	RegisterHandler(s, s.handleAccountCount)
+	RegisterHandler(s, s.handleCreateAccount)
+	RegisterHandler(s, s.handleGetAccount)
+	RegisterHandler(s, s.handleGetAccounts)
+
+	//Tokens
+	RegisterHandler(s, s.handleMintToken)
+	RegisterHandler(s, s.handleAuthorizeTokenTransfer)
+	RegisterHandler(s, s.handleTransferToken)
+}
+
+func (s *Server) handleCreateAccount(ctx context.Context, req *scalegraph.CreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {
+	// Verify the certificate in the envelope matches the server CA
+	payloadCert, err := crypto.ParseCertificatePEM(req.SignedEnvelope.Certificate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid certificate in request: %w", err)
+	}
+	if !s.ca.Certificate().Equal(payloadCert) {
+		return nil, fmt.Errorf("certificate in request does not match server CA certificate")
+	}
+
+	// Create account credentials via CA
+	keyPair, cert, _, err := s.ca.CreateAccountCredentials()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create account credentials: %w", err)
+	}
+
+	acc, err := s.app.CreateAccountWithKeys(ctx, keyPair.PublicKey, cert, req.InitialBalance)
+	if err != nil {
+		return nil, err
+	}
+
+	certPEM := crypto.EncodeCertificatePEM(cert)
+	privKeyPEM, _ := crypto.EncodePrivateKeyPEM(keyPair.PrivateKey)
+	pubKeyPEM, _ := crypto.EncodePublicKeyPEM(keyPair.PublicKey)
+
+	return &scalegraph.CreateAccountResponse{
+		Account:     acc,
+		Certificate: certPEM,
+		PrivateKey:  string(privKeyPEM),
+		PublicKey:   string(pubKeyPEM),
+	}, nil
+}
+
+func (s *Server) handleGetAccount(ctx context.Context, req *scalegraph.GetAccountRequest) (*scalegraph.GetAccountResponse, error) {
+	return s.app.GetAccount(ctx, req)
+}
+
+func (s *Server) handleGetAccounts(ctx context.Context, req *scalegraph.GetAccountsRequest) (*scalegraph.GetAccountsResponse, error) {
+	return s.app.GetAccounts(ctx, req)
+}
+
+func (s *Server) handleTransfer(ctx context.Context, req *scalegraph.TransferRequest) (*scalegraph.TransferResponse, error) {
+	return s.app.Transfer(ctx, req)
+}
+
+func (s *Server) handleMint(ctx context.Context, req *scalegraph.MintRequest) (*scalegraph.MintResponse, error) {
+	err := s.app.Mint(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &scalegraph.MintResponse{}, nil
+}
+
+func (s *Server) handleMintToken(ctx context.Context, req *scalegraph.MintTokenRequest) (*scalegraph.MintTokenResponse, error) {
+	return s.app.MintToken(ctx, req)
+}
+
+func (s *Server) handleAccountCount(ctx context.Context, req *scalegraph.AccountCountRequest) (*scalegraph.AccountCountResponse, error) {
+	return s.app.AccountCount(ctx, req)
+}
+
+func (s *Server) handleAuthorizeTokenTransfer(ctx context.Context, req *scalegraph.AuthorizeTokenTransferRequest) (*scalegraph.AuthorizeTokenTransferResponse, error) {
+	err := s.app.AuthorizeTokenTransfer(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &scalegraph.AuthorizeTokenTransferResponse{}, nil
+}
+
+func (s *Server) handleTransferToken(ctx context.Context, req *scalegraph.TransferTokenRequest) (*scalegraph.TransferTokenResponse, error) {
+	err := s.app.TransferToken(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &scalegraph.TransferTokenResponse{}, nil
 }
 
 // CA returns the server's Certificate Authority (may be nil)
@@ -133,65 +219,6 @@ func (s *Server) CreateVirtualApp() (*VirtualApp, error) {
 	return vapp, nil
 }
 
-// verifySignedRequest verifies the cryptographic signature on a signed request payload.
-// It is a generic function that works with any SignablePayload type.
-//
-// The function performs the following checks:
-//  1. Verifies signature is provided when required
-//  2. Validates certificate chain and cryptographic signature
-//  3. Verifies signer ID matches expected account
-//  4. Verifies payload data matches signed data
-//
-// Returns nil if verification succeeds or signature is optional and not provided.
-// Returns wrapped error with context if verification fails.
-func verifySignedRequest[T crypto.SignableData](s *Server, payload messages.SignablePayload[T]) error {
-	signedReq := payload.GetSignedRequest()
-	required := payload.RequiresSignature()
-
-	if required {
-		if s.verifier == nil {
-			// Server misconfiguration - CA required for this operation
-			return ErrNoVerifier
-		}
-
-		if signedReq == nil {
-			// Signature is mandatory but not provided
-			return ErrMissingSignature
-		}
-	} else {
-		// Signature is optional - if not provided, skip verification
-		if signedReq == nil {
-			return nil
-		}
-	}
-
-	// Verify the signed envelope (certificate chain, signature, timestamp)
-	_, err := crypto.VerifyEnvelope(s.verifier, signedReq)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidSignature, err)
-	}
-
-	// Verify the signer ID matches the expected account
-	expectedSignerID := payload.GetSignerID()
-	if expectedSignerID == (scalegraph.ScalegraphId{}) {
-		// Zero value means this request must be signed by the CA's system account
-		// (e.g., account creation requests)
-		caSystemID := scalegraph.ScalegraphIdFromPublicKey(s.ca.PublicKey())
-		if signedReq.Signature.SignerID != caSystemID.String() {
-			return fmt.Errorf("%w: request requires CA signature, expected %s, got %s", ErrSignerMismatch, caSystemID, signedReq.Signature.SignerID)
-		}
-	} else if signedReq.Signature.SignerID != expectedSignerID.String() {
-		return fmt.Errorf("%w: expected %s, got %s", ErrSignerMismatch, expectedSignerID, signedReq.Signature.SignerID)
-	}
-
-	// Verify the payload data matches the signed data
-	if err := payload.VerifyPayloadData(); err != nil {
-		return fmt.Errorf("%w: %v", ErrPayloadMismatch, err)
-	}
-
-	return nil
-}
-
 // run is the main processing loop that handles incoming requests
 func (s *Server) run() {
 	defer s.wg.Done()
@@ -227,9 +254,8 @@ func (s *Server) drainRequests() {
 				return
 			}
 			resp := messages.Response{
-				ID:      req.ID,
-				Success: false,
-				Error:   "server shutting down",
+				ID:    req.ID,
+				Error: fmt.Errorf("server shutting down"),
 			}
 			select {
 			case req.ResponseChan <- resp:
@@ -249,132 +275,28 @@ func (s *Server) handleRequest(req messages.Request) messages.Response {
 		logger = logger.With("trace_id", traceID)
 	}
 
-	resp := messages.Response{
-		ID:      req.ID,
-		Success: true,
+	handler, ok := s.handlers[reflect.TypeOf(req.Payload)]
+	if !ok {
+		logger.Warn("Unknown request type", "type", fmt.Sprintf("%T", req.Payload))
+		return messages.Response{ID: req.ID, Error: fmt.Errorf("unknown request type: %T", req.Payload)}
 	}
 
-	switch req.Type {
-	case messages.ReqCreateAccount:
-		payload := req.Payload.(*messages.CreateAccountWithKeysPayload)
-
-		payloadCert, err := crypto.ParseCertificatePEM(payload.GetSignedRequest().Certificate)
-		if err != nil {
-			logger.Error("Failed to parse certificate from CreateAccountWithKeys payload", "error", err)
-			resp.Success = false
-			resp.Error = "Invalid certificate in request"
-			break
+	// Auto-verify signature if payload implements crypto.Verifiable
+	if v, ok := req.Payload.(crypto.Verifiable); ok {
+		if v.RequiresSignature() {
+			if s.verifier == nil {
+				return messages.Response{ID: req.ID, Error: crypto.ErrNoVerifier}
+			}
+			if err := v.Verify(s.verifier, s.ca.PublicKey()); err != nil {
+				logger.Warn("Signature verification failed", "error", err, "type", fmt.Sprintf("%T", req.Payload))
+				return messages.Response{ID: req.ID, Error: err}
+			}
 		}
-
-		if !s.ca.Certificate().Equal(payloadCert) {
-			logger.Error("Certificate in CreateAccountWithKeys payload does not match server CA certificate")
-			resp.Success = false
-			resp.Error = "Certificate in request does not match server CA certificate"
-			break
-		}
-
-		if err := verifySignedRequest(s, payload); err != nil {
-			logger.Warn("CreateAccountWithKeys signature verification failed", "error", err)
-			resp.Success = false
-			resp.Error = err.Error()
-			break
-		}
-
-		if s.ca == nil {
-			logger.Error("No CA available to create a new account with credentials")
-			resp.Error = "Internal server error: no CA available for account creation"
-			resp.Success = false
-			break
-		}
-
-		// If CA is available, create account with cryptographic credentials
-		keyPair, cert, accountID, err := s.ca.CreateAccountCredentials()
-		if err != nil {
-			logger.Error("CreateAccount with keys failed", "error", err)
-			resp.Success = false
-			resp.Error = err.Error()
-			break
-		}
-
-		acc, err := s.app.CreateAccountWithKeys(req.Context, keyPair.PublicKey, cert, payload.InitialBalance)
-		if err != nil {
-			logger.Error("CreateAccountWithKeys request failed", "error", err, "initial_balance", payload.InitialBalance)
-			resp.Success = false
-			resp.Error = err.Error()
-		}
-		certPEM := crypto.EncodeCertificatePEM(cert)
-		privKeyPEM, _ := crypto.EncodePrivateKeyPEM(keyPair.PrivateKey)
-		pubKeyPEM, _ := crypto.EncodePublicKeyPEM(keyPair.PublicKey)
-		resp.Payload = messages.CreateAccountWithKeysResponse{
-			Account:     acc,
-			Certificate: certPEM,
-			PrivateKey:  string(privKeyPEM),
-			PublicKey:   string(pubKeyPEM),
-		}
-		logger.Info("Account created with cryptographic credentials", "account_id", accountID)
-
-	case messages.ReqGetAccount:
-		payload := req.Payload.(*messages.GetAccountPayload)
-
-		if err := verifySignedRequest(s, payload); err != nil {
-			logger.Warn("GetAccount signature verification failed", "error", err, "account_id", payload.AccountID)
-			resp.Success = false
-			resp.Error = err.Error()
-			break
-		}
-
-		acc, err := s.app.GetAccount(req.Context, payload.AccountID)
-		if err != nil {
-			resp.Success = false
-			resp.Error = err.Error()
-		} else {
-			resp.Payload = messages.GetAccountResponse{Account: acc}
-		}
-
-	case messages.ReqGetAccounts:
-		accounts := s.app.GetAccounts(req.Context)
-		resp.Payload = messages.GetAccountsResponse{Accounts: accounts}
-
-	case messages.ReqTransfer:
-		payload := req.Payload.(*messages.TransferPayload)
-
-		// Verify cryptographic signature
-		if err := verifySignedRequest(s, payload); err != nil {
-			logger.Warn("Transfer signature verification failed", "error", err, "from", payload.From)
-			resp.Success = false
-			resp.Error = err.Error()
-			break
-		}
-
-		logger.Debug("Transfer signature verified", "from", payload.From, "to", payload.To, "amount", payload.Amount)
-
-		err := s.app.Transfer(req.Context, payload.From, payload.To, payload.Amount, payload.Nonce)
-		if err != nil {
-			resp.Success = false
-			resp.Error = err.Error()
-		} else {
-			resp.Payload = messages.TransferResponse{}
-		}
-
-	case messages.ReqMint:
-		payload := req.Payload.(messages.MintPayload)
-		err := s.app.Mint(req.Context, payload.To, payload.Amount)
-		if err != nil {
-			resp.Success = false
-			resp.Error = err.Error()
-		} else {
-			resp.Payload = messages.MintResponse{}
-		}
-
-	case messages.ReqAccountCount:
-		count := s.app.AccountCount(req.Context)
-		resp.Payload = messages.AccountCountResponse{Count: count}
-
-	default:
-		logger.Warn("Unknown request type", "type", req.Type)
-		resp.Success = false
-		resp.Error = "unknown request type"
 	}
 
-	return resp
+	result, err := handler(req.Context, req.Payload)
+	if err != nil {
+		return messages.Response{ID: req.ID, Error: err}
+	}
+	return messages.Response{ID: req.ID, Payload: result}
 }

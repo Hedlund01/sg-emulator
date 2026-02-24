@@ -26,7 +26,7 @@ func TestMintTransactionType(t *testing.T) {
 	tx := newMintTransaction(receiver, 50.0)
 
 	require.NotNil(t, tx.Type())
-	assert.Equal(t, Mint, *tx.Type())
+	assert.Equal(t, Mint, tx.Type())
 }
 
 func TestMintTransactionID(t *testing.T) {
@@ -37,19 +37,19 @@ func TestMintTransactionID(t *testing.T) {
 
 	require.NotNil(t, tx1.ID())
 	require.NotNil(t, tx2.ID())
-	assert.NotEqual(t, *tx1.ID(), *tx2.ID(), "two mint transactions should have unique IDs")
-	assert.NotEqual(t, ScalegraphId{}, *tx1.ID(), "transaction ID should not be zero value")
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two mint transactions should have unique IDs")
+	assert.NotEqual(t, ScalegraphId{}, tx1.ID(), "transaction ID should not be zero value")
 }
 
 func TestMintTransactionImmutability(t *testing.T) {
 	receiver, _ := testCreateAccount(t)
 
 	tx := newMintTransaction(receiver, 75.0)
-	originalID := *tx.ID()
+	originalID := tx.ID()
 	originalAmount := tx.Amount()
 
 	for i := 0; i < 10; i++ {
-		assert.Equal(t, originalID, *tx.ID(), "transaction ID changed on access %d", i)
+		assert.Equal(t, originalID, tx.ID(), "transaction ID changed on access %d", i)
 		assert.Equal(t, originalAmount, tx.Amount(), "transaction amount changed on access %d", i)
 		assert.Nil(t, tx.Sender())
 		assert.Equal(t, receiver, tx.Receiver())
@@ -75,7 +75,7 @@ func TestTransferTransactionType(t *testing.T) {
 	tx := newTransferTransaction(sender, receiver, 25.0)
 
 	require.NotNil(t, tx.Type())
-	assert.Equal(t, Transfer, *tx.Type())
+	assert.Equal(t, Transfer, tx.Type())
 }
 
 func TestTransferTransactionID(t *testing.T) {
@@ -86,19 +86,19 @@ func TestTransferTransactionID(t *testing.T) {
 
 	require.NotNil(t, tx1.ID())
 	require.NotNil(t, tx2.ID())
-	assert.NotEqual(t, *tx1.ID(), *tx2.ID(), "two transfer transactions should have unique IDs")
-	assert.NotEqual(t, ScalegraphId{}, *tx1.ID(), "transaction ID should not be zero value")
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two transfer transactions should have unique IDs")
+	assert.NotEqual(t, ScalegraphId{}, tx1.ID(), "transaction ID should not be zero value")
 }
 
 func TestTransferTransactionImmutability(t *testing.T) {
 	sender, receiver := testCreateTwoAccounts(t)
 
 	tx := newTransferTransaction(sender, receiver, 50.0)
-	originalID := *tx.ID()
+	originalID := tx.ID()
 	originalAmount := tx.Amount()
 
 	for i := 0; i < 10; i++ {
-		assert.Equal(t, originalID, *tx.ID(), "transaction ID changed on access %d", i)
+		assert.Equal(t, originalID, tx.ID(), "transaction ID changed on access %d", i)
 		assert.Equal(t, originalAmount, tx.Amount(), "transaction amount changed on access %d", i)
 		assert.Equal(t, sender, tx.Sender())
 		assert.Equal(t, receiver, tx.Receiver())
@@ -124,7 +124,7 @@ func TestBurnTransactionType(t *testing.T) {
 	tx := newBurnTransaction(receiver, 15.0)
 
 	require.NotNil(t, tx.Type())
-	assert.Equal(t, Burn, *tx.Type())
+	assert.Equal(t, Burn, tx.Type())
 }
 
 func TestBurnTransactionID(t *testing.T) {
@@ -135,8 +135,8 @@ func TestBurnTransactionID(t *testing.T) {
 
 	require.NotNil(t, tx1.ID())
 	require.NotNil(t, tx2.ID())
-	assert.NotEqual(t, *tx1.ID(), *tx2.ID(), "two burn transactions should have unique IDs")
-	assert.NotEqual(t, ScalegraphId{}, *tx1.ID(), "transaction ID should not be zero value")
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two burn transactions should have unique IDs")
+	assert.NotEqual(t, ScalegraphId{}, tx1.ID(), "transaction ID should not be zero value")
 }
 
 // --- ITransaction Interface Compliance Tests ---
@@ -206,4 +206,77 @@ func TestTransactionTypeEnumIndex(t *testing.T) {
 	assert.Equal(t, 0, Transfer.EnumIndex())
 	assert.Equal(t, 1, Mint.EnumIndex())
 	assert.Equal(t, 2, Burn.EnumIndex())
+}
+
+// --- MintTokenTransaction Tests ---
+
+func TestNewMintTokenTransactionHasNilSender(t *testing.T) {
+	// Regression: newMintTokenTransaction was setting sender = receiver instead of nil.
+	// A mint has no sender — only a receiver.
+	acc, _ := testCreateAccount(t)
+	token := &Token{}
+
+	tx := newMintTokenTransaction(acc, token)
+
+	require.NotNil(t, tx)
+	assert.Nil(t, tx.Sender(), "mint token transaction should have nil sender")
+	assert.Equal(t, acc, tx.Receiver(), "mint token transaction should have the correct receiver")
+}
+
+func TestMintTokenTransactionType(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+	tx := newMintTokenTransaction(acc, &Token{})
+
+	assert.Equal(t, MintToken, tx.Type())
+}
+
+func TestMintTokenTransactionUniqueIDs(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+
+	tx1 := newMintTokenTransaction(acc, &Token{})
+	tx2 := newMintTokenTransaction(acc, &Token{})
+
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two mint token transactions should have unique IDs")
+	assert.NotEqual(t, ScalegraphId{}, tx1.ID(), "transaction ID should not be zero value")
+}
+
+// --- TransferTokenTransaction Tests ---
+
+func TestTransferTokenTransactionFields(t *testing.T) {
+	sender, receiver := testCreateTwoAccounts(t)
+	token := &Token{}
+
+	tx := newTransferTokenTransaction(sender, receiver, token)
+
+	require.NotNil(t, tx)
+	assert.Equal(t, TransferToken, tx.Type())
+	assert.Equal(t, sender, tx.Sender())
+	assert.Equal(t, receiver, tx.Receiver())
+	assert.Equal(t, token, tx.Token())
+	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
+}
+
+func TestTransferTokenTransactionUniqueIDs(t *testing.T) {
+	sender, receiver := testCreateTwoAccounts(t)
+
+	tx1 := newTransferTokenTransaction(sender, receiver, &Token{})
+	tx2 := newTransferTokenTransaction(sender, receiver, &Token{})
+
+	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two transfer token transactions should have unique IDs")
+}
+
+// --- AuthorizeTokenTransferTransaction Tests ---
+
+func TestAuthorizeTokenTransferTransactionFields(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+	tokenId := "some-token-id"
+
+	tx := newAuthorizeTokenTransferTransaction(acc, &tokenId)
+
+	require.NotNil(t, tx)
+	assert.Equal(t, AuthorizeTokenTransfer, tx.Type())
+	assert.Equal(t, acc, tx.Sender(), "sender should be the account")
+	assert.Equal(t, acc, tx.Receiver(), "receiver should be the same account")
+	assert.Equal(t, &tokenId, tx.TokenId())
+	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
 }

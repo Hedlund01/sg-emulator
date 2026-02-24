@@ -1,7 +1,7 @@
 package scalegraph
 
 type MintTransaction struct {
-	id       *ScalegraphId
+	id       ScalegraphId
 	sender   *Account
 	receiver *Account
 	amount   float64
@@ -10,20 +10,20 @@ type MintTransaction struct {
 func newMintTransaction(receiver *Account, amount float64) *MintTransaction {
 	txId, _ := NewScalegraphId()
 	return &MintTransaction{
-		id:       &txId,
+		id:       txId,
 		sender:   nil,
 		receiver: receiver,
 		amount:   amount,
 	}
 }
 
-func (t *MintTransaction) ID() *ScalegraphId {
+func (t *MintTransaction) ID() ScalegraphId {
 	return t.id
 }
 
-func (t *MintTransaction) Type() *TransactionType {
+func (t *MintTransaction) Type() TransactionType {
 	tt := Mint
-	return &tt
+	return tt
 }
 
 func (t *MintTransaction) Sender() *Account {

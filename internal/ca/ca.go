@@ -18,8 +18,8 @@ type CA struct {
 	logger      *slog.Logger
 }
 
-// New creates a new CA, either by loading existing credentials or bootstrapping new ones
-func New(baseDir string, logger *slog.Logger) (*CA, error) {
+// NewCA creates a new CA, either by loading existing credentials or bootstrapping new ones
+func NewCA(baseDir string, logger *slog.Logger) (*CA, error) {
 	store := NewStore(baseDir)
 	ca := &CA{
 		store:  store,
