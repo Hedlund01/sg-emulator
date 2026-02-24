@@ -72,9 +72,10 @@ func (t *Transport) Start(ctx context.Context) error {
 
 	// Token routes
 	r.Route("/tokens", func(r chi.Router) {
-		r.Post("/mint", t.handleMintToken)                   // Mint a token (signed)
-		r.Post("/authorize", t.handleAuthorizeTokenTransfer) // Authorize token transfer (signed)
-		r.Post("/transfer", t.handleTransferToken)           // Transfer a token (signed)
+		r.Post("/mint", t.handleMintToken)                       // Mint a token (signed)
+		r.Post("/authorize", t.handleAuthorizeTokenTransfer)     // Authorize token transfer (signed)
+		r.Post("/unauthorize", t.handleUnauthorizeTokenTransfer) // Unauthorize token transfer (signed)
+		r.Post("/transfer", t.handleTransferToken)               // Transfer a token (signed)
 	})
 
 	t.server = &http.Server{
@@ -391,6 +392,42 @@ func (t *Transport) handleAuthorizeTokenTransfer(w http.ResponseWriter, r *http.
 
 	if _, err := t.client.AuthorizeTokenTransferSigned(r.Context(), req.SignedEnvelope); err != nil {
 		t.logger.Error("Authorize token transfer failed", "error", err,
+			"account_id", req.SignedEnvelope.Payload.AccountID,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedUnauthorizeTokenTransferRequest represents the incoming signed unauthorize token transfer request
+type SignedUnauthorizeTokenTransferRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.UnauthorizeTokenTransferPayload] `json:"signed_envelope"`
+}
+
+// handleUnauthorizeTokenTransfer godoc
+// @Summary Unauthorize a token transfer
+// @Description Revoke a previously authorized token transfer from an account. Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedUnauthorizeTokenTransferRequest true "Signed unauthorize token transfer request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or unauthorization failed"
+// @Router /tokens/unauthorize [post]
+func (t *Transport) handleUnauthorizeTokenTransfer(w http.ResponseWriter, r *http.Request) {
+	var req SignedUnauthorizeTokenTransferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.UnauthorizeTokenTransferSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Unauthorize token transfer failed", "error", err,
 			"account_id", req.SignedEnvelope.Payload.AccountID,
 			"token_id", req.SignedEnvelope.Payload.TokenID)
 		respondError(w, http.StatusBadRequest, err.Error())

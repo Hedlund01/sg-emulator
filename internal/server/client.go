@@ -268,6 +268,27 @@ func (c *Client) AuthorizeTokenTransferSigned(ctx context.Context, signedReq *cr
 	})
 }
 
+func (c *Client) UnauthorizeTokenTransferSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.UnauthorizeTokenTransferPayload]) (*scalegraph.UnauthorizeTokenTransferResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"account_id", signedReq.Payload.AccountID, "token_id", signedReq.Payload.TokenID, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Unauthorize token transfer requested", logAttrs...)
+
+	acc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.AccountID)
+	if err != nil {
+		c.logger.Error("Invalid account ID in signed request", "error", err, "account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+
+	return Send[scalegraph.UnauthorizeTokenTransferRequest, scalegraph.UnauthorizeTokenTransferResponse](c, ctx, &scalegraph.UnauthorizeTokenTransferRequest{
+		AccountID:      acc,
+		TokenId:        signedReq.Payload.TokenID,
+		SignedEnvelope: signedReq,
+	})
+}
+
 func (c *Client) TransferTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.TransferTokenPayload]) (*scalegraph.TransferTokenResponse, error) {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"from", signedReq.Payload.From, "to", signedReq.Payload.To, "token_id", signedReq.Payload.TokenID, "signed", true}

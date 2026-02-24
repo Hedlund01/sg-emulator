@@ -10,6 +10,7 @@ const (
 	BurnToken
 	TransferToken
 	AuthorizeTokenTransfer
+	UnauthorizeTokenTransfer
 )
 
 func (tt TransactionType) String() string {
@@ -28,6 +29,8 @@ func (tt TransactionType) String() string {
 		return "TransferToken"
 	case AuthorizeTokenTransfer:
 		return "AuthorizeTokenTransfer"
+	case UnauthorizeTokenTransfer:
+		return "UnauthorizeTokenTransfer"
 	default:
 		return "Unknown"
 	}

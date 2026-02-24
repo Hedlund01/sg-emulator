@@ -82,6 +82,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateMintToken(msg)
 		case ViewAuthorizeTokenTransfer:
 			return m.updateAuthorizeTokenTransfer(msg)
+		case ViewUnauthorizeTokenTransfer:
+			return m.updateUnauthorizeTokenTransfer(msg)
 		case ViewTransferToken:
 			return m.updateTransferToken(msg)
 		case ViewTokenList:
@@ -552,7 +554,7 @@ func (m *Model) getCredentials(accountID scalegraph.ScalegraphId) (*AccountCrede
 }
 
 func (m Model) updateTokenMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	const tokenMenuItemCount = 4
+	const tokenMenuItemCount = 5
 	switch msg.String() {
 	case "esc":
 		m.view = ViewMenu
@@ -586,8 +588,10 @@ func (m Model) updateTokenMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 1:
 			m.view = ViewAuthorizeTokenTransfer
 		case 2:
-			m.view = ViewTransferToken
+			m.view = ViewUnauthorizeTokenTransfer
 		case 3:
+			m.view = ViewTransferToken
+		case 4:
 			m.view = ViewTokenList
 		}
 	}
@@ -833,6 +837,129 @@ func (m Model) updateAuthorizeTokenTransfer(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			}
 			_ = m.refreshAccounts()
 			m.statusMsg = "Token transfer authorized!"
+			m.view = ViewTokenMenu
+			m.tokenStep = 0
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateUnauthorizeTokenTransfer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	accounts := m.cachedAccounts
+
+	switch msg.String() {
+	case "esc":
+		if m.tokenStep > 0 {
+			m.tokenStep--
+			m.statusMsg = ""
+		} else {
+			m.view = ViewTokenMenu
+		}
+		return m, nil
+	}
+
+	switch m.tokenStep {
+	case 0: // Pick the account revoking authorization (the receiver)
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenAccountIndex > 0 {
+				m.tokenAccountIndex--
+			}
+		case "down", "j":
+			if m.tokenAccountIndex < len(accounts)-1 {
+				m.tokenAccountIndex++
+			}
+		case "enter":
+			if len(accounts) < 2 {
+				m.statusMsg = "Need at least 2 accounts"
+				return m, nil
+			}
+			m.tokenStep = 1
+			m.tokenSourceIndex = 0
+			if m.tokenSourceIndex == m.tokenAccountIndex {
+				m.tokenSourceIndex = 1
+			}
+			m.statusMsg = ""
+		}
+
+	case 1: // Pick the source account (token owner) to browse tokens from
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenSourceIndex > 0 {
+				m.tokenSourceIndex--
+				if m.tokenSourceIndex == m.tokenAccountIndex {
+					if m.tokenSourceIndex > 0 {
+						m.tokenSourceIndex--
+					} else {
+						m.tokenSourceIndex++
+					}
+				}
+			}
+		case "down", "j":
+			if m.tokenSourceIndex < len(accounts)-1 {
+				m.tokenSourceIndex++
+				if m.tokenSourceIndex == m.tokenAccountIndex {
+					if m.tokenSourceIndex < len(accounts)-1 {
+						m.tokenSourceIndex++
+					} else {
+						m.tokenSourceIndex--
+					}
+				}
+			}
+		case "enter":
+			if err := m.refreshTokensForIndex(m.tokenSourceIndex); err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+			if len(m.cachedTokens) == 0 {
+				m.statusMsg = "Selected account has no owned tokens"
+				return m, nil
+			}
+			m.tokenStep = 2
+			m.tokenTokenIndex = 0
+			m.statusMsg = ""
+		}
+
+	case 2: // Pick a token from the source account
+		tokens := m.cachedTokens
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenTokenIndex > 0 {
+				m.tokenTokenIndex--
+			}
+		case "down", "j":
+			if m.tokenTokenIndex < len(tokens)-1 {
+				m.tokenTokenIndex++
+			}
+		case "enter":
+			selectedToken := tokens[m.tokenTokenIndex]
+			receiverID := accounts[m.tokenAccountIndex].ID()
+
+			creds, err := m.getCredentials(receiverID)
+			if err != nil {
+				m.statusMsg = "Failed to load credentials: " + err.Error()
+				return m, nil
+			}
+			privKey, err := crypto.DecodePrivateKeyPEM([]byte(creds.PrivateKeyPEM))
+			if err != nil {
+				m.statusMsg = "Failed to parse private key: " + err.Error()
+				return m, nil
+			}
+			payload := &crypto.UnauthorizeTokenTransferPayload{
+				AccountID: receiverID.String(),
+				TokenID:   selectedToken.ID(),
+			}
+			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, receiverID.String(), creds.CertificatePEM)
+			if err != nil {
+				m.statusMsg = "Failed to sign request: " + err.Error()
+				return m, nil
+			}
+			if _, err := m.app.UnauthorizeTokenTransferSigned(context.Background(), signedEnvelope); err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+			_ = m.refreshAccounts()
+			m.statusMsg = "Token transfer unauthorized!"
 			m.view = ViewTokenMenu
 			m.tokenStep = 0
 		}

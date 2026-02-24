@@ -182,3 +182,17 @@ func (r *AuthorizeTokenTransferPayload) Bytes() []byte {
 	})
 	return data
 }
+
+type UnauthorizeTokenTransferPayload struct {
+	AccountID string `json:"account_id"`
+	TokenID   string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *UnauthorizeTokenTransferPayload) Bytes() []byte {
+	data, _ := json.Marshal(UnauthorizeTokenTransferPayload{
+		AccountID: r.AccountID,
+		TokenID:   r.TokenID,
+	})
+	return data
+}

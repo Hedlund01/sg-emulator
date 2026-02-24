@@ -77,6 +77,7 @@ func (s *Server) registerHandlers() {
 	RegisterHandler(s, s.handleMintToken)
 	RegisterHandler(s, s.handleAuthorizeTokenTransfer)
 	RegisterHandler(s, s.handleTransferToken)
+	RegisterHandler(s, s.handleUnauthorizeTokenTransfer)
 }
 
 func (s *Server) handleCreateAccount(ctx context.Context, req *scalegraph.CreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {
@@ -146,6 +147,14 @@ func (s *Server) handleAuthorizeTokenTransfer(ctx context.Context, req *scalegra
 		return nil, err
 	}
 	return &scalegraph.AuthorizeTokenTransferResponse{}, nil
+}
+
+func (s *Server) handleUnauthorizeTokenTransfer(ctx context.Context, req *scalegraph.UnauthorizeTokenTransferRequest) (*scalegraph.UnauthorizeTokenTransferResponse, error) {
+	err := s.app.UnauthorizeTokenTransfer(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &scalegraph.UnauthorizeTokenTransferResponse{}, nil
 }
 
 func (s *Server) handleTransferToken(ctx context.Context, req *scalegraph.TransferTokenRequest) (*scalegraph.TransferTokenResponse, error) {

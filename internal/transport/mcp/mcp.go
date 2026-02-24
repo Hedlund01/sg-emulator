@@ -52,6 +52,12 @@ type AuthorizeTokenTransferArgs struct {
 	TokenID   string `json:"token_id" jsonschema:"The token ID to authorize for transfer"`
 }
 
+// UnauthorizeTokenTransferArgs represents arguments for unauthorize_token_transfer tool
+type UnauthorizeTokenTransferArgs struct {
+	AccountID string `json:"account_id" jsonschema:"Account ID that owns the token authorization to revoke (hex string)"`
+	TokenID   string `json:"token_id" jsonschema:"The token ID to unauthorize for transfer"`
+}
+
 // TransferTokenArgs represents arguments for transfer_token tool
 type TransferTokenArgs struct {
 	FromAccountID string `json:"from_account_id" jsonschema:"Source account ID (hex string)"`
@@ -61,7 +67,7 @@ type TransferTokenArgs struct {
 
 // CreateSignedRequestArgs represents arguments for create_signed_request tool
 type CreateSignedRequestArgs struct {
-	Type            string  `json:"type" jsonschema:"Type of request: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', or 'transfer_token'"`
+	Type            string  `json:"type" jsonschema:"Type of request: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', or 'transfer_token'"`
 	AccountID       string  `json:"account_id" jsonschema:"Account ID that will sign the request (must have credentials)"`
 	ToID            string  `json:"to_id,omitempty" jsonschema:"Destination account ID (for transfer only)"`
 	Amount          float64 `json:"amount,omitempty" jsonschema:"Amount to transfer (for transfer only)"`
@@ -391,6 +397,37 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		}, nil, nil
 	})
 
+	// unauthorize_token_transfer tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "unauthorize_token_transfer",
+		Description: "Revoke a previously authorized token transfer from an account. Must be signed by the account that holds the authorization.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args UnauthorizeTokenTransferArgs) (*mcp.CallToolResult, any, error) {
+		if _, err := scalegraph.ScalegraphIdFromString(args.AccountID); err != nil {
+			return nil, nil, fmt.Errorf("invalid account_id: %v", err)
+		}
+		if args.TokenID == "" {
+			return nil, nil, fmt.Errorf("token_id is required")
+		}
+
+		payload := &crypto.UnauthorizeTokenTransferPayload{
+			AccountID: args.AccountID,
+			TokenID:   args.TokenID,
+		}
+		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		if _, err := client.UnauthorizeTokenTransferSigned(context.Background(), signedEnvelope); err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Token %s authorization revoked for account %s", args.TokenID, args.AccountID[:16]+"...")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
 	// transfer_token tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "transfer_token",
@@ -461,7 +498,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 	// create_signed_request tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "create_signed_request",
-		Description: "Create a cryptographically signed request for REST API endpoints. Generates a complete SignedEnvelope with Ed25519 signature and certificate. Supports request types: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'transfer_token'.",
+		Description: "Create a cryptographically signed request for REST API endpoints. Generates a complete SignedEnvelope with Ed25519 signature and certificate. Supports request types: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token'.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateSignedRequestArgs) (*mcp.CallToolResult, any, error) {
 		// Validate account ID
 		_, err := scalegraph.ScalegraphIdFromString(args.AccountID)
@@ -607,6 +644,25 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
 			}
 
+		case "unauthorize_token_transfer":
+			if args.TokenID == "" {
+				return nil, nil, fmt.Errorf("token_id is required for unauthorize_token_transfer requests")
+			}
+			payload := &crypto.UnauthorizeTokenTransferPayload{
+				AccountID: args.AccountID,
+				TokenID:   args.TokenID,
+			}
+			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
+			}
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
 		case "transfer_token":
 			if args.TokenID == "" {
 				return nil, nil, fmt.Errorf("token_id is required for transfer_token requests")
@@ -634,7 +690,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			}
 
 		default:
-			return nil, nil, fmt.Errorf("unsupported request type: %s (must be 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', or 'transfer_token')", args.Type)
+			return nil, nil, fmt.Errorf("unsupported request type: %s (must be 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', or 'transfer_token')", args.Type)
 		}
 
 		text := fmt.Sprintf("Signed %s request created for account %s\n\n", args.Type, args.AccountID[:16]+"...")
@@ -652,6 +708,8 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			text += "2. Find the POST /tokens/mint endpoint\n"
 		case "authorize_token_transfer":
 			text += "2. Find the POST /tokens/authorize endpoint\n"
+		case "unauthorize_token_transfer":
+			text += "2. Find the POST /tokens/unauthorize endpoint\n"
 		case "transfer_token":
 			text += "2. Find the POST /tokens/transfer endpoint\n"
 		}

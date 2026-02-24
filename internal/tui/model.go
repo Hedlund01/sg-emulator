@@ -23,6 +23,7 @@ const (
 	ViewTokenMenu
 	ViewMintToken
 	ViewAuthorizeTokenTransfer
+	ViewUnauthorizeTokenTransfer
 	ViewTransferToken
 	ViewTokenList
 )

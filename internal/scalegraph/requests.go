@@ -197,6 +197,29 @@ func (r *AuthorizeTokenTransferRequest) Verify(verifier *crypto.Verifier, caPubl
 
 type AuthorizeTokenTransferResponse struct{}
 
+type UnauthorizeTokenTransferRequest struct {
+	AccountID      ScalegraphId
+	TokenId        string
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.UnauthorizeTokenTransferPayload]
+}
+
+func (r *UnauthorizeTokenTransferRequest) RequiresSignature() bool { return true }
+
+func (r *UnauthorizeTokenTransferRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
+		func(signed *crypto.UnauthorizeTokenTransferPayload) error {
+			if signed.TokenID != r.TokenId {
+				return fmt.Errorf("TokenId mismatch")
+			}
+			if signed.AccountID != r.AccountID.String() {
+				return fmt.Errorf("From mismatch")
+			}
+			return nil
+		})
+}
+
+type UnauthorizeTokenTransferResponse struct{}
+
 // AccountCountRequest is the request to get the number of accounts.
 // Not signed.
 type AccountCountRequest struct{}

@@ -51,7 +51,7 @@ func registerTxRollbackHandler[T ITransaction](handlers map[TransactionType]txRo
 const (
 	// MBR (Minimum Balance Requirement) = MBR_SLOT_COST * number of authorized token transfers (i.e. number of &Token{} entries in the token store) + MBR_TOKEN_COST * number of tokens created by the account. Each token creation or authorization of token transfer will require the account to have at least MBR_SLOT_COST balance as MBR, which will be unfrozen when the burn token transaction is executed or the unauthorize token transfer transaction is executed. This is to prevent accounts to create DoS token transactions by authorizing unlimited token transfers or token creation transactions, which can cause the blockchain to grow indefinitely and consume all memory.
 
-	MBR_SLOT_COST = 0.5 // Each token transfer transaction will require the sender to have at least this balance as MBR, which will unfreeze when the unauthorize token transfer transaction is executed.
+	MBR_SLOT_COST = 0.5 // Each token transfer transaction will require the sender to have at least this balance as MBR, which will unfreeze when the unauthorize token transfer transaction is executed or the token is received.
 
 	MBR_TOKEN_COST = 1.0 // Each token creation transaction will require the sender to have at least this balance as MBR, which will unfreeze when the burn token transaction is executed.
 
@@ -99,6 +99,7 @@ func (a *Account) registerTxHandlers() {
 	registerTxHandler(a.txHandlers, MintToken, a.handleMintTokenTx)
 	registerTxHandler(a.txHandlers, TransferToken, a.handleTransferTokenTx)
 	registerTxHandler(a.txHandlers, AuthorizeTokenTransfer, a.handleAuthorizeTokenTransferTx)
+	registerTxHandler(a.txHandlers, UnauthorizeTokenTransfer, a.handleUnauthorizeTokenTransferTx)
 }
 
 func (a *Account) registerTxRollbackHandlers() {
@@ -109,6 +110,7 @@ func (a *Account) registerTxRollbackHandlers() {
 	registerTxRollbackHandler(a.txRollbackHandlers, MintToken, a.rollbackMintTokenTx)
 	registerTxRollbackHandler(a.txRollbackHandlers, TransferToken, a.rollbackTransferTokenTx)
 	registerTxRollbackHandler(a.txRollbackHandlers, AuthorizeTokenTransfer, a.rollbackAuthorizeTokenTransferTx)
+	registerTxRollbackHandler(a.txRollbackHandlers, UnauthorizeTokenTransfer, a.rollbackUnauthorizeTokenTransferTx)
 }
 
 // PublicKey returns the account's public key (may be nil for legacy accounts)
@@ -215,6 +217,7 @@ func (a *Account) addTokenFromTransfer(token *Token) error {
 	}
 
 	a.tokenStore[token.ID()] = token
+	a.mbr -= MBR_SLOT_COST // Unfreeze the MBR for the authorized slot, which is now occupied by the received token.
 	return nil
 }
 
@@ -372,6 +375,25 @@ func (a *Account) handleAuthorizeTokenTransferTx(trx *AuthorizeTokenTransferTran
 	return nil
 }
 
+func (a *Account) handleUnauthorizeTokenTransferTx(trx *UnauthorizeTokenTransferTransaction) error {
+	if trx.Sender() == nil || trx.Receiver() == nil || trx.Sender().ID() != a.ID() || trx.Receiver().ID() != a.ID() {
+		return fmt.Errorf("both sender and receiver must be this account for unauthorize token transfer transaction")
+	}
+
+	tokenId := *trx.TokenId()
+	slot, ok := a.tokenStore[tokenId]
+	if !ok {
+		return fmt.Errorf("token with ID %s is not authorized for transfer to account %s, cannot unauthorize", tokenId, a.ID())
+	}
+	if !slot.Equal(&Token{}) {
+		return fmt.Errorf("token with ID %s is already owned by account %s, cannot unauthorize transfer", tokenId, a.ID())
+	}
+
+	delete(a.tokenStore, tokenId)
+	a.mbr -= MBR_SLOT_COST
+	return nil
+}
+
 // --- Rollback handlers ---
 // These mirror their handleXxx counterparts and must be called with a.mu already held.
 
@@ -433,6 +455,13 @@ func (a *Account) rollbackAuthorizeTokenTransferTx(trx *AuthorizeTokenTransferTr
 	tokenId := *trx.TokenId()
 	delete(a.tokenStore, tokenId)
 	a.mbr -= MBR_SLOT_COST
+	return nil
+}
+
+func (a *Account) rollbackUnauthorizeTokenTransferTx(trx *UnauthorizeTokenTransferTransaction) error {
+	tokenId := *trx.TokenId()
+	a.tokenStore[tokenId] = &Token{}
+	a.mbr += MBR_SLOT_COST
 	return nil
 }
 

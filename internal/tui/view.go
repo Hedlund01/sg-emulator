@@ -81,6 +81,8 @@ func (m Model) View() string {
 		content = m.viewMintToken()
 	case ViewAuthorizeTokenTransfer:
 		content = m.viewAuthorizeTokenTransfer()
+	case ViewUnauthorizeTokenTransfer:
+		content = m.viewUnauthorizeTokenTransfer()
 	case ViewTransferToken:
 		content = m.viewTransferToken()
 	case ViewTokenList:
@@ -382,6 +384,14 @@ func (m Model) viewAccountDetailSingle() string {
 					}
 					line += fmt.Sprintf("Token Auth  id:%s", tokID)
 				}
+			case scalegraph.UnauthorizeTokenTransfer:
+				if unauthTx, ok := tx.(*scalegraph.UnauthorizeTokenTransferTransaction); ok {
+					tokID := "(unknown)"
+					if unauthTx.TokenId() != nil {
+						tokID = shortID(*unauthTx.TokenId(), 8)
+					}
+					line += fmt.Sprintf("Token Unauth id:%s", tokID)
+				}
 			}
 
 			if i == m.selectedTransactionIndex {
@@ -568,6 +578,20 @@ func (m Model) viewTransactionDetail() string {
 			detailContent += lipgloss.NewStyle().Bold(true).Render("Token ID:") + "\n"
 			detailContent += fmt.Sprintf("  %s\n", tokID)
 		}
+	case scalegraph.UnauthorizeTokenTransfer:
+		isTokenTx = true
+		if unauthTx, ok := tx.(*scalegraph.UnauthorizeTokenTransferTransaction); ok {
+			detailContent += "  Unauthorize Token Transfer\n\n"
+			detailContent += lipgloss.NewStyle().Bold(true).Render("Account:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(unauthTx.Sender()))
+			detailContent += fmt.Sprintf("  %s\n\n", unauthTx.Sender().ID().String())
+			tokID := "(unknown)"
+			if unauthTx.TokenId() != nil {
+				tokID = shortID(*unauthTx.TokenId(), 16)
+			}
+			detailContent += lipgloss.NewStyle().Bold(true).Render("Token ID:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", tokID)
+		}
 	}
 
 	// Amount (only for balance-changing transactions)
@@ -720,6 +744,7 @@ func (m Model) viewTokenMenu() string {
 	tokenMenuItems := []string{
 		"Mint Token",
 		"Authorize Token Transfer",
+		"Unauthorize Token Transfer",
 		"Transfer Token",
 		"View Account Tokens",
 	}
@@ -866,6 +891,84 @@ func (m Model) viewAuthorizeTokenTransfer() string {
 			content += "No owned tokens found."
 		} else {
 			content += "Step 3/3 — Select token to authorize receiving:\n\n"
+			for i, tok := range tokens {
+				cursor := "  "
+				line := fmt.Sprintf("Value: %-12s  ID: %s", tok.Value(), shortID(tok.ID(), 8))
+				if i == m.tokenTokenIndex {
+					cursor = "> "
+					line = selectedStyle.Render(line)
+				}
+				content += cursor + line + "\n"
+			}
+		}
+	}
+
+	help := helpStyle.Render("↑/↓: navigate • enter: confirm • esc: back")
+
+	status := m.renderStatus()
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		content,
+		"",
+		status,
+		help,
+	)
+}
+
+func (m Model) viewUnauthorizeTokenTransfer() string {
+	title := titleStyle.Render("Unauthorize Token Transfer")
+
+	accounts := m.cachedAccounts
+	if len(accounts) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "No accounts available.", "", helpStyle.Render("esc: back"))
+	}
+
+	var content string
+
+	switch m.tokenStep {
+	case 0: // Select the account revoking authorization (receiver)
+		content = "Step 1/3 — Select account revoking authorization:\n\n"
+		for i, acc := range accounts {
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenAccountIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+
+	case 1: // Select the source account (token owner) to browse tokens from
+		receiver := accounts[m.tokenAccountIndex]
+		content = fmt.Sprintf("Receiver: %s\n\n", m.getAccountDisplayName(receiver))
+		content += "Step 2/3 — Select source account (token owner):\n\n"
+		for i, acc := range accounts {
+			if i == m.tokenAccountIndex {
+				continue
+			}
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f  Tokens: %d",
+				m.getAccountDisplayName(acc), acc.Balance(), len(acc.GetTokens()))
+			if i == m.tokenSourceIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+
+	case 2: // Select token from source account
+		receiver := accounts[m.tokenAccountIndex]
+		source := accounts[m.tokenSourceIndex]
+		content = fmt.Sprintf("Receiver: %s\n", m.getAccountDisplayName(receiver))
+		content += fmt.Sprintf("Source:   %s\n\n", m.getAccountDisplayName(source))
+		tokens := m.cachedTokens
+		if len(tokens) == 0 {
+			content += "No owned tokens found."
+		} else {
+			content += "Step 3/3 — Select token to unauthorize:\n\n"
 			for i, tok := range tokens {
 				cursor := "  "
 				line := fmt.Sprintf("Value: %-12s  ID: %s", tok.Value(), shortID(tok.ID(), 8))

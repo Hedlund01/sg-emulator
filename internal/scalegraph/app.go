@@ -237,6 +237,31 @@ func (a *App) AuthorizeTokenTransfer(ctx context.Context, req *AuthorizeTokenTra
 	return nil
 }
 
+func (a *App) UnauthorizeTokenTransfer(ctx context.Context, req *UnauthorizeTokenTransferRequest) error {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+	logger.Debug("Unauthorize token transfer operation initiated", "account_id", req.AccountID, "token_id", req.TokenId)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	acc, exists := a.accounts[req.AccountID]
+	if !exists {
+		logger.Warn("Account not found for unauthorize token transfer", "account_id", req.AccountID)
+		return fmt.Errorf("account not found: %s", req.AccountID)
+	}
+
+	unauthorizeTx := newUnauthorizeTokenTransferTransaction(acc, &req.TokenId)
+	if err := acc.appendTransaction(unauthorizeTx); err != nil {
+		logger.Error("Failed to append unauthorize token transfer transaction", "error", err)
+		return err
+	}
+
+	logger.Info("Unauthorize token transfer completed", "account_id", req.AccountID, "token_id", req.TokenId)
+	return nil
+}
+
 // TransferToken transfers a token between accounts
 func (a *App) TransferToken(ctx context.Context, req *TransferTokenRequest) error {
 	logger := a.logger
