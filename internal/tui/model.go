@@ -14,7 +14,6 @@ type ViewState int
 const (
 	ViewMenu ViewState = iota
 	ViewCreateAccount
-	ViewListAccounts
 	ViewAccountDetail
 	ViewAccountDetailSingle
 	ViewTransactionDetail
@@ -26,6 +25,8 @@ const (
 	ViewUnauthorizeTokenTransfer
 	ViewTransferToken
 	ViewTokenList
+	ViewBurnToken
+	ViewClawbackToken
 )
 
 // AccountCredentials caches loaded cryptographic credentials

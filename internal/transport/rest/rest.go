@@ -76,6 +76,8 @@ func (t *Transport) Start(ctx context.Context) error {
 		r.Post("/authorize", t.handleAuthorizeTokenTransfer)     // Authorize token transfer (signed)
 		r.Post("/unauthorize", t.handleUnauthorizeTokenTransfer) // Unauthorize token transfer (signed)
 		r.Post("/transfer", t.handleTransferToken)               // Transfer a token (signed)
+		r.Post("/burn", t.handleBurnToken)                       // Burn a token (signed)
+		r.Post("/clawback", t.handleClawbackToken)               // Clawback a token (signed)
 	})
 
 	t.server = &http.Server{
@@ -464,6 +466,79 @@ func (t *Transport) handleTransferToken(w http.ResponseWriter, r *http.Request) 
 
 	if _, err := t.client.TransferTokenSigned(r.Context(), req.SignedEnvelope); err != nil {
 		t.logger.Error("Transfer token failed", "error", err,
+			"from", req.SignedEnvelope.Payload.From,
+			"to", req.SignedEnvelope.Payload.To,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedBurnTokenRequest represents the incoming signed burn token request
+type SignedBurnTokenRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.BurnTokenPayload] `json:"signed_envelope"`
+}
+
+// handleBurnToken godoc
+// @Summary Burn a token
+// @Description Permanently destroy a token owned by an account. Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedBurnTokenRequest true "Signed burn token request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or burn failed"
+// @Router /tokens/burn [post]
+func (t *Transport) handleBurnToken(w http.ResponseWriter, r *http.Request) {
+	var req SignedBurnTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.BurnTokenSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Burn token failed", "error", err,
+			"account_id", req.SignedEnvelope.Payload.AccountID,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedClawbackTokenRequest represents the incoming signed clawback token request
+type SignedClawbackTokenRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.ClawbackTokenPayload] `json:"signed_envelope"`
+}
+
+// handleClawbackToken godoc
+// @Summary Clawback a token
+// @Description Reclaim a token from an account using clawback authority. Must be signed by the clawback authority account (To). Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedClawbackTokenRequest true "Signed clawback token request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or clawback failed"
+// @Router /tokens/clawback [post]
+func (t *Transport) handleClawbackToken(w http.ResponseWriter, r *http.Request) {
+	var req SignedClawbackTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.ClawbackTokenSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Clawback token failed", "error", err,
 			"from", req.SignedEnvelope.Payload.From,
 			"to", req.SignedEnvelope.Payload.To,
 			"token_id", req.SignedEnvelope.Payload.TokenID)

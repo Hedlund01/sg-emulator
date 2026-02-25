@@ -1,4 +1,3 @@
-basePath: /
 definitions:
   rest.AccountResponse:
     properties:
@@ -29,7 +28,19 @@ definitions:
         example: rest
         type: string
     type: object
+  rest.SignedAuthorizeTokenTransferRequest:
+    type: object
+  rest.SignedBurnTokenRequest:
+    type: object
+  rest.SignedClawbackTokenRequest:
+    type: object
+  rest.SignedMintTokenRequest:
+    type: object
   rest.SignedTransferRequest:
+    type: object
+  rest.SignedTransferTokenRequest:
+    type: object
+  rest.SignedUnauthorizeTokenTransferRequest:
     type: object
   rest.TransferResponse:
     properties:
@@ -37,18 +48,8 @@ definitions:
         example: success
         type: string
     type: object
-host: localhost:8080
 info:
-  contact:
-    email: support@example.com
-    name: API Support
-  description: REST API for SG Emulator with cryptographically signed requests
-  license:
-    name: Apache 2.0
-    url: http://www.apache.org/licenses/LICENSE-2.0.html
-  termsOfService: http://swagger.io/terms/
-  title: SG Emulator REST API
-  version: "1.0"
+  contact: {}
 paths:
   /accounts/me:
     post:
@@ -88,20 +89,176 @@ paths:
       summary: Health check
       tags:
       - health
+  /tokens/authorize:
+    post:
+      consumes:
+      - application/json
+      description: Authorize a token to be transferred from an account. Must be called
+        before /tokens/transfer. Requires a cryptographically signed request.
+      parameters:
+      - description: Signed authorize token transfer request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.SignedAuthorizeTokenTransferRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.TransferResponse'
+        "400":
+          description: Invalid request or authorization failed
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Authorize a token transfer
+      tags:
+      - tokens
+  /tokens/burn:
+    post:
+      consumes:
+      - application/json
+      description: Permanently destroy a token owned by an account. Requires a cryptographically
+        signed request.
+      parameters:
+      - description: Signed burn token request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.SignedBurnTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.TransferResponse'
+        "400":
+          description: Invalid request or burn failed
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Burn a token
+      tags:
+      - tokens
+  /tokens/clawback:
+    post:
+      consumes:
+      - application/json
+      description: Reclaim a token from an account using clawback authority. Must
+        be signed by the clawback authority account (To). Requires a cryptographically
+        signed request.
+      parameters:
+      - description: Signed clawback token request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.SignedClawbackTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.TransferResponse'
+        "400":
+          description: Invalid request or clawback failed
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Clawback a token
+      tags:
+      - tokens
+  /tokens/mint:
+    post:
+      consumes:
+      - application/json
+      description: Mint a new token for an account. Requires a cryptographically signed
+        request with Ed25519 signature.
+      parameters:
+      - description: Signed mint token request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.SignedMintTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.TransferResponse'
+        "400":
+          description: Invalid request or mint failed
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Mint a new token
+      tags:
+      - tokens
+  /tokens/transfer:
+    post:
+      consumes:
+      - application/json
+      description: Transfer a token from one account to another. The token must first
+        be authorized for transfer using /tokens/authorize. Requires a cryptographically
+        signed request.
+      parameters:
+      - description: Signed transfer token request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.SignedTransferTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.TransferResponse'
+        "400":
+          description: Invalid request or transfer failed
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Transfer a token between accounts
+      tags:
+      - tokens
+  /tokens/unauthorize:
+    post:
+      consumes:
+      - application/json
+      description: Revoke a previously authorized token transfer from an account.
+        Requires a cryptographically signed request.
+      parameters:
+      - description: Signed unauthorize token transfer request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.SignedUnauthorizeTokenTransferRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.TransferResponse'
+        "400":
+          description: Invalid request or unauthorization failed
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Unauthorize a token transfer
+      tags:
+      - tokens
   /transfer:
     post:
       consumes:
       - application/json
-      description: |-
-        Transfer funds from one account to another. Requires cryptographically signed request with Ed25519 signature.
-
-        The request must be wrapped in a SignedEnvelope containing:
-        - payload: TransferRequest with from (sender account ID), to (recipient account ID), amount, nonce (random 16-byte hex string), and timestamp
-        - signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id (must match 'from'), and timestamp
-        - certificate: PEM-encoded X.509 certificate of the sender
-
-        The nonce prevents replay attacks. Each transfer must use a unique nonce.
-        The signature is created by signing the canonical JSON bytes of the TransferRequest payload.
+      description: Transfer funds from one account to another. Requires cryptographically
+        signed request with Ed25519 signature.
       parameters:
       - description: Signed transfer request with Ed25519 signature
         in: body

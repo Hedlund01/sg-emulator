@@ -140,7 +140,8 @@ func (r *MintTokenPayload) Bytes() []byte {
 
 // BurnTokenPayload is the signed payload for a burn token request.
 type BurnTokenPayload struct {
-	TokenID string `json:"token_id"`
+	AccountID string `json:"account_id"`
+	TokenID   string `json:"token_id"`
 }
 
 // Bytes returns the canonical byte representation for signing
@@ -193,6 +194,22 @@ func (r *UnauthorizeTokenTransferPayload) Bytes() []byte {
 	data, _ := json.Marshal(UnauthorizeTokenTransferPayload{
 		AccountID: r.AccountID,
 		TokenID:   r.TokenID,
+	})
+	return data
+}
+
+type ClawbackTokenPayload struct {
+	From    string `json:"from"`
+	To      string `json:"to"`
+	TokenID string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *ClawbackTokenPayload) Bytes() []byte {
+	data, _ := json.Marshal(ClawbackTokenPayload{
+		From:    r.From,
+		To:      r.To,
+		TokenID: r.TokenID,
 	})
 	return data
 }

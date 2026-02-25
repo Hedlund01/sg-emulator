@@ -228,3 +228,53 @@ type AccountCountRequest struct{}
 type AccountCountResponse struct {
 	Count int
 }
+
+type BurnTokenRequest struct {
+	AccountID      ScalegraphId
+	TokenId        string
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.BurnTokenPayload]
+}
+
+func (r *BurnTokenRequest) RequiresSignature() bool { return true }
+
+func (r *BurnTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
+		func(signed *crypto.BurnTokenPayload) error {
+			if signed.TokenID != r.TokenId {
+				return fmt.Errorf("TokenId mismatch")
+			}
+			if signed.AccountID != r.AccountID.String() {
+				return fmt.Errorf("From mismatch")
+			}
+			return nil
+		})
+}
+
+type BurnTokenResponse struct{}
+
+type ClawbackTokenRequest struct {
+	From           ScalegraphId
+	To             ScalegraphId
+	TokenId        string
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.ClawbackTokenPayload]
+}
+
+func (r *ClawbackTokenRequest) RequiresSignature() bool { return true }
+
+func (r *ClawbackTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.To.String(),
+		func(signed *crypto.ClawbackTokenPayload) error {
+			if signed.TokenID != r.TokenId {
+				return fmt.Errorf("TokenId mismatch")
+			}
+			if signed.From != r.From.String() {
+				return fmt.Errorf("From mismatch")
+			}
+			if signed.To != r.To.String() {
+				return fmt.Errorf("To mismatch")
+			}
+			return nil
+		})
+}
+
+type ClawbackTokenResponse struct{}

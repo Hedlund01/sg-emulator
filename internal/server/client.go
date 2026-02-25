@@ -315,3 +315,51 @@ func (c *Client) TransferTokenSigned(ctx context.Context, signedReq *crypto.Sign
 		SignedEnvelope: signedReq,
 	})
 }
+
+func (c *Client) BurnTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.BurnTokenPayload]) (*scalegraph.BurnTokenResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"account_id", signedReq.Payload.AccountID, "token_id", signedReq.Payload.TokenID, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Burn token requested", logAttrs...)
+
+	acc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.AccountID)
+	if err != nil {
+		c.logger.Error("Invalid account ID in signed request", "error", err, "account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+
+	return Send[scalegraph.BurnTokenRequest, scalegraph.BurnTokenResponse](c, ctx, &scalegraph.BurnTokenRequest{
+		AccountID:      acc,
+		TokenId:        signedReq.Payload.TokenID,
+		SignedEnvelope: signedReq,
+	})
+}
+
+func (c *Client) ClawbackTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.ClawbackTokenPayload]) (*scalegraph.ClawbackTokenResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"from", signedReq.Payload.From, "to", signedReq.Payload.To, "token_id", signedReq.Payload.TokenID, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Clawback token requested", logAttrs...)
+
+	fromAcc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.From)
+	if err != nil {
+		c.logger.Error("Invalid from account ID in signed request", "error", err, "from_account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+	toAcc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.To)
+	if err != nil {
+		c.logger.Error("Invalid to account ID in signed request", "error", err, "to_account_id", signedReq.Signature.SignerID)
+		return nil, err
+	}
+
+	return Send[scalegraph.ClawbackTokenRequest, scalegraph.ClawbackTokenResponse](c, ctx, &scalegraph.ClawbackTokenRequest{
+		From:           fromAcc,
+		To:             toAcc,
+		TokenId:        signedReq.Payload.TokenID,
+		SignedEnvelope: signedReq,
+	})
+}

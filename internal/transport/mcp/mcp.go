@@ -65,16 +65,30 @@ type TransferTokenArgs struct {
 	TokenID       string `json:"token_id" jsonschema:"The token ID to transfer"`
 }
 
+// BurnTokenArgs represents arguments for burn_token tool
+type BurnTokenArgs struct {
+	AccountID string `json:"account_id" jsonschema:"Account ID of the token owner (hex string)"`
+	TokenID   string `json:"token_id" jsonschema:"The token ID to burn"`
+}
+
+// ClawbackTokenArgs represents arguments for clawback_token tool
+type ClawbackTokenArgs struct {
+	FromAccountID string `json:"from_account_id" jsonschema:"Account ID holding the token (hex string)"`
+	ToAccountID   string `json:"to_account_id" jsonschema:"Clawback authority account ID that signs and receives the token (hex string)"`
+	TokenID       string `json:"token_id" jsonschema:"The token ID to clawback"`
+}
+
 // CreateSignedRequestArgs represents arguments for create_signed_request tool
 type CreateSignedRequestArgs struct {
-	Type            string  `json:"type" jsonschema:"Type of request: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', or 'transfer_token'"`
+	Type            string  `json:"type" jsonschema:"Type of request: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token', 'burn_token', or 'clawback_token'"`
 	AccountID       string  `json:"account_id" jsonschema:"Account ID that will sign the request (must have credentials)"`
 	ToID            string  `json:"to_id,omitempty" jsonschema:"Destination account ID (for transfer only)"`
 	Amount          float64 `json:"amount,omitempty" jsonschema:"Amount to transfer (for transfer only)"`
 	TokenValue      string  `json:"token_value,omitempty" jsonschema:"Token value/name (for mint_token only)"`
 	ClawbackAddress string  `json:"clawback_address,omitempty" jsonschema:"Optional clawback address hex string (for mint_token only)"`
-	TokenID         string  `json:"token_id,omitempty" jsonschema:"Token ID (for authorize_token_transfer and transfer_token)"`
-	ToAccountID     string  `json:"to_account_id,omitempty" jsonschema:"Destination account ID (for transfer_token only)"`
+	TokenID         string  `json:"token_id,omitempty" jsonschema:"Token ID (for authorize_token_transfer, transfer_token, burn_token, and clawback_token)"`
+	ToAccountID     string  `json:"to_account_id,omitempty" jsonschema:"Destination account ID (for transfer_token and clawback_token)"`
+	FromAccountID   string  `json:"from_account_id,omitempty" jsonschema:"Source account holding the token (for clawback_token only)"`
 }
 
 // RunHTTPServer starts an MCP server over HTTP with SSE transport.
@@ -463,6 +477,89 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		}, nil, nil
 	})
 
+	// burn_token tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "burn_token",
+		Description: "Permanently destroy a token. Must be signed by the token owner.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args BurnTokenArgs) (*mcp.CallToolResult, any, error) {
+		if _, err := scalegraph.ScalegraphIdFromString(args.AccountID); err != nil {
+			return nil, nil, fmt.Errorf("invalid account_id: %v", err)
+		}
+		if args.TokenID == "" {
+			return nil, nil, fmt.Errorf("token_id is required")
+		}
+
+		payload := &crypto.BurnTokenPayload{
+			AccountID: args.AccountID,
+			TokenID:   args.TokenID,
+		}
+		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		if _, err := client.BurnTokenSigned(context.Background(), signedEnvelope); err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Token %s burned by account %s", args.TokenID, args.AccountID[:16]+"...")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
+	// clawback_token tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "clawback_token",
+		Description: "Reclaim a token from a holder back to the issuer/authority. Must be signed by the clawback authority (to_account_id).",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args ClawbackTokenArgs) (*mcp.CallToolResult, any, error) {
+		if _, err := scalegraph.ScalegraphIdFromString(args.FromAccountID); err != nil {
+			return nil, nil, fmt.Errorf("invalid from_account_id: %v", err)
+		}
+		if _, err := scalegraph.ScalegraphIdFromString(args.ToAccountID); err != nil {
+			return nil, nil, fmt.Errorf("invalid to_account_id: %v", err)
+		}
+		if args.TokenID == "" {
+			return nil, nil, fmt.Errorf("token_id is required")
+		}
+
+		payload := &crypto.ClawbackTokenPayload{
+			From:    args.FromAccountID,
+			To:      args.ToAccountID,
+			TokenID: args.TokenID,
+		}
+		// Signed by the clawback authority (to_account_id), not the holder
+		signedEnvelope, err := createSignedEnvelope(srv, args.ToAccountID, payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		if _, err := client.ClawbackTokenSigned(context.Background(), signedEnvelope); err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Token %s clawed back from %s to %s", args.TokenID, args.FromAccountID[:16]+"...", args.ToAccountID[:16]+"...")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
+	// get_account_count tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "get_account_count",
+		Description: "Get the total number of accounts in the scalegraph",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args any) (*mcp.CallToolResult, any, error) {
+		count, err := client.AccountCount(context.Background())
+		if err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Total accounts: %d", count)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
 	// get_virtual_nodes tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "get_virtual_nodes",
@@ -498,7 +595,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 	// create_signed_request tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "create_signed_request",
-		Description: "Create a cryptographically signed request for REST API endpoints. Generates a complete SignedEnvelope with Ed25519 signature and certificate. Supports request types: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token'.",
+		Description: "Create a cryptographically signed request for REST API endpoints. Generates a complete SignedEnvelope with Ed25519 signature and certificate. Supports request types: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token', 'burn_token', 'clawback_token'.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateSignedRequestArgs) (*mcp.CallToolResult, any, error) {
 		// Validate account ID
 		_, err := scalegraph.ScalegraphIdFromString(args.AccountID)
@@ -689,8 +786,54 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
 			}
 
+		case "burn_token":
+			if args.TokenID == "" {
+				return nil, nil, fmt.Errorf("token_id is required for burn_token requests")
+			}
+			payload := &crypto.BurnTokenPayload{
+				AccountID: args.AccountID,
+				TokenID:   args.TokenID,
+			}
+			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
+			}
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
+		case "clawback_token":
+			if args.TokenID == "" {
+				return nil, nil, fmt.Errorf("token_id is required for clawback_token requests")
+			}
+			if args.FromAccountID == "" {
+				return nil, nil, fmt.Errorf("from_account_id is required for clawback_token requests")
+			}
+			if _, err := scalegraph.ScalegraphIdFromString(args.FromAccountID); err != nil {
+				return nil, nil, fmt.Errorf("invalid from_account_id: %v", err)
+			}
+			// account_id is the clawback authority (signer/recipient), from_account_id is the holder
+			payload := &crypto.ClawbackTokenPayload{
+				From:    args.FromAccountID,
+				To:      args.AccountID,
+				TokenID: args.TokenID,
+			}
+			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
+			}
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
 		default:
-			return nil, nil, fmt.Errorf("unsupported request type: %s (must be 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', or 'transfer_token')", args.Type)
+			return nil, nil, fmt.Errorf("unsupported request type: %s (must be 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token', 'burn_token', or 'clawback_token')", args.Type)
 		}
 
 		text := fmt.Sprintf("Signed %s request created for account %s\n\n", args.Type, args.AccountID[:16]+"...")
@@ -712,6 +855,10 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			text += "2. Find the POST /tokens/unauthorize endpoint\n"
 		case "transfer_token":
 			text += "2. Find the POST /tokens/transfer endpoint\n"
+		case "burn_token":
+			text += "2. Find the POST /tokens/burn endpoint\n"
+		case "clawback_token":
+			text += "2. Find the POST /tokens/clawback endpoint\n"
 		}
 		text += "3. Click 'Try it out'\n"
 		text += "4. Paste the entire JSON above into the request body\n"

@@ -78,6 +78,8 @@ func (s *Server) registerHandlers() {
 	RegisterHandler(s, s.handleAuthorizeTokenTransfer)
 	RegisterHandler(s, s.handleTransferToken)
 	RegisterHandler(s, s.handleUnauthorizeTokenTransfer)
+	RegisterHandler(s, s.handleBurnToken)
+	RegisterHandler(s, s.handleClawbackToken)
 }
 
 func (s *Server) handleCreateAccount(ctx context.Context, req *scalegraph.CreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {
@@ -163,6 +165,22 @@ func (s *Server) handleTransferToken(ctx context.Context, req *scalegraph.Transf
 		return nil, err
 	}
 	return &scalegraph.TransferTokenResponse{}, nil
+}
+
+func (s *Server) handleBurnToken(ctx context.Context, req *scalegraph.BurnTokenRequest) (*scalegraph.BurnTokenResponse, error) {
+	err := s.app.BurnToken(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &scalegraph.BurnTokenResponse{}, nil
+}
+
+func (s *Server) handleClawbackToken(ctx context.Context, req *scalegraph.ClawbackTokenRequest) (*scalegraph.ClawbackTokenResponse, error) {
+	err := s.app.ClawbackToken(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &scalegraph.ClawbackTokenResponse{}, nil
 }
 
 // CA returns the server's Certificate Authority (may be nil)

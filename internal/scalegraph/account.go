@@ -100,6 +100,8 @@ func (a *Account) registerTxHandlers() {
 	registerTxHandler(a.txHandlers, TransferToken, a.handleTransferTokenTx)
 	registerTxHandler(a.txHandlers, AuthorizeTokenTransfer, a.handleAuthorizeTokenTransferTx)
 	registerTxHandler(a.txHandlers, UnauthorizeTokenTransfer, a.handleUnauthorizeTokenTransferTx)
+	registerTxHandler(a.txHandlers, BurnToken, a.handleBurnTokenTx)
+	registerTxHandler(a.txHandlers, ClawbackTokenTransfer, a.handleClawbackTokenTx)
 }
 
 func (a *Account) registerTxRollbackHandlers() {
@@ -111,6 +113,8 @@ func (a *Account) registerTxRollbackHandlers() {
 	registerTxRollbackHandler(a.txRollbackHandlers, TransferToken, a.rollbackTransferTokenTx)
 	registerTxRollbackHandler(a.txRollbackHandlers, AuthorizeTokenTransfer, a.rollbackAuthorizeTokenTransferTx)
 	registerTxRollbackHandler(a.txRollbackHandlers, UnauthorizeTokenTransfer, a.rollbackUnauthorizeTokenTransferTx)
+	// BurnToken does not need a rollback handler because a burn token transaction only touches one account.
+	registerTxRollbackHandler(a.txRollbackHandlers, ClawbackTokenTransfer, a.rollbackClawbackTokenTx)
 }
 
 // PublicKey returns the account's public key (may be nil for legacy accounts)
@@ -230,6 +234,16 @@ func (a *Account) removeToken(tokenId string) error {
 	return nil
 }
 
+func (a *Account) addToken(token *Token) error {
+
+	if a.tokenStore[token.ID()] != nil {
+		return fmt.Errorf("token with ID %s already exists in account %s", token.ID(), a.ID())
+	}
+
+	a.tokenStore[token.ID()] = token
+	return nil
+}
+
 func (a *Account) burnToken(tokenId string) error {
 
 	if a.tokenStore[tokenId] == nil {
@@ -274,7 +288,7 @@ func (a *Account) rollbacklatestTransaction(trx ITransaction) error {
 	a.blockchain.removeLatestBlock()
 
 	if err := rollback(trx); err != nil {
-		return fmt.Errorf("rollback handler failed for transaction type %s: %w", trx.Type(), err)
+		return fmt.Errorf("rollback handler failed for transaction type %s, latest block removed: %w", trx.Type(), err)
 	}
 	return nil
 }
@@ -394,6 +408,39 @@ func (a *Account) handleUnauthorizeTokenTransferTx(trx *UnauthorizeTokenTransfer
 	return nil
 }
 
+func (a *Account) handleBurnTokenTx(trx *BurnTokenTransaction) error {
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		if err := a.burnToken(trx.TokenID()); err != nil {
+			return fmt.Errorf("failed to burn token: %w", err)
+		}
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		return fmt.Errorf("receiver should be nil for burn token transaction")
+	} else {
+		return fmt.Errorf("sender must be this account for burn token transaction")
+	}
+	return nil
+}
+
+func (a *Account) handleClawbackTokenTx(trx *ClawbackTokenTransaction) error {
+	token := trx.Token()
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		_, ok := a.tokenStore[token.ID()]
+		if !ok {
+			return fmt.Errorf("token with ID %s does not exist in account %s", token.ID(), a.ID())
+		}
+		if err := a.removeToken(token.ID()); err != nil {
+			return fmt.Errorf("failed to remove token during clawback: %w", err)
+		}
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		if err := a.addToken(&token); err != nil {
+			return fmt.Errorf("failed to add token during clawback: %w", err)
+		}
+	} else {
+		return fmt.Errorf("either from or to must be this account for clawback token transaction")
+	}
+	return nil
+}
+
 // --- Rollback handlers ---
 // These mirror their handleXxx counterparts and must be called with a.mu already held.
 
@@ -462,6 +509,20 @@ func (a *Account) rollbackUnauthorizeTokenTransferTx(trx *UnauthorizeTokenTransf
 	tokenId := *trx.TokenId()
 	a.tokenStore[tokenId] = &Token{}
 	a.mbr += MBR_SLOT_COST
+	return nil
+}
+
+func (a *Account) rollbackClawbackTokenTx(trx *ClawbackTokenTransaction) error {
+	token := trx.Token()
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		if err := a.addToken(&token); err != nil {
+			return fmt.Errorf("failed to add token during clawback rollback: %w", err)
+		}
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		if err := a.removeToken(token.ID()); err != nil {
+			return fmt.Errorf("failed to remove token during clawback rollback: %w", err)
+		}
+	}
 	return nil
 }
 

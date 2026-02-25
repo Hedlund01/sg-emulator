@@ -314,3 +314,78 @@ func (a *App) AccountCount(ctx context.Context, req *AccountCountRequest) (*Acco
 	defer a.mu.RUnlock()
 	return &AccountCountResponse{Count: len(a.accounts)}, nil
 }
+
+func (a *App) BurnToken(ctx context.Context, req *BurnTokenRequest) error {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+	logger.Debug("Burn token operation initiated", "account_id", req.AccountID, "token_id", req.TokenId)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	acc, exists := a.accounts[req.AccountID]
+	if !exists {
+		logger.Warn("Account not found for burn token", "account_id", req.AccountID)
+		return fmt.Errorf("account not found: %s", req.AccountID)
+	}
+
+	burnTx := newBurnTokenTransaction(acc, req.TokenId)
+	if err := acc.appendTransaction(burnTx); err != nil {
+		logger.Error("Failed to append burn token transaction", "error", err)
+		return err
+	}
+
+	logger.Info("Burn token completed", "account_id", req.AccountID, "token_id", req.TokenId)
+	return nil
+}
+
+func (a *App) ClawbackToken(ctx context.Context, req *ClawbackTokenRequest) error {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+	logger.Debug("Clawback token operation initiated", "from", req.From, "to", req.To, "token_id", req.TokenId)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	fromAcc, exists := a.accounts[req.From]
+	if !exists {
+		logger.Warn("Source account not found for clawback token", "from", req.From)
+		return fmt.Errorf("source account not found: %s", req.From)
+	}
+
+	toAcc, exists := a.accounts[req.To]
+	if !exists {
+		logger.Warn("Destination account not found for clawback token", "to", req.To)
+		return fmt.Errorf("destination account not found: %s", req.To)
+	}
+
+	token, exists := fromAcc.GetToken(req.TokenId)
+	if !exists {
+		logger.Warn("Token not found in source account", "token_id", req.TokenId, "from_account", req.From)
+		return fmt.Errorf("token not found in source account: %s", req.TokenId)
+	}
+
+	if token.ClawbackAddress().String() != toAcc.ID().String() {
+		logger.Warn("Clawback address mismatch", "token_id", req.TokenId, "expected_clawback_address", token.ClawbackAddress(), "to_account", req.To)
+		return fmt.Errorf("clawback address mismatch: token expects %s, but destination account is %s", token.ClawbackAddress(), req.To)
+	}
+
+	clawbackTx := newClawbackTokenTransaction(fromAcc, toAcc, *token)
+
+	if err := fromAcc.appendTransaction(clawbackTx); err != nil {
+		logger.Error("Failed to append clawback token transaction", "error", err)
+		return err
+	}
+
+	if err := toAcc.appendTransaction(clawbackTx); err != nil {
+		logger.Error("Failed to append clawback token transaction", "error", err)
+		// Rollback: remove transaction from sender if receiver append fails
+		fromAcc.rollbacklatestTransaction(clawbackTx)
+		return err
+	}
+
+	logger.Info("Clawback token completed", "from", req.From, "to", req.To, "token_id", token.ID())
+	return nil
+}

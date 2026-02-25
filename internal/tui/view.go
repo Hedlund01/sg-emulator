@@ -43,7 +43,6 @@ func (m Model) renderStatus() string {
 
 var menuItems = []string{
 	"Create Account",
-	"List Accounts",
 	"View Account",
 	"Send Money",
 	"View Virtual Nodes",
@@ -63,8 +62,6 @@ func (m Model) View() string {
 		content = m.viewMenu()
 	case ViewCreateAccount:
 		content = m.viewCreateAccount()
-	case ViewListAccounts:
-		content = m.viewListAccounts()
 	case ViewAccountDetail:
 		content = m.viewAccountDetail()
 	case ViewAccountDetailSingle:
@@ -87,6 +84,10 @@ func (m Model) View() string {
 		content = m.viewTransferToken()
 	case ViewTokenList:
 		content = m.viewTokenList()
+	case ViewBurnToken:
+		content = m.viewBurnToken()
+	case ViewClawbackToken:
+		content = m.viewClawbackToken()
 	}
 
 	return lipgloss.Place(
@@ -173,35 +174,6 @@ func (m Model) viewCreateAccount() string {
 		inputs,
 		"",
 		status,
-		help,
-	)
-}
-
-func (m Model) viewListAccounts() string {
-	title := titleStyle.Render("All Accounts")
-	accounts := m.cachedAccounts
-
-	var listContent string
-	if len(accounts) == 0 {
-		listContent = "No accounts yet."
-	} else {
-		for i, acc := range accounts {
-			line := fmt.Sprintf("%d. %s  Balance: %.2f",
-				i+1,
-				m.getAccountDisplayName(acc),
-				acc.Balance())
-			listContent += line + "\n"
-		}
-	}
-
-	help := helpStyle.Render("esc: back")
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		"",
-		listContent,
-		"",
 		help,
 	)
 }
@@ -391,6 +363,19 @@ func (m Model) viewAccountDetailSingle() string {
 						tokID = shortID(*unauthTx.TokenId(), 8)
 					}
 					line += fmt.Sprintf("Token Unauth id:%s", tokID)
+				}
+			case scalegraph.BurnToken:
+				if burnTokTx, ok := tx.(*scalegraph.BurnTokenTransaction); ok {
+					line += fmt.Sprintf("Token Burn  id:%s", shortID(burnTokTx.TokenID(), 8))
+				}
+			case scalegraph.ClawbackTokenTransfer:
+				if clawTx, ok := tx.(*scalegraph.ClawbackTokenTransaction); ok {
+					tok := clawTx.Token()
+					if tx.Sender() != nil && tx.Sender().ID() == selectedAcc.ID() {
+						line += fmt.Sprintf("Token Claw  val:%-10s id:%s (out)", tok.Value(), shortID(tok.ID(), 8))
+					} else {
+						line += fmt.Sprintf("Token Claw  val:%-10s id:%s (in)", tok.Value(), shortID(tok.ID(), 8))
+					}
 				}
 			}
 
@@ -592,6 +577,32 @@ func (m Model) viewTransactionDetail() string {
 			detailContent += lipgloss.NewStyle().Bold(true).Render("Token ID:") + "\n"
 			detailContent += fmt.Sprintf("  %s\n", tokID)
 		}
+	case scalegraph.BurnToken:
+		isTokenTx = true
+		if burnTokTx, ok := tx.(*scalegraph.BurnTokenTransaction); ok {
+			detailContent += "  Burn Token\n\n"
+			detailContent += lipgloss.NewStyle().Bold(true).Render("Account:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(burnTokTx.Sender()))
+			detailContent += fmt.Sprintf("  %s\n\n", burnTokTx.Sender().ID().String())
+			detailContent += lipgloss.NewStyle().Bold(true).Render("Token ID:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", shortID(burnTokTx.TokenID(), 16))
+		}
+	case scalegraph.ClawbackTokenTransfer:
+		isTokenTx = true
+		if clawTx, ok := tx.(*scalegraph.ClawbackTokenTransaction); ok {
+			detailContent += "  Clawback Token\n\n"
+			detailContent += lipgloss.NewStyle().Bold(true).Render("From (holder):") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(clawTx.Sender()))
+			detailContent += fmt.Sprintf("  %s\n\n", clawTx.Sender().ID().String())
+			detailContent += lipgloss.NewStyle().Bold(true).Render("To (authority):") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", m.getAccountDisplayName(clawTx.Receiver()))
+			detailContent += fmt.Sprintf("  %s\n\n", clawTx.Receiver().ID().String())
+			tok := clawTx.Token()
+			detailContent += lipgloss.NewStyle().Bold(true).Render("Token Value:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n\n", tok.Value())
+			detailContent += lipgloss.NewStyle().Bold(true).Render("Token ID:") + "\n"
+			detailContent += fmt.Sprintf("  %s\n", shortID(tok.ID(), 16))
+		}
 	}
 
 	// Amount (only for balance-changing transactions)
@@ -747,6 +758,8 @@ func (m Model) viewTokenMenu() string {
 		"Unauthorize Token Transfer",
 		"Transfer Token",
 		"View Account Tokens",
+		"Burn Token",
+		"Clawback Token",
 	}
 
 	var content string
@@ -809,19 +822,18 @@ func (m Model) viewMintToken() string {
 			noClawbackLabel = selectedStyle.Render(noClawbackLabel)
 		}
 		content += noClawbackCursor + noClawbackLabel + "\n"
-		clawbackIdx := 1
 		for i, acc := range accounts {
-			if i == m.tokenAccountIndex {
-				continue
-			}
+			clawbackIdx := i + 1
 			cursor := "  "
 			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenAccountIndex {
+				line += " (minter)"
+			}
 			if clawbackIdx == m.tokenClawbackIndex {
 				cursor = "> "
 				line = selectedStyle.Render(line)
 			}
 			content += cursor + line + "\n"
-			clawbackIdx++
 		}
 	}
 
@@ -1063,6 +1075,141 @@ func (m Model) viewTransferToken() string {
 
 	help := helpStyle.Render("↑/↓: navigate • enter: confirm • esc: back")
 
+	status := m.renderStatus()
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		content,
+		"",
+		status,
+		help,
+	)
+}
+
+func (m Model) viewBurnToken() string {
+	title := titleStyle.Render("Burn Token")
+
+	accounts := m.cachedAccounts
+	if len(accounts) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "No accounts available.", "", helpStyle.Render("esc: back"))
+	}
+
+	var content string
+
+	switch m.tokenStep {
+	case 0: // Select account
+		content = "Select account that owns the token to burn:\n\n"
+		for i, acc := range accounts {
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f  Tokens: %d",
+				m.getAccountDisplayName(acc), acc.Balance(), len(acc.GetTokens()))
+			if i == m.tokenAccountIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+
+	case 1: // Select token
+		acc := accounts[m.tokenAccountIndex]
+		content = fmt.Sprintf("Account: %s\n\n", m.getAccountDisplayName(acc))
+		tokens := m.cachedTokens
+		if len(tokens) == 0 {
+			content += "No owned tokens found."
+		} else {
+			content += "Select token to burn:\n\n"
+			for i, tok := range tokens {
+				cursor := "  "
+				line := fmt.Sprintf("Value: %-12s  ID: %s", tok.Value(), shortID(tok.ID(), 8))
+				if i == m.tokenTokenIndex {
+					cursor = "> "
+					line = selectedStyle.Render(line)
+				}
+				content += cursor + line + "\n"
+			}
+		}
+	}
+
+	help := helpStyle.Render("↑/↓: navigate • enter: confirm • esc: back")
+	status := m.renderStatus()
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		content,
+		"",
+		status,
+		help,
+	)
+}
+
+func (m Model) viewClawbackToken() string {
+	title := titleStyle.Render("Clawback Token")
+
+	accounts := m.cachedAccounts
+	if len(accounts) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "No accounts available.", "", helpStyle.Render("esc: back"))
+	}
+
+	var content string
+
+	switch m.tokenStep {
+	case 0: // Select clawback authority account (To — signs the request)
+		content = "Step 1/3 — Select clawback authority account:\n\n"
+		for i, acc := range accounts {
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenAccountIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+
+	case 1: // Select token holder account (From)
+		authority := accounts[m.tokenAccountIndex]
+		content = fmt.Sprintf("Authority: %s\n\n", m.getAccountDisplayName(authority))
+		content += "Step 2/3 — Select token holder account:\n\n"
+		for i, acc := range accounts {
+			if i == m.tokenAccountIndex {
+				continue
+			}
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f  Tokens: %d",
+				m.getAccountDisplayName(acc), acc.Balance(), len(acc.GetTokens()))
+			if i == m.tokenSourceIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+
+	case 2: // Select token to claw back (filtered to this authority)
+		authority := accounts[m.tokenAccountIndex]
+		holder := accounts[m.tokenSourceIndex]
+		content = fmt.Sprintf("Authority: %s\n", m.getAccountDisplayName(authority))
+		content += fmt.Sprintf("Holder:    %s\n\n", m.getAccountDisplayName(holder))
+		tokens := m.cachedTokens
+		if len(tokens) == 0 {
+			content += "No clawable tokens found."
+		} else {
+			content += "Step 3/3 — Select token to claw back:\n\n"
+			for i, tok := range tokens {
+				cursor := "  "
+				line := fmt.Sprintf("Value: %-12s  ID: %s", tok.Value(), shortID(tok.ID(), 8))
+				if i == m.tokenTokenIndex {
+					cursor = "> "
+					line = selectedStyle.Render(line)
+				}
+				content += cursor + line + "\n"
+			}
+		}
+	}
+
+	help := helpStyle.Render("↑/↓: navigate • enter: confirm • esc: back")
 	status := m.renderStatus()
 
 	return lipgloss.JoinVertical(
