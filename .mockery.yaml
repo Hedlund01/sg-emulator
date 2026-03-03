@@ -9,3 +9,10 @@ packages:
           dir: '{{.InterfaceDir}}/mocks'
           structname: Mock{{.InterfaceName}}
           filename: "mock_{{.InterfaceName}}.go"
+  sg-emulator/internal/ca:
+    interfaces:
+      CertificateAuthority:
+        config:
+          dir: '{{.InterfaceDir}}/mocks'
+          structname: Mock{{.InterfaceName}}
+          filename: "mock_{{.InterfaceName}}.go"

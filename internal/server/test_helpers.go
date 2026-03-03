@@ -2,9 +2,15 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"os"
+	"testing"
 	"time"
 
 	"sg-emulator/internal/ca"
@@ -19,6 +25,38 @@ func newTestLogger() *slog.Logger {
 	}))
 }
 
+// createTestAccountDirect creates an account directly on the app using generated keys.
+// Use this in tests that don't go through the full server/client/CA flow.
+func createTestAccountDirect(t *testing.T, app *scalegraph.App, balance float64) *scalegraph.Account {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key pair: %v", err)
+	}
+
+	// Create a self-signed cert
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "test"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, pub, ed25519.NewKeyFromSeed(make([]byte, 32)))
+	if err != nil {
+		t.Fatalf("failed to create certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("failed to parse certificate: %v", err)
+	}
+
+	acc, err := app.CreateAccountWithKeys(context.Background(), pub, cert, balance)
+	if err != nil {
+		t.Fatalf("failed to create test account: %v", err)
+	}
+	return acc
+}
+
 // newTestServer creates a server with a temporary CA for testing
 func newTestServer(logger *slog.Logger) (*Server, func(), error) {
 	// Create temporary directory for CA
@@ -28,7 +66,7 @@ func newTestServer(logger *slog.Logger) (*Server, func(), error) {
 	}
 
 	// Create CA
-	certAuth, err := ca.New(tmpDir, logger)
+	certAuth, err := ca.NewCA(tmpDir, logger)
 	if err != nil {
 		os.RemoveAll(tmpDir)
 		return nil, nil, err
@@ -47,7 +85,7 @@ func newTestServer(logger *slog.Logger) (*Server, func(), error) {
 
 // createSignedAccountRequest creates a signed account creation request for testing.
 // It uses the CA's identity (system account) to sign the request, mirroring how the MCP transport works.
-func createSignedAccountRequest(srv *Server, balance float64) (*crypto.SignedEnvelope[*crypto.CreateAccountRequest], error) {
+func createSignedAccountRequest(srv *Server, balance float64) (*crypto.SignedEnvelope[*crypto.CreateAccountPayload], error) {
 	ca := srv.CA()
 	if ca == nil {
 		return nil, fmt.Errorf("no CA available on server")
@@ -57,7 +95,7 @@ func createSignedAccountRequest(srv *Server, balance float64) (*crypto.SignedEnv
 	systemAccountID := scalegraph.ScalegraphIdFromPublicKey(ca.PublicKey())
 	accountIDStr := systemAccountID.String()
 
-	createReq := &crypto.CreateAccountRequest{
+	createReq := &crypto.CreateAccountPayload{
 		InitialBalance: balance,
 	}
 
@@ -66,7 +104,6 @@ func createSignedAccountRequest(srv *Server, balance float64) (*crypto.SignedEnv
 
 // createTestAccount is a convenience wrapper that creates a signed account request,
 // calls CreateAccountWithCredentials, and returns the account.
-// This replaces the old client.CreateAccount() pattern in tests.
 func createTestAccount(ctx context.Context, srv *Server, client *Client, balance float64) (*scalegraph.Account, error) {
 	signedReq, err := createSignedAccountRequest(srv, balance)
 	if err != nil {
@@ -82,7 +119,7 @@ func createTestAccount(ctx context.Context, srv *Server, client *Client, balance
 
 // createSignedGetAccountRequest creates a signed get account request for testing.
 // It uses the account's own credentials to sign the request.
-func createSignedGetAccountRequest(srv *Server, accountID scalegraph.ScalegraphId) (*crypto.SignedEnvelope[*crypto.GetAccountRequest], error) {
+func createSignedGetAccountRequest(srv *Server, accountID scalegraph.ScalegraphId) (*crypto.SignedEnvelope[*crypto.GetAccountPayload], error) {
 	ca := srv.CA()
 	if ca == nil {
 		return nil, fmt.Errorf("no CA available on server")
@@ -105,7 +142,7 @@ func createSignedGetAccountRequest(srv *Server, accountID scalegraph.ScalegraphI
 		return nil, err
 	}
 
-	getReq := &crypto.GetAccountRequest{
+	getReq := &crypto.GetAccountPayload{
 		AccountID: accountIDStr,
 	}
 
@@ -123,7 +160,7 @@ func getTestAccount(ctx context.Context, srv *Server, client *Client, accountID 
 }
 
 // createSignedTransfer creates a signed transfer envelope for testing
-func createSignedTransfer(ctx context.Context, srv *Server, client *Client, fromID, toID scalegraph.ScalegraphId, amount float64) (*crypto.SignedEnvelope[*crypto.TransferRequest], error) {
+func createSignedTransfer(ctx context.Context, srv *Server, client *Client, fromID, toID scalegraph.ScalegraphId, amount float64) (*crypto.SignedEnvelope[*crypto.TransferPayload], error) {
 	// Get the CA from server
 	ca := srv.CA()
 	if ca == nil {
@@ -159,7 +196,7 @@ func createSignedTransfer(ctx context.Context, srv *Server, client *Client, from
 	nonce := fromAccount.GetNonce() + 1
 
 	// Create transfer request
-	transferReq := &crypto.TransferRequest{
+	transferReq := &crypto.TransferPayload{
 		From:      fromIDStr,
 		To:        toID.String(),
 		Amount:    amount,

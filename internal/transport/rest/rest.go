@@ -14,7 +14,6 @@ import (
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server"
-	"sg-emulator/internal/server/messages"
 	_ "sg-emulator/internal/transport/rest/docs"
 )
 
@@ -70,6 +69,16 @@ func (t *Transport) Start(ctx context.Context) error {
 	r.Get("/health", t.handleHealth)
 	r.Post("/accounts/me", t.handleGetMyAccount) // Get own account (signed, authenticated)
 	r.Post("/transfer", t.handleTransfer)        // Transfer (signed, authenticated)
+
+	// Token routes
+	r.Route("/tokens", func(r chi.Router) {
+		r.Post("/mint", t.handleMintToken)                       // Mint a token (signed)
+		r.Post("/authorize", t.handleAuthorizeTokenTransfer)     // Authorize token transfer (signed)
+		r.Post("/unauthorize", t.handleUnauthorizeTokenTransfer) // Unauthorize token transfer (signed)
+		r.Post("/transfer", t.handleTransferToken)               // Transfer a token (signed)
+		r.Post("/burn", t.handleBurnToken)                       // Burn a token (signed)
+		r.Post("/clawback", t.handleClawbackToken)               // Clawback a token (signed)
+	})
 
 	t.server = &http.Server{
 		Addr:    t.address,
@@ -154,11 +163,11 @@ func (t *Transport) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AccountRequest represents a request to access account data (must be signed)
-type AccountRequest struct {
-	AccountID string `json:"account_id" example:"6c439a07c32f7fb09c29403d8d2e4e47b8c5e8a9"`
+// GetMyAccountRequest is the incoming request body for the /accounts/me endpoint
+type GetMyAccountRequest struct {
+	AccountID     scalegraph.ScalegraphId                           `json:"account_id"`
+	SignedRequest *crypto.SignedEnvelope[*crypto.GetAccountPayload] `json:"signed_request"`
 }
-
 
 // AccountResponse represents account details with transaction history
 type AccountResponse struct {
@@ -172,12 +181,6 @@ type ErrorResponse struct {
 	Error string `json:"error" example:"Invalid request"`
 }
 
-// Bytes implements SignableData interface for AccountRequest
-func (a *AccountRequest) Bytes() []byte {
-	data, _ := json.Marshal(a)
-	return data
-}
-
 // handleGetMyAccount godoc
 // @Summary Get your own account details
 // @Description Get account details including balance and transaction history. Requires cryptographically signed request with Ed25519 signature and X.509 certificate.
@@ -187,7 +190,7 @@ func (a *AccountRequest) Bytes() []byte {
 // @Failure 404 {object} ErrorResponse "Account not found"
 // @Router /accounts/me [post]
 func (t *Transport) handleGetMyAccount(w http.ResponseWriter, r *http.Request) {
-	var req messages.GetAccountPayload
+	var req GetMyAccountRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body")
@@ -237,10 +240,25 @@ func (t *Transport) handleGetMyAccount(w http.ResponseWriter, r *http.Request) {
 			if receiver := tx.Receiver(); receiver != nil {
 				toID = receiver.ID().String()
 			}
+
+			var amount float64
+			switch tx.Type() {
+			case scalegraph.Mint:
+				mintTx := tx.(*scalegraph.MintTransaction)
+				amount = mintTx.Amount()
+			case scalegraph.Transfer:
+				transferTx := tx.(*scalegraph.TransferTransaction)
+				amount = transferTx.Amount()
+			case scalegraph.Burn:
+				burnTx := tx.(*scalegraph.BurnTransaction)
+				amount = burnTx.Amount()
+			}
+
 			transactions = append(transactions, map[string]interface{}{
+				"type":   tx.Type().String(),
 				"from":   fromID,
 				"to":     toID,
-				"amount": tx.Amount(),
+				"amount": amount,
 			})
 		}
 	}
@@ -254,7 +272,7 @@ func (t *Transport) handleGetMyAccount(w http.ResponseWriter, r *http.Request) {
 
 // SignedTransferRequest represents the incoming signed transfer request
 type SignedTransferRequest struct {
-	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferRequest] `json:"signed_envelope"`
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferPayload] `json:"signed_envelope"`
 }
 
 // TransferResponse represents a successful transfer response
@@ -265,18 +283,10 @@ type TransferResponse struct {
 // handleTransfer godoc
 // @Summary Transfer funds between accounts
 // @Description Transfer funds from one account to another. Requires cryptographically signed request with Ed25519 signature.
-// @Description
-// @Description The request must be wrapped in a SignedEnvelope containing:
-// @Description - payload: TransferRequest with from (sender account ID), to (recipient account ID), amount, nonce (random 16-byte hex string), and timestamp
-// @Description - signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id (must match 'from'), and timestamp
-// @Description - certificate: PEM-encoded X.509 certificate of the sender
-// @Description
-// @Description The nonce prevents replay attacks. Each transfer must use a unique nonce.
-// @Description The signature is created by signing the canonical JSON bytes of the TransferRequest payload.
 // @Tags transfer
 // @Accept json
 // @Produce json
-// @Param request body SignedTransferRequest true "Signed transfer request with Ed25519 signature" SchemaExample({"signed_envelope": {"payload": {"from": "6a9449abe8d7a13b5ac7a24ad5d8e75af5e5d038", "to": "ba2119599402108cc4aa91b84dec4d5bc67ac8db", "amount": 20, "nonce": "39e9506a5b49a063aacd2a1359aed06e", "timestamp": 1770219384}, "signature": {"algorithm": "Ed25519", "value": "AdD3+ttskNv3b0PEkEt44AhpIHPOVwAdkSMB+Uac5sYvTHwls2wKXupLmxsVampMS69KNS7PmYszbPzO5Hk9Cw==", "signer_id": "6a9449abe8d7a13b5ac7a24ad5d8e75af5e5d038", "timestamp": 1770219384}, "certificate": "-----BEGIN CERTIFICATE-----\nMIIBzjCCAYCgAwIBAgIRAOihXziTU66Z6IuOTkN3iKUwBQYDK2VwMFYxHDAaBgNV\nBAoTE1NjYWxlZ3JhcGggRW11bGF0b3IxHjAcBgNVBAsTFUNlcnRpZmljYXRlIEF1\ndGhvcml0eTEWMBQGA1UEAxMNU2NhbGVncmFwaCBDQTAeFw0yNjAyMDQxNTM1NDRa\nFw0yNzAyMDQxNTM1NDRaMGMxHDAaBgNVBAoTE1NjYWxlZ3JhcGggRW11bGF0b3Ix\nEDAOBgNVBAsTB0FjY291bnQxMTAvBgNVBAMTKDZhOTQ0OWFiZThkN2ExM2I1YWM3\nYTI0YWQ1ZDhlNzVhZjVlNWQwMzgwKjAFBgMrZXADIQD7yeDwJUBfq6VN3Q19psz6\npJngu+eTv8htYRedY9+ohKNWMFQwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG\nCCsGAQUFBwMCMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUXrWTE8j1zlHmiT+L\ne9GT14eaBJswBQYDK2VwA0EA88Q8Dj7fefnb1P0YotpaYcPp2UVWQyh/H5gSbdAC\n7mImKcgSPXnKgQAV4OfnZ/B/XQBrhBaOMPTbIKvYu68yAQ==\n-----END CERTIFICATE-----\n"}})
+// @Param request body SignedTransferRequest true "Signed transfer request with Ed25519 signature"
 // @Success 200 {object} TransferResponse
 // @Failure 400 {object} ErrorResponse "Invalid request, missing fields, or transfer failed"
 // @Router /transfer [post]
@@ -318,6 +328,224 @@ func (t *Transport) handleTransfer(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, TransferResponse{
 		Status: "success",
 	})
+}
+
+// SignedMintTokenRequest represents the incoming signed mint token request
+type SignedMintTokenRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.MintTokenPayload] `json:"signed_envelope"`
+}
+
+// handleMintToken godoc
+// @Summary Mint a new token
+// @Description Mint a new token for an account. Requires a cryptographically signed request with Ed25519 signature.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedMintTokenRequest true "Signed mint token request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or mint failed"
+// @Router /tokens/mint [post]
+func (t *Transport) handleMintToken(w http.ResponseWriter, r *http.Request) {
+	var req SignedMintTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.MintTokenSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Mint token failed", "error", err,
+			"signer", req.SignedEnvelope.Signature.SignerID,
+			"token_value", req.SignedEnvelope.Payload.TokenValue)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedAuthorizeTokenTransferRequest represents the incoming signed authorize token transfer request
+type SignedAuthorizeTokenTransferRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload] `json:"signed_envelope"`
+}
+
+// handleAuthorizeTokenTransfer godoc
+// @Summary Authorize a token transfer
+// @Description Authorize a token to be transferred from an account. Must be called before /tokens/transfer. Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedAuthorizeTokenTransferRequest true "Signed authorize token transfer request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or authorization failed"
+// @Router /tokens/authorize [post]
+func (t *Transport) handleAuthorizeTokenTransfer(w http.ResponseWriter, r *http.Request) {
+	var req SignedAuthorizeTokenTransferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.AuthorizeTokenTransferSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Authorize token transfer failed", "error", err,
+			"account_id", req.SignedEnvelope.Payload.AccountID,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedUnauthorizeTokenTransferRequest represents the incoming signed unauthorize token transfer request
+type SignedUnauthorizeTokenTransferRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.UnauthorizeTokenTransferPayload] `json:"signed_envelope"`
+}
+
+// handleUnauthorizeTokenTransfer godoc
+// @Summary Unauthorize a token transfer
+// @Description Revoke a previously authorized token transfer from an account. Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedUnauthorizeTokenTransferRequest true "Signed unauthorize token transfer request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or unauthorization failed"
+// @Router /tokens/unauthorize [post]
+func (t *Transport) handleUnauthorizeTokenTransfer(w http.ResponseWriter, r *http.Request) {
+	var req SignedUnauthorizeTokenTransferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.UnauthorizeTokenTransferSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Unauthorize token transfer failed", "error", err,
+			"account_id", req.SignedEnvelope.Payload.AccountID,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedTransferTokenRequest represents the incoming signed transfer token request
+type SignedTransferTokenRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferTokenPayload] `json:"signed_envelope"`
+}
+
+// handleTransferToken godoc
+// @Summary Transfer a token between accounts
+// @Description Transfer a token from one account to another. The token must first be authorized for transfer using /tokens/authorize. Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedTransferTokenRequest true "Signed transfer token request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or transfer failed"
+// @Router /tokens/transfer [post]
+func (t *Transport) handleTransferToken(w http.ResponseWriter, r *http.Request) {
+	var req SignedTransferTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.TransferTokenSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Transfer token failed", "error", err,
+			"from", req.SignedEnvelope.Payload.From,
+			"to", req.SignedEnvelope.Payload.To,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedBurnTokenRequest represents the incoming signed burn token request
+type SignedBurnTokenRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.BurnTokenPayload] `json:"signed_envelope"`
+}
+
+// handleBurnToken godoc
+// @Summary Burn a token
+// @Description Permanently destroy a token owned by an account. Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedBurnTokenRequest true "Signed burn token request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or burn failed"
+// @Router /tokens/burn [post]
+func (t *Transport) handleBurnToken(w http.ResponseWriter, r *http.Request) {
+	var req SignedBurnTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.BurnTokenSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Burn token failed", "error", err,
+			"account_id", req.SignedEnvelope.Payload.AccountID,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
+}
+
+// SignedClawbackTokenRequest represents the incoming signed clawback token request
+type SignedClawbackTokenRequest struct {
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.ClawbackTokenPayload] `json:"signed_envelope"`
+}
+
+// handleClawbackToken godoc
+// @Summary Clawback a token
+// @Description Reclaim a token from an account using clawback authority. Must be signed by the clawback authority account (To). Requires a cryptographically signed request.
+// @Tags tokens
+// @Accept json
+// @Produce json
+// @Param request body SignedClawbackTokenRequest true "Signed clawback token request"
+// @Success 200 {object} TransferResponse
+// @Failure 400 {object} ErrorResponse "Invalid request or clawback failed"
+// @Router /tokens/clawback [post]
+func (t *Transport) handleClawbackToken(w http.ResponseWriter, r *http.Request) {
+	var req SignedClawbackTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SignedEnvelope == nil {
+		respondError(w, http.StatusBadRequest, "Signed envelope required")
+		return
+	}
+
+	if _, err := t.client.ClawbackTokenSigned(r.Context(), req.SignedEnvelope); err != nil {
+		t.logger.Error("Clawback token failed", "error", err,
+			"from", req.SignedEnvelope.Payload.From,
+			"to", req.SignedEnvelope.Payload.To,
+			"token_id", req.SignedEnvelope.Payload.TokenID)
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, TransferResponse{Status: "success"})
 }
 
 // respondJSON writes a JSON response

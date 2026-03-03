@@ -2,44 +2,36 @@ package scalegraph
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewScalegraphId(t *testing.T) {
 	id, err := NewScalegraphId()
-	if err != nil {
-		t.Fatalf("NewScalegraphId() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Test that ID is not zero value
 	zeroID := ScalegraphId{}
-	if id == zeroID {
-		t.Error("generated ID is zero value")
-	}
+	assert.NotEqual(t, zeroID, id, "generated ID should not be zero value")
 
 	// Test that two IDs are different
 	id2, err := NewScalegraphId()
-	if err != nil {
-		t.Fatalf("NewScalegraphId() failed: %v", err)
-	}
-	if id == id2 {
-		t.Error("two generated IDs are identical")
-	}
+	require.NoError(t, err)
+	assert.NotEqual(t, id, id2, "two generated IDs should be different")
 }
 
 func TestScalegraphIdString(t *testing.T) {
 	id, _ := NewScalegraphId()
 	str := id.String()
 
-	// Test that string is hex encoded
-	if len(str) != 40 { // 20 bytes * 2 hex chars
-		t.Errorf("expected string length 40, got %d", len(str))
-	}
+	// Test that string is hex encoded (20 bytes * 2 hex chars = 40)
+	assert.Len(t, str, 40, "hex string should be 40 characters")
 
 	// Test that string contains only hex characters
 	for _, c := range str {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			t.Errorf("string contains non-hex character: %c", c)
-		}
+		isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
+		assert.True(t, isHex, "string should only contain hex characters, got: %c", c)
 	}
 }
 
@@ -50,65 +42,60 @@ func TestScalegraphIdFromString(t *testing.T) {
 
 	// Parse back from string
 	parsed, err := ScalegraphIdFromString(str)
-	if err != nil {
-		t.Fatalf("ScalegraphIdFromString() failed: %v", err)
-	}
-
-	// Test that IDs are equal
-	if parsed != original {
-		t.Error("parsed ID does not match original")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, original, parsed, "parsed ID should match original")
 
 	// Test parsing invalid hex
 	_, err = ScalegraphIdFromString("not-hex")
-	if err == nil {
-		t.Error("expected error for invalid hex, got nil")
-	}
+	assert.Error(t, err, "should error for invalid hex")
 
 	// Test parsing wrong length
-	_, err = ScalegraphIdFromString("abcd1234") // Too short
-	if err == nil {
-		t.Error("expected error for wrong length, got nil")
-	}
+	_, err = ScalegraphIdFromString("abcd1234")
+	assert.Error(t, err, "should error for wrong length")
 
 	// Test empty string
 	_, err = ScalegraphIdFromString("")
-	if err == nil {
-		t.Error("expected error for empty string, got nil")
-	}
+	assert.Error(t, err, "should error for empty string")
 }
 
 func TestScalegraphIdRoundTrip(t *testing.T) {
-	// Test multiple round trips
 	for i := 0; i < 10; i++ {
 		original, _ := NewScalegraphId()
 		str := original.String()
 		parsed, err := ScalegraphIdFromString(str)
-		if err != nil {
-			t.Fatalf("round trip %d failed: %v", i, err)
-		}
-		if parsed != original {
-			t.Errorf("round trip %d: IDs don't match", i)
-		}
+		require.NoError(t, err, "round trip %d failed", i)
+		assert.Equal(t, original, parsed, "round trip %d: IDs should match", i)
 	}
 }
 
 func TestScalegraphIdConsistency(t *testing.T) {
 	id, _ := NewScalegraphId()
 
-	// Test that String() is consistent
 	str1 := id.String()
 	str2 := id.String()
-	if str1 != str2 {
-		t.Error("String() returned different values")
-	}
+	assert.Equal(t, str1, str2, "String() should return consistent values")
 }
 
 func TestScalegraphIdSize(t *testing.T) {
 	id := ScalegraphId{}
+	assert.Len(t, id, 20, "ScalegraphId should be exactly 20 bytes")
+}
 
-	// Test that size is exactly 20 bytes
-	if len(id) != 20 {
-		t.Errorf("expected size 20 bytes, got %d", len(id))
-	}
+func TestScalegraphIdFromPublicKey(t *testing.T) {
+	pubKey, _, _ := testKeyPairAndCert(t)
+
+	id := ScalegraphIdFromPublicKey(pubKey)
+
+	// Should not be zero
+	zeroID := ScalegraphId{}
+	assert.NotEqual(t, zeroID, id, "ID from public key should not be zero")
+
+	// Should be deterministic
+	id2 := ScalegraphIdFromPublicKey(pubKey)
+	assert.Equal(t, id, id2, "same public key should produce same ID")
+
+	// Different keys should produce different IDs
+	pubKey2, _, _ := testKeyPairAndCert(t)
+	id3 := ScalegraphIdFromPublicKey(pubKey2)
+	assert.NotEqual(t, id, id3, "different public keys should produce different IDs")
 }

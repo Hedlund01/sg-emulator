@@ -9,15 +9,7 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "termsOfService": "http://swagger.io/terms/",
-        "contact": {
-            "name": "API Support",
-            "email": "support@example.com"
-        },
-        "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
-        },
+        "contact": {},
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -25,28 +17,8 @@ const docTemplate = `{
     "paths": {
         "/accounts/me": {
             "post": {
-                "description": "Get account details including balance and transaction history. Requires cryptographically signed request with Ed25519 signature and X.509 certificate.\n\nThe request must be wrapped in a SignedEnvelope structure containing:\n- payload: The AccountRequest with your account_id\n- signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id, and timestamp\n- certificate: PEM-encoded X.509 certificate containing your public key\n\nThe signature must be created by signing the JSON bytes of the payload using your account's Ed25519 private key.\nThe signer_id in the signature must match the account_id in the payload.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "accounts"
-                ],
+                "description": "Get account details including balance and transaction history. Requires cryptographically signed request with Ed25519 signature and X.509 certificate.",
                 "summary": "Get your own account details",
-                "parameters": [
-                    {
-                        "description": "Signed account request with Ed25519 signature",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/rest.SignedAccountRequest"
-                        }
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -98,9 +70,249 @@ const docTemplate = `{
                 }
             }
         },
+        "/tokens/authorize": {
+            "post": {
+                "description": "Authorize a token to be transferred from an account. Must be called before /tokens/transfer. Requires a cryptographically signed request.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tokens"
+                ],
+                "summary": "Authorize a token transfer",
+                "parameters": [
+                    {
+                        "description": "Signed authorize token transfer request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.SignedAuthorizeTokenTransferRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.TransferResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or authorization failed",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tokens/burn": {
+            "post": {
+                "description": "Permanently destroy a token owned by an account. Requires a cryptographically signed request.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tokens"
+                ],
+                "summary": "Burn a token",
+                "parameters": [
+                    {
+                        "description": "Signed burn token request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.SignedBurnTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.TransferResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or burn failed",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tokens/clawback": {
+            "post": {
+                "description": "Reclaim a token from an account using clawback authority. Must be signed by the clawback authority account (To). Requires a cryptographically signed request.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tokens"
+                ],
+                "summary": "Clawback a token",
+                "parameters": [
+                    {
+                        "description": "Signed clawback token request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.SignedClawbackTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.TransferResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or clawback failed",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tokens/mint": {
+            "post": {
+                "description": "Mint a new token for an account. Requires a cryptographically signed request with Ed25519 signature.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tokens"
+                ],
+                "summary": "Mint a new token",
+                "parameters": [
+                    {
+                        "description": "Signed mint token request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.SignedMintTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.TransferResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or mint failed",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tokens/transfer": {
+            "post": {
+                "description": "Transfer a token from one account to another. The token must first be authorized for transfer using /tokens/authorize. Requires a cryptographically signed request.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tokens"
+                ],
+                "summary": "Transfer a token between accounts",
+                "parameters": [
+                    {
+                        "description": "Signed transfer token request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.SignedTransferTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.TransferResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or transfer failed",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tokens/unauthorize": {
+            "post": {
+                "description": "Revoke a previously authorized token transfer from an account. Requires a cryptographically signed request.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tokens"
+                ],
+                "summary": "Unauthorize a token transfer",
+                "parameters": [
+                    {
+                        "description": "Signed unauthorize token transfer request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.SignedUnauthorizeTokenTransferRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.TransferResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or unauthorization failed",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/transfer": {
             "post": {
-                "description": "Transfer funds from one account to another. Requires cryptographically signed request with Ed25519 signature.\n\nThe request must be wrapped in a SignedEnvelope containing:\n- payload: TransferRequest with from (sender account ID), to (recipient account ID), amount, nonce (random 16-byte hex string), and timestamp\n- signature: Ed25519 signature with algorithm, value (base64-encoded), signer_id (must match 'from'), and timestamp\n- certificate: PEM-encoded X.509 certificate of the sender\n\nThe nonce prevents replay attacks. Each transfer must use a unique nonce.\nThe signature is created by signing the canonical JSON bytes of the TransferRequest payload.",
+                "description": "Transfer funds from one account to another. Requires cryptographically signed request with Ed25519 signature.",
                 "consumes": [
                     "application/json"
                 ],
@@ -182,10 +394,25 @@ const docTemplate = `{
                 }
             }
         },
-        "rest.SignedAccountRequest": {
+        "rest.SignedAuthorizeTokenTransferRequest": {
+            "type": "object"
+        },
+        "rest.SignedBurnTokenRequest": {
+            "type": "object"
+        },
+        "rest.SignedClawbackTokenRequest": {
+            "type": "object"
+        },
+        "rest.SignedMintTokenRequest": {
             "type": "object"
         },
         "rest.SignedTransferRequest": {
+            "type": "object"
+        },
+        "rest.SignedTransferTokenRequest": {
+            "type": "object"
+        },
+        "rest.SignedUnauthorizeTokenTransferRequest": {
             "type": "object"
         },
         "rest.TransferResponse": {
@@ -202,12 +429,12 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0",
-	Host:             "localhost:8080",
-	BasePath:         "/",
+	Version:          "",
+	Host:             "",
+	BasePath:         "",
 	Schemes:          []string{},
-	Title:            "SG Emulator REST API",
-	Description:      "REST API for SG Emulator with cryptographically signed requests",
+	Title:            "",
+	Description:      "",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

@@ -76,8 +76,8 @@ func CreateSignedEnvelope[T SignableData](payload T, privKey ed25519.PrivateKey,
 	}, nil
 }
 
-// TransferRequest represents a signed transfer request
-type TransferRequest struct {
+// TransferPayload is the signed payload for a transfer request.
+type TransferPayload struct {
 	From      string  `json:"from"`
 	To        string  `json:"to"`
 	Amount    float64 `json:"amount"`
@@ -86,9 +86,8 @@ type TransferRequest struct {
 }
 
 // Bytes returns the canonical byte representation for signing
-func (r *TransferRequest) Bytes() []byte {
-	// Create a deterministic byte representation
-	data, _ := json.Marshal(TransferRequest{
+func (r *TransferPayload) Bytes() []byte {
+	data, _ := json.Marshal(TransferPayload{
 		From:      r.From,
 		To:        r.To,
 		Amount:    r.Amount,
@@ -98,26 +97,119 @@ func (r *TransferRequest) Bytes() []byte {
 	return data
 }
 
-type CreateAccountRequest struct {
+// CreateAccountPayload is the signed payload for a create account request.
+type CreateAccountPayload struct {
 	InitialBalance float64 `json:"initial_balance"`
 }
 
 // Bytes returns the canonical byte representation for signing
-func (r *CreateAccountRequest) Bytes() []byte {
-	data, _ := json.Marshal(CreateAccountRequest{
+func (r *CreateAccountPayload) Bytes() []byte {
+	data, _ := json.Marshal(CreateAccountPayload{
 		InitialBalance: r.InitialBalance,
 	})
 	return data
 }
 
-type GetAccountRequest struct {
+// GetAccountPayload is the signed payload for a get account request.
+type GetAccountPayload struct {
 	AccountID string `json:"account_id"`
 }
 
 // Bytes returns the canonical byte representation for signing
-func (r *GetAccountRequest) Bytes() []byte {
-	data, _ := json.Marshal(GetAccountRequest{
+func (r *GetAccountPayload) Bytes() []byte {
+	data, _ := json.Marshal(GetAccountPayload{
 		AccountID: r.AccountID,
+	})
+	return data
+}
+
+// MintTokenPayload is the signed payload for a mint token request.
+type MintTokenPayload struct {
+	TokenValue      string  `json:"token_value"`
+	ClawbackAddress *string `json:"clawback_address,omitempty"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *MintTokenPayload) Bytes() []byte {
+	data, _ := json.Marshal(MintTokenPayload{
+		TokenValue:      r.TokenValue,
+		ClawbackAddress: r.ClawbackAddress,
+	})
+	return data
+}
+
+// BurnTokenPayload is the signed payload for a burn token request.
+type BurnTokenPayload struct {
+	AccountID string `json:"account_id"`
+	TokenID   string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *BurnTokenPayload) Bytes() []byte {
+	data, _ := json.Marshal(BurnTokenPayload{
+		TokenID: r.TokenID,
+	})
+	return data
+}
+
+// TransferTokenPayload is the signed payload for a transfer token request.
+type TransferTokenPayload struct {
+	From    string `json:"from"`
+	To      string `json:"to"`
+	TokenID string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *TransferTokenPayload) Bytes() []byte {
+	data, _ := json.Marshal(TransferTokenPayload{
+		From:    r.From,
+		To:      r.To,
+		TokenID: r.TokenID,
+	})
+	return data
+}
+
+// AuthorizeTokenTransferPayload is the signed payload for an authorize token transfer request.
+type AuthorizeTokenTransferPayload struct {
+	AccountID string `json:"account_id"`
+	TokenID   string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *AuthorizeTokenTransferPayload) Bytes() []byte {
+	data, _ := json.Marshal(AuthorizeTokenTransferPayload{
+		AccountID: r.AccountID,
+		TokenID:   r.TokenID,
+	})
+	return data
+}
+
+type UnauthorizeTokenTransferPayload struct {
+	AccountID string `json:"account_id"`
+	TokenID   string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *UnauthorizeTokenTransferPayload) Bytes() []byte {
+	data, _ := json.Marshal(UnauthorizeTokenTransferPayload{
+		AccountID: r.AccountID,
+		TokenID:   r.TokenID,
+	})
+	return data
+}
+
+type ClawbackTokenPayload struct {
+	From    string `json:"from"`
+	To      string `json:"to"`
+	TokenID string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *ClawbackTokenPayload) Bytes() []byte {
+	data, _ := json.Marshal(ClawbackTokenPayload{
+		From:    r.From,
+		To:      r.To,
+		TokenID: r.TokenID,
 	})
 	return data
 }

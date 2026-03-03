@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -15,12 +14,19 @@ type ViewState int
 const (
 	ViewMenu ViewState = iota
 	ViewCreateAccount
-	ViewListAccounts
 	ViewAccountDetail
 	ViewAccountDetailSingle
 	ViewTransactionDetail
 	ViewSendMoney
 	ViewVirtualNodes
+	ViewTokenMenu
+	ViewMintToken
+	ViewAuthorizeTokenTransfer
+	ViewUnauthorizeTokenTransfer
+	ViewTransferToken
+	ViewTokenList
+	ViewBurnToken
+	ViewClawbackToken
 )
 
 // AccountCredentials caches loaded cryptographic credentials
@@ -45,27 +51,39 @@ type Model struct {
 	// Credential cache (maps account ID to loaded credentials)
 	credentialCache map[scalegraph.ScalegraphId]*AccountCredentials
 
+	// Snapshot caches — refreshed on view entry and after every mutating action.
+	// All Update and View code reads from these instead of calling GetAccounts/GetTokens inline.
+	cachedAccounts []*scalegraph.Account
+	cachedTokens   []*scalegraph.Token // tokens for the currently active tokenAccountIndex
 	// Menu state
 	menuCursor int
 
 	// Create account state
 	balanceInput       textinput.Model
 	nameInput          textinput.Model
-	pendingAccountID   scalegraph.ScalegraphId // ID of account being named
-	createAccountFocus int                     // 0=balance, 1=name, 2=submit
+	createAccountFocus int // 0=balance, 1=name, 2=submit
 
 	// Account selection state
 	selectedAccountIndex     int
 	transactionOffset        int // Scroll offset for transaction history
 	selectedTransactionIndex int // Selected transaction in the list
-	accountList              list.Model
-	transactionList          list.Model
+	tokenListOffset          int // Scroll offset for token list
 
 	// Send money state
 	sendFromIndex int
 	sendToIndex   int
 	sendAmount    string
 	sendStep      int // 0=from, 1=to, 2=amount
+
+	// Token operations state
+	tokenMenuCursor     int
+	tokenStep           int
+	tokenAccountIndex   int // from-account or single-account selector
+	tokenToAccountIndex int // to-account selector (TransferToken step 2)
+	tokenSourceIndex    int // source account selector (AuthorizeTokenTransfer step 1: token owner)
+	tokenClawbackIndex  int // 0 = "No clawback", 1+ = account index (MintToken step 2)
+	tokenTokenIndex     int // selected token index within an account's token list
+	tokenValueInput     textinput.Model
 
 	// Status message
 	statusMsg string
@@ -85,6 +103,12 @@ func NewModel(application *server.Client, srv *server.Server) Model {
 	nameInput.CharLimit = 50
 	nameInput.Width = 40
 
+	// Initialize token value input
+	tokenValueInput := textinput.New()
+	tokenValueInput.Placeholder = "e.g. gold"
+	tokenValueInput.CharLimit = 100
+	tokenValueInput.Width = 40
+
 	return Model{
 		app:             application,
 		server:          srv,
@@ -93,6 +117,7 @@ func NewModel(application *server.Client, srv *server.Server) Model {
 		credentialCache: make(map[scalegraph.ScalegraphId]*AccountCredentials),
 		balanceInput:    balanceInput,
 		nameInput:       nameInput,
+		tokenValueInput: tokenValueInput,
 	}
 }
 
