@@ -18,7 +18,7 @@ BINARY_DIR=bin
 MAIN_PACKAGE=./cmd/app
 TESTCLIENT_PACKAGE=./cmd/testclient
 
-.PHONY: all build run test test-coverage clean deps fmt lint proto swagger rename-module help test-endpoints test-streams test-grpc run-grpc
+.PHONY: all build run test test-coverage clean deps fmt lint proto swagger rename-module help test-endpoints test-streams test-grpc bench-grpc run-grpc
 
 # Default target
 all: clean deps fmt swagger test build
@@ -40,6 +40,13 @@ test-streams:
 	$(BINARY_DIR)/$(TESTCLIENT_NAME) -mode streams -addr $(GRPC_ADDR) -base-dir . \
 		-max-streams $(MAX_STREAMS) -step $(STEP_SIZE) -fanout=$(FANOUT) -timeout $(STREAMS_TIMEOUT)
 
+# Run throughput benchmark (requires a running server at localhost:50051)
+bench-grpc: build
+	@echo "Running throughput benchmark against $(GRPC_ADDR)..."
+	$(BINARY_DIR)/$(TESTCLIENT_NAME) -mode bench -addr $(GRPC_ADDR) -base-dir . \
+		-workload $(BENCH_WORKLOAD) -workers $(BENCH_WORKERS) \
+		-duration $(BENCH_DURATION) -warmup $(BENCH_WARMUP)
+
 # Run both endpoint tests and stream load test
 test-grpc: test-endpoints test-streams
 
@@ -49,6 +56,10 @@ STEP_SIZE ?= 100
 FANOUT ?= true
 ENDPOINTS_TIMEOUT ?= 60s
 STREAMS_TIMEOUT ?= 120s
+BENCH_WORKLOAD ?= mixed
+BENCH_WORKERS  ?= 10
+BENCH_DURATION ?= 10s
+BENCH_WARMUP   ?= 2s
 
 # Build the application
 build:
