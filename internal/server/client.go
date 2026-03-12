@@ -172,22 +172,32 @@ func (c *Client) GetAccounts(ctx context.Context) ([]*scalegraph.Account, error)
 }
 
 // TransferSigned transfers funds with a cryptographically signed request
-func (c *Client) TransferSigned(ctx context.Context, from, to scalegraph.ScalegraphId, amount float64, signedRequest *crypto.SignedEnvelope[*crypto.TransferPayload]) error {
+func (c *Client) TransferSigned(ctx context.Context, signedRequest *crypto.SignedEnvelope[*crypto.TransferPayload]) (*scalegraph.TransferResponse, error) {
 	traceID := trace.GetTraceID(ctx)
-	logAttrs := []any{"from", from, "to", to, "amount", amount, "signed", true}
+	logAttrs := []any{"from", signedRequest.Payload.From, "to", signedRequest.Payload.To, "amount", signedRequest.Payload.Amount, "signed", true}
 	if traceID != "" {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
 	c.logger.Debug("Signed transfer requested", logAttrs...)
 
-	_, err := Send[scalegraph.TransferRequest, scalegraph.TransferResponse](c, ctx, &scalegraph.TransferRequest{
+	from, err := scalegraph.ScalegraphIdFromString(signedRequest.Payload.From)
+	if err != nil {
+		c.logger.Error("Invalid from account ID in signed request", "error", err, "from_account_id", signedRequest.Payload.From)
+		return nil, err
+	}
+	to, err := scalegraph.ScalegraphIdFromString(signedRequest.Payload.To)
+	if err != nil {
+		c.logger.Error("Invalid to account ID in signed request", "error", err, "to_account_id", signedRequest.Payload.To)
+		return nil, err
+	}
+
+	return Send[scalegraph.TransferRequest, scalegraph.TransferResponse](c, ctx, &scalegraph.TransferRequest{
 		From:           from,
 		To:             to,
-		Amount:         amount,
+		Amount:         signedRequest.Payload.Amount,
 		Nonce:          signedRequest.Payload.Nonce,
 		SignedEnvelope: signedRequest,
 	})
-	return err
 }
 
 // Mint creates new funds in an account
@@ -335,6 +345,21 @@ func (c *Client) BurnTokenSigned(ctx context.Context, signedReq *crypto.SignedEn
 		TokenId:        signedReq.Payload.TokenID,
 		SignedEnvelope: signedReq,
 	})
+}
+
+// AdminCreateAccount creates an account without requiring a signed request.
+// Access is controlled at the transport layer via a flag.
+func (c *Client) AdminCreateAccount(ctx context.Context, initialBalance float64) (*scalegraph.CreateAccountResponse, error) {
+	return Send[scalegraph.AdminCreateAccountRequest, scalegraph.CreateAccountResponse](c, ctx,
+		&scalegraph.AdminCreateAccountRequest{InitialBalance: initialBalance})
+}
+
+// AdminMint mints funds into an account without requiring a signed request.
+// Access is controlled at the transport layer via a flag.
+func (c *Client) AdminMint(ctx context.Context, to scalegraph.ScalegraphId, amount float64) error {
+	_, err := Send[scalegraph.AdminMintRequest, scalegraph.AdminMintResponse](c, ctx,
+		&scalegraph.AdminMintRequest{To: to, Amount: amount})
+	return err
 }
 
 func (c *Client) ClawbackTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.ClawbackTokenPayload]) (*scalegraph.ClawbackTokenResponse, error) {

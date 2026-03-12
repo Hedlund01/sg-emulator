@@ -135,8 +135,7 @@ func TestTransfer(t *testing.T) {
 	acc1 := createTestAccountInApp(t, app, 100.0)
 	acc2 := createTestAccountInApp(t, app, 50.0)
 
-	// Nonce = blockchain length + 1
-	// After CreateAccountWithKeys with balance, acc has genesis + mint = 2 blocks, so nonce is 2, next is 3
+	// Nonce = number of outgoing transfers + 1 (fresh account has nonce 0, first transfer uses 1)
 	nonce := acc1.GetNonce() + 1
 
 	// Test successful transfer

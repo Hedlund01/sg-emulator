@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package event.v1;
+
+import "buf/validate/validate.proto";
+import "common/v1/common.proto";
+
+option go_package = "sg-emulator/gen/event/v1;eventv1";
+
+// EventType enumerates the blockchain operations that can generate events.
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_TRANSFER = 1;
+  EVENT_TYPE_MINT = 2;
+  EVENT_TYPE_BURN = 3;
+  EVENT_TYPE_MINT_TOKEN = 4;
+  EVENT_TYPE_BURN_TOKEN = 5;
+  EVENT_TYPE_TRANSFER_TOKEN = 6;
+  EVENT_TYPE_AUTHORIZE_TOKEN_TRANSFER = 7;
+  EVENT_TYPE_UNAUTHORIZE_TOKEN_TRANSFER = 8;
+  EVENT_TYPE_CLAWBACK_TOKEN = 9;
+}
+
+// ---------------------------------------------------------------------------
+// Event — the streamed message pushed to subscribers
+// ---------------------------------------------------------------------------
+
+message TransferEventData {
+  string from = 1;
+  string to = 2;
+  double amount = 3;
+}
+
+message MintEventData {
+  string to = 1;
+  double amount = 2;
+}
+
+message MintTokenEventData {
+  string account_id = 1;
+  string token_id = 2;
+  string token_value = 3;
+  string clawback_address = 4; // empty if none
+}
+
+message TransferTokenEventData {
+  string from = 1;
+  string to = 2;
+  string token_id = 3;
+}
+
+message AuthorizeTokenTransferEventData {
+  string account_id = 1;
+  string token_id = 2;
+}
+
+message UnauthorizeTokenTransferEventData {
+  string account_id = 1;
+  string token_id = 2;
+}
+
+message BurnTokenEventData {
+  string account_id = 1;
+  string token_id = 2;
+}
+
+message ClawbackTokenEventData {
+  string from = 1;
+  string to = 2;
+  string token_id = 3;
+}
+
+message Event {
+  EventType type = 1;
+  int64 timestamp = 2;
+
+  oneof data {
+    TransferEventData transfer = 10;
+    MintEventData mint = 11;
+    MintTokenEventData mint_token = 12;
+    TransferTokenEventData transfer_token = 13;
+    AuthorizeTokenTransferEventData authorize_token_transfer = 14;
+    UnauthorizeTokenTransferEventData unauthorize_token_transfer = 15;
+    BurnTokenEventData burn_token = 16;
+    ClawbackTokenEventData clawback_token = 17;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Subscribe — signed request for server-streaming events
+// ---------------------------------------------------------------------------
+
+message SubscribePayload {
+  // The account subscribing to events. The signer must own this account.
+  // Only events involving this account will be delivered.
+  string account_id = 1 [(buf.validate.field).string = {min_len: 1}];
+
+  // Optional event type filters. If empty, the subscriber receives ALL event types.
+  repeated EventType event_types = 2;
+}
+
+message SignedSubscribeEnvelope {
+  SubscribePayload payload = 1 [(buf.validate.field).required = true];
+  common.v1.Signature signature = 2 [(buf.validate.field).required = true];
+  string certificate = 3 [(buf.validate.field).required = true];
+}
+
+message SubscribeRequest {
+  SignedSubscribeEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+// SubscribeResponse wraps an Event for the server-streaming RPC.
+message SubscribeResponse {
+  Event event = 1;
+}
+
+// ---------------------------------------------------------------------------
+// EventService
+// ---------------------------------------------------------------------------
+
+service EventService {
+  // Subscribe opens a server-streaming connection that pushes matching events
+  // to the caller. The request must be signed by the subscriber's private key.
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+}

@@ -69,6 +69,7 @@ type Account struct {
 	tokenStore         map[string]*Token // &Token{} means authorized but not owned, nil means not authorized, non-nil means owned
 	txHandlers         map[TransactionType]txHandlerFunc
 	txRollbackHandlers map[TransactionType]txRollbackFunc
+	outgoingTxCount    uint64 // number of Transfer transactions sent by this account
 }
 
 // newAccountWithPublicKey creates a new account with a public key and certificate
@@ -151,12 +152,12 @@ func (a *Account) Blockchain() IBlockchain {
 	return a.blockchain
 }
 
-// GetNonce returns the current nonce for this account (blockchain length)
-// The next transaction from this account should use nonce = GetNonce() + 1
+// GetNonce returns the number of outgoing Transfer transactions sent by this account.
+// The next Transfer from this account must use nonce = GetNonce() + 1.
 func (a *Account) GetNonce() uint64 {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return uint64(a.blockchain.Len())
+	return a.outgoingTxCount
 }
 
 // GetToken returns the token with the given ID if it exists in the account's token store.
@@ -324,6 +325,7 @@ func (a *Account) handleTransferTx(trx *TransferTransaction) error {
 			return fmt.Errorf("insufficient balance for transfer: current balance %.2f, mbr %.2f, transfer amount %.2f", a.balance, a.mbr, trx.Amount())
 		}
 		a.balance -= trx.Amount()
+		a.outgoingTxCount++
 	}
 	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
 		a.balance += trx.Amount()
@@ -452,6 +454,7 @@ func (a *Account) rollbackMintTx(trx *MintTransaction) error {
 func (a *Account) rollbackTransferTx(trx *TransferTransaction) error {
 	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
 		a.balance += trx.Amount()
+		a.outgoingTxCount--
 	}
 	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
 		a.balance -= trx.Amount()

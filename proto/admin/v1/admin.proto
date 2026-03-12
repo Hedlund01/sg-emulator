@@ -1,0 +1,21 @@
+syntax = "proto3";
+package admin.v1;
+option go_package = "sg-emulator/gen/admin/v1";
+
+service AdminService {
+  rpc CreateAccount(CreateAccountRequest) returns (CreateAccountResponse);
+  rpc Mint(MintRequest)                   returns (MintResponse);
+}
+
+message CreateAccountRequest  { double initial_balance = 1; }
+message CreateAccountResponse {
+  bool   success         = 1;
+  string account_id      = 2;
+  string private_key_pem = 3;
+  string public_key_pem  = 4;
+  string certificate_pem = 5;
+  string error_message   = 6;
+}
+
+message MintRequest  { string account_id = 1; double amount = 2; }
+message MintResponse { bool success = 1; string error_message = 2; }

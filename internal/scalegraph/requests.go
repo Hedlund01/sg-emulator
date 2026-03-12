@@ -278,3 +278,38 @@ func (r *ClawbackTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed2
 }
 
 type ClawbackTokenResponse struct{}
+
+// AdminCreateAccountRequest – no signature, access controlled via flag at transport layer.
+type AdminCreateAccountRequest struct {
+	InitialBalance float64
+}
+
+// AdminMintRequest – no signature, access controlled via flag at transport layer.
+type AdminMintRequest struct {
+	To     ScalegraphId
+	Amount float64
+}
+
+// AdminMintResponse is the response from an admin mint operation.
+type AdminMintResponse struct{}
+
+// SubscribeEventsRequest is the request to subscribe to blockchain events.
+// Signed by the subscribing account owner. Only events involving the signer's
+// own account will be delivered.
+type SubscribeEventsRequest struct {
+	AccountID      ScalegraphId
+	EventTypes     []string
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.SubscribePayload]
+}
+
+func (r *SubscribeEventsRequest) RequiresSignature() bool { return true }
+
+func (r *SubscribeEventsRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
+		func(signed *crypto.SubscribePayload) error {
+			if signed.AccountID != r.AccountID.String() {
+				return fmt.Errorf("AccountID mismatch")
+			}
+			return nil
+		})
+}

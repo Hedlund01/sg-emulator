@@ -278,11 +278,6 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("invalid 'from' account ID: %v", err)
 		}
 
-		toID, err := scalegraph.ScalegraphIdFromString(args.To)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid 'to' account ID: %v", err)
-		}
-
 		signedReq, err := createSignedEnvelope(srv, fromID.String(), &crypto.GetAccountPayload{AccountID: fromID.String()})
 
 		// Get account to calculate nonce
@@ -307,7 +302,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		}
 
 		// Execute signed transfer
-		if err := client.TransferSigned(context.Background(), fromID, toID, args.Amount, signedEnvelope); err != nil {
+		if _, err := client.TransferSigned(context.Background(), signedEnvelope); err != nil {
 			return nil, nil, err
 		}
 

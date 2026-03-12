@@ -12,7 +12,7 @@ import (
 
 	"sg-emulator/internal/ca"
 	"sg-emulator/internal/server"
-	"sg-emulator/internal/transport/grpc"
+	grpc "sg-emulator/internal/transport/connect"
 	"sg-emulator/internal/transport/mcp"
 	"sg-emulator/internal/transport/rest"
 	"sg-emulator/internal/transport/tui"
@@ -23,6 +23,7 @@ func main() {
 	numRestApps := flag.Int("rest", 0, "Number of virtual app instances with REST transport")
 	numGrpcApps := flag.Int("grpc", 0, "Number of virtual app instances with gRPC transport")
 	mcpAddr := flag.String("mcp", "", "MCP server HTTP address (e.g., localhost:3000)")
+	exposeAdmin := flag.Bool("expose-admin", false, "Expose unauthenticated admin gRPC interface (debug only)")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	logFormat := flag.String("log-format", "text", "Log format (text, json)")
 	logFile := flag.String("log-file", "", "Log file path (auto-set for TUI mode)")
@@ -128,7 +129,7 @@ func main() {
 
 			grpcAddr := fmt.Sprintf("localhost:%d", 50051+i)
 			grpcLogger := rootLogger.With("component", "grpc", "index", i, "address", grpcAddr)
-			vapp.AddTransport(grpc.New(grpcAddr, vapp.Client(), grpcLogger))
+			vapp.AddTransport(grpc.New(grpcAddr, vapp.Client(), certAuth.NewVerifier(), certAuth.PublicKey(), *exposeAdmin, vapp.EventBus(), grpcLogger))
 			vapp.Start()
 
 			slog.Info("Created gRPC virtual app",

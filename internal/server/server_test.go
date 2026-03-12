@@ -332,7 +332,7 @@ func TestServer_HandleRequest_Transfer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create signed transfer: %v", err)
 	}
-	err = client.TransferSigned(ctx, from.ID(), to.ID(), 30.0, signedTransfer)
+	_, err = client.TransferSigned(ctx, signedTransfer)
 	if err != nil {
 		t.Fatalf("TransferSigned() error = %v", err)
 	}

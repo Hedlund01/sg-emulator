@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package currency.v1;
+
+import "buf/validate/validate.proto";
+import "common/v1/common.proto";
+
+message TransferPayload {
+  string from      = 1 [(buf.validate.field).string = {min_len: 1}];
+  string to        = 2 [(buf.validate.field).string = {min_len: 1}];
+  double  amount    = 3 [(buf.validate.field).double = {gt: 0}];
+  int64  nonce     = 4;
+  int64  timestamp = 5;
+}
+
+message SignedTransferEnvelope {
+  TransferPayload    payload     = 1 [(buf.validate.field).required = true];
+  common.v1.Signature signature  = 2 [(buf.validate.field).required = true];
+  string              certificate = 3 [(buf.validate.field).required = true];
+}
+
+message TransferRequest {
+  SignedTransferEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message TransferResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+service CurrencyService {
+  rpc Transfer(TransferRequest) returns (TransferResponse) {}
+}

@@ -473,7 +473,7 @@ func (m Model) updateSendMoney(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			err = m.app.TransferSigned(ctx, fromID, toID, amount, signedEnvelope)
+			_, err = m.app.TransferSigned(ctx, signedEnvelope)
 			if err != nil {
 				m.statusMsg = err.Error()
 				return m, nil

@@ -73,6 +73,10 @@ func (s *Server) registerHandlers() {
 	RegisterHandler(s, s.handleGetAccount)
 	RegisterHandler(s, s.handleGetAccounts)
 
+	// Admin (unauthenticated, flag-gated at transport layer)
+	RegisterHandler(s, s.handleAdminCreateAccount)
+	RegisterHandler(s, s.handleAdminMint)
+
 	//Tokens
 	RegisterHandler(s, s.handleMintToken)
 	RegisterHandler(s, s.handleAuthorizeTokenTransfer)
@@ -181,6 +185,34 @@ func (s *Server) handleClawbackToken(ctx context.Context, req *scalegraph.Clawba
 		return nil, err
 	}
 	return &scalegraph.ClawbackTokenResponse{}, nil
+}
+
+func (s *Server) handleAdminCreateAccount(ctx context.Context, req *scalegraph.AdminCreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {
+	keyPair, cert, _, err := s.ca.CreateAccountCredentials()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create account credentials: %w", err)
+	}
+	acc, err := s.app.CreateAccountWithKeys(ctx, keyPair.PublicKey, cert, req.InitialBalance)
+	if err != nil {
+		return nil, err
+	}
+	certPEM := crypto.EncodeCertificatePEM(cert)
+	privKeyPEM, _ := crypto.EncodePrivateKeyPEM(keyPair.PrivateKey)
+	pubKeyPEM, _ := crypto.EncodePublicKeyPEM(keyPair.PublicKey)
+	return &scalegraph.CreateAccountResponse{
+		Account:     acc,
+		Certificate: certPEM,
+		PrivateKey:  string(privKeyPEM),
+		PublicKey:   string(pubKeyPEM),
+	}, nil
+}
+
+func (s *Server) handleAdminMint(ctx context.Context, req *scalegraph.AdminMintRequest) (*scalegraph.AdminMintResponse, error) {
+	err := s.app.Mint(ctx, &scalegraph.MintRequest{To: req.To, Amount: req.Amount})
+	if err != nil {
+		return nil, err
+	}
+	return &scalegraph.AdminMintResponse{}, nil
 }
 
 // CA returns the server's Certificate Authority (may be nil)
@@ -325,5 +357,88 @@ func (s *Server) handleRequest(req messages.Request) messages.Response {
 	if err != nil {
 		return messages.Response{ID: req.ID, Error: err}
 	}
+
+	// Publish event to all VirtualApp event buses after successful operation
+	s.publishEvent(req.Payload, result)
+
 	return messages.Response{ID: req.ID, Payload: result}
+}
+
+// publishEvent constructs an event from the request/response and publishes it
+// to all VirtualApp event buses.
+func (s *Server) publishEvent(requestPayload any, responsePayload any) {
+	info := extractEventInfo(requestPayload, responsePayload)
+	if info == nil {
+		return
+	}
+
+	event := BuildEvent(info)
+	if event == nil {
+		return
+	}
+
+	vapps := s.registry.List()
+	for _, vapp := range vapps {
+		vapp.EventBus().Send(event)
+	}
+}
+
+// extractEventInfo maps a domain request payload to an event info struct
+// that BuildEvent can convert into a proto Event.
+func extractEventInfo(requestPayload any, responsePayload any) any {
+	switch req := requestPayload.(type) {
+	case *scalegraph.TransferRequest:
+		return &transferEventInfo{
+			From:   req.From.String(),
+			To:     req.To.String(),
+			Amount: req.Amount,
+		}
+	case *scalegraph.MintRequest:
+		return &mintEventInfo{
+			To:     req.To.String(),
+			Amount: req.Amount,
+		}
+	case *scalegraph.MintTokenRequest:
+		info := &mintTokenEventInfo{
+			AccountID:  req.SignedEnvelope.Signature.SignerID,
+			TokenValue: req.TokenValue,
+		}
+		if req.ClawbackAddress != nil {
+			info.ClawbackAddress = req.ClawbackAddress.String()
+		}
+		// Extract token ID from response
+		if resp, ok := responsePayload.(*scalegraph.MintTokenResponse); ok {
+			info.TokenID = resp.TokenID
+		}
+		return info
+	case *scalegraph.TransferTokenRequest:
+		return &transferTokenEventInfo{
+			From:    req.From.String(),
+			To:      req.To.String(),
+			TokenID: req.TokenId,
+		}
+	case *scalegraph.AuthorizeTokenTransferRequest:
+		return &authorizeTokenTransferEventInfo{
+			AccountID: req.AccountID.String(),
+			TokenID:   req.TokenId,
+		}
+	case *scalegraph.UnauthorizeTokenTransferRequest:
+		return &unauthorizeTokenTransferEventInfo{
+			AccountID: req.AccountID.String(),
+			TokenID:   req.TokenId,
+		}
+	case *scalegraph.BurnTokenRequest:
+		return &burnTokenEventInfo{
+			AccountID: req.AccountID.String(),
+			TokenID:   req.TokenId,
+		}
+	case *scalegraph.ClawbackTokenRequest:
+		return &clawbackTokenEventInfo{
+			From:    req.From.String(),
+			To:      req.To.String(),
+			TokenID: req.TokenId,
+		}
+	default:
+		return nil
+	}
 }
