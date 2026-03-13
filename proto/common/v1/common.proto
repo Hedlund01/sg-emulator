@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package common.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "sg-emulator/gen/common/v1;commonv1";
+
+// Signature represents an Ed25519 cryptographic signature.
+// It is shared across all signed service envelopes.
+message Signature {
+  string algorithm = 1 [(buf.validate.field).string = {min_len: 1}];
+  string value     = 2 [(buf.validate.field).string = {min_len: 1}];
+  string signer_id = 3 [(buf.validate.field).string = {min_len: 1}];
+  int64  timestamp = 4;
+}

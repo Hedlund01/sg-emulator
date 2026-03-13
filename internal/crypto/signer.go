@@ -213,3 +213,18 @@ func (r *ClawbackTokenPayload) Bytes() []byte {
 	})
 	return data
 }
+
+// SubscribePayload is the signed payload for an event subscription request.
+type SubscribePayload struct {
+	AccountID  string   `json:"account_id"`
+	EventTypes []string `json:"event_types,omitempty"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *SubscribePayload) Bytes() []byte {
+	data, _ := json.Marshal(SubscribePayload{
+		AccountID:  r.AccountID,
+		EventTypes: r.EventTypes,
+	})
+	return data
+}

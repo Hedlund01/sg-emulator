@@ -113,15 +113,23 @@ func TestAccountString(t *testing.T) {
 
 func TestAccountGetNonce(t *testing.T) {
 	app := testApp()
-	acc := createTestAccountInApp(t, app, 0)
+	acc1 := createTestAccountInApp(t, app, 100)
+	acc2 := createTestAccountInApp(t, app, 0)
 
-	// Nonce is based on blockchain length
-	initialNonce := acc.GetNonce()
+	assert.Equal(t, uint64(0), acc1.GetNonce(), "fresh account nonce should be 0")
 
-	err := app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: 50.0})
+	// Mint must NOT change nonce
+	err := app.Mint(testCtx(), &MintRequest{To: acc1.ID(), Amount: 50.0})
 	require.NoError(t, err)
+	assert.Equal(t, uint64(0), acc1.GetNonce(), "nonce must not change after incoming mint")
 
-	assert.Greater(t, acc.GetNonce(), initialNonce, "nonce should increase after transaction")
+	// Outgoing transfer must increment nonce
+	_, err = app.Transfer(testCtx(), &TransferRequest{
+		From: acc1.ID(), To: acc2.ID(), Amount: 1.0, Nonce: 1,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), acc1.GetNonce(), "nonce should be 1 after first outgoing transfer")
+	assert.Equal(t, uint64(0), acc2.GetNonce(), "receiver nonce must not change")
 }
 
 func TestAccountConcurrentMint(t *testing.T) {

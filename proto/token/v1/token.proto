@@ -1,0 +1,167 @@
+syntax = "proto3";
+
+package token.v1;
+
+import "buf/validate/validate.proto";
+import "common/v1/common.proto";
+
+option go_package = "sg-emulator/gen/token/v1;tokenv1";
+
+// ---------------------------------------------------------------------------
+// MintToken
+// ---------------------------------------------------------------------------
+
+message MintTokenPayload {
+  string token_value       = 1 [(buf.validate.field).string = {min_len: 1}];
+  string clawback_address  = 2; // optional; empty means no clawback authority
+}
+
+message SignedMintTokenEnvelope {
+  MintTokenPayload    payload     = 1 [(buf.validate.field).required = true];
+  common.v1.Signature signature   = 2 [(buf.validate.field).required = true];
+  string              certificate = 3 [(buf.validate.field).required = true];
+}
+
+message MintTokenRequest {
+  SignedMintTokenEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message MintTokenResponse {
+  bool   success       = 1;
+  string error_message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// TransferToken
+// ---------------------------------------------------------------------------
+
+message TransferTokenPayload {
+  string from     = 1 [(buf.validate.field).string = {min_len: 1}];
+  string to       = 2 [(buf.validate.field).string = {min_len: 1}];
+  string token_id = 3 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SignedTransferTokenEnvelope {
+  TransferTokenPayload payload     = 1 [(buf.validate.field).required = true];
+  common.v1.Signature  signature   = 2 [(buf.validate.field).required = true];
+  string               certificate = 3 [(buf.validate.field).required = true];
+}
+
+message TransferTokenRequest {
+  SignedTransferTokenEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message TransferTokenResponse {
+  bool   success       = 1;
+  string error_message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// AuthorizeTokenTransfer
+// ---------------------------------------------------------------------------
+
+message AuthorizeTokenTransferPayload {
+  string account_id = 1 [(buf.validate.field).string = {min_len: 1}];
+  string token_id   = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SignedAuthorizeTokenTransferEnvelope {
+  AuthorizeTokenTransferPayload payload     = 1 [(buf.validate.field).required = true];
+  common.v1.Signature           signature   = 2 [(buf.validate.field).required = true];
+  string                        certificate = 3 [(buf.validate.field).required = true];
+}
+
+message AuthorizeTokenTransferRequest {
+  SignedAuthorizeTokenTransferEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message AuthorizeTokenTransferResponse {
+  bool   success       = 1;
+  string error_message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// UnauthorizeTokenTransfer
+// ---------------------------------------------------------------------------
+
+message UnauthorizeTokenTransferPayload {
+  string account_id = 1 [(buf.validate.field).string = {min_len: 1}];
+  string token_id   = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SignedUnauthorizeTokenTransferEnvelope {
+  UnauthorizeTokenTransferPayload payload     = 1 [(buf.validate.field).required = true];
+  common.v1.Signature             signature   = 2 [(buf.validate.field).required = true];
+  string                          certificate = 3 [(buf.validate.field).required = true];
+}
+
+message UnauthorizeTokenTransferRequest {
+  SignedUnauthorizeTokenTransferEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message UnauthorizeTokenTransferResponse {
+  bool   success       = 1;
+  string error_message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// BurnToken
+// ---------------------------------------------------------------------------
+
+message BurnTokenPayload {
+  string account_id = 1 [(buf.validate.field).string = {min_len: 1}];
+  string token_id   = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SignedBurnTokenEnvelope {
+  BurnTokenPayload    payload     = 1 [(buf.validate.field).required = true];
+  common.v1.Signature signature   = 2 [(buf.validate.field).required = true];
+  string              certificate = 3 [(buf.validate.field).required = true];
+}
+
+message BurnTokenRequest {
+  SignedBurnTokenEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message BurnTokenResponse {
+  bool   success       = 1;
+  string error_message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// ClawbackToken
+// ---------------------------------------------------------------------------
+
+message ClawbackTokenPayload {
+  string from     = 1 [(buf.validate.field).string = {min_len: 1}];
+  string to       = 2 [(buf.validate.field).string = {min_len: 1}];
+  string token_id = 3 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SignedClawbackTokenEnvelope {
+  ClawbackTokenPayload payload     = 1 [(buf.validate.field).required = true];
+  common.v1.Signature  signature   = 2 [(buf.validate.field).required = true];
+  string               certificate = 3 [(buf.validate.field).required = true];
+}
+
+message ClawbackTokenRequest {
+  SignedClawbackTokenEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message ClawbackTokenResponse {
+  bool   success       = 1;
+  string error_message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// TokenService
+// ---------------------------------------------------------------------------
+
+service TokenService {
+  rpc MintToken(MintTokenRequest)                           returns (MintTokenResponse);
+  rpc TransferToken(TransferTokenRequest)                   returns (TransferTokenResponse);
+  rpc AuthorizeTokenTransfer(AuthorizeTokenTransferRequest) returns (AuthorizeTokenTransferResponse);
+  rpc UnauthorizeTokenTransfer(UnauthorizeTokenTransferRequest) returns (UnauthorizeTokenTransferResponse);
+  rpc BurnToken(BurnTokenRequest)                           returns (BurnTokenResponse);
+  rpc ClawbackToken(ClawbackTokenRequest)                   returns (ClawbackTokenResponse);
+}

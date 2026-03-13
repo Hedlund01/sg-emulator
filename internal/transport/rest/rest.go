@@ -303,20 +303,8 @@ func (t *Transport) handleTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract IDs from the signed payload
-	fromID, err := scalegraph.ScalegraphIdFromString(req.SignedEnvelope.Payload.From)
-	if err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid from account ID")
-		return
-	}
-	toID, err := scalegraph.ScalegraphIdFromString(req.SignedEnvelope.Payload.To)
-	if err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid to account ID")
-		return
-	}
-
 	// Server will verify signature and that signer matches from account
-	if err := t.client.TransferSigned(r.Context(), fromID, toID, req.SignedEnvelope.Payload.Amount, req.SignedEnvelope); err != nil {
+	if _, err := t.client.TransferSigned(r.Context(), req.SignedEnvelope); err != nil {
 		t.logger.Error("Transfer failed", "error", err,
 			"from", req.SignedEnvelope.Payload.From,
 			"to", req.SignedEnvelope.Payload.To,

@@ -304,7 +304,7 @@ func TestClient_Transfer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create signed transfer: %v", err)
 	}
-	err = client.TransferSigned(ctx, from.ID(), to.ID(), 30.0, signedTransfer)
+	_, err = client.TransferSigned(ctx, signedTransfer)
 	if err != nil {
 		t.Fatalf("TransferSigned() error = %v, want nil", err)
 	}
@@ -350,7 +350,7 @@ func TestClient_Transfer_InsufficientFunds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create signed transfer: %v", err)
 	}
-	err = client.TransferSigned(ctx, from.ID(), to.ID(), 100.0, signedTransfer)
+	_, err = client.TransferSigned(ctx, signedTransfer)
 	if err == nil {
 		t.Error("TransferSigned() with insufficient funds succeeded, want error")
 	}
@@ -390,7 +390,7 @@ func TestClient_Transfer_NonExistentAccounts(t *testing.T) {
 			// Try to create signed transfer - may fail if from account doesn't exist
 			signedTransfer, err := createSignedTransfer(ctx, srv, client, tt.fromID, tt.toID, 10.0)
 			if err == nil {
-				err = client.TransferSigned(ctx, tt.fromID, tt.toID, 10.0, signedTransfer)
+				_, err = client.TransferSigned(ctx, signedTransfer)
 			}
 			if err == nil {
 				t.Error("TransferSigned() with non-existent account succeeded, want error")
@@ -630,7 +630,7 @@ func TestClient_ConcurrentDifferentOperations(t *testing.T) {
 			defer wg.Done()
 			signedTransfer, err := createSignedTransfer(ctx, srv, client2, acc1.ID(), acc2.ID(), 10.0)
 			if err == nil {
-				err = client2.TransferSigned(ctx, acc1.ID(), acc2.ID(), 10.0, signedTransfer)
+				_, err = client2.TransferSigned(ctx, signedTransfer)
 			}
 			if err == nil {
 				successCount.Add(1)
@@ -720,7 +720,7 @@ func TestClient_ConcurrentSameClient_RaceCondition(t *testing.T) {
 			defer wg.Done()
 			signedTransfer, err := createSignedTransfer(ctx, srv, client, acc1.ID(), acc2.ID(), 10.0)
 			if err == nil {
-				err = client.TransferSigned(ctx, acc1.ID(), acc2.ID(), 10.0, signedTransfer)
+				_, err = client.TransferSigned(ctx, signedTransfer)
 			}
 			if err != nil {
 				errChan <- err
@@ -943,7 +943,7 @@ func BenchmarkClient_Transfer(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		signedTransfer, _ := createSignedTransfer(ctx, srv, client, from.ID(), to.ID(), 1.0)
-		client.TransferSigned(ctx, from.ID(), to.ID(), 1.0, signedTransfer)
+		client.TransferSigned(ctx, signedTransfer) //nolint:errcheck
 	}
 }
 

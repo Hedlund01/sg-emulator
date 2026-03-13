@@ -15,6 +15,7 @@ type VirtualApp struct {
 	id         scalegraph.ScalegraphId
 	client     *Client
 	transports []Transport
+	eventBus   *EventBus
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
@@ -34,6 +35,7 @@ func newVirtualApp(requestChan chan<- messages.Request, logger *slog.Logger) (*V
 		id:         id,
 		client:     NewClient(requestChan, logger.With("vapp_id", id)),
 		transports: make([]Transport, 0),
+		eventBus:   NewEventBus(logger.With("vapp_id", id, "component", "event-bus")),
 		ctx:        ctx,
 		cancel:     cancel,
 	}, nil
@@ -49,14 +51,24 @@ func (v *VirtualApp) Client() *Client {
 	return v.client
 }
 
+// EventBus returns the VirtualApp's event bus for pub/sub
+func (v *VirtualApp) EventBus() *EventBus {
+	return v.eventBus
+}
+
 // Context returns the VirtualApp's context
 func (v *VirtualApp) Context() context.Context {
 	return v.ctx
 }
 
-// AddTransport adds a transport to the VirtualApp
+// AddTransport adds a transport to the VirtualApp.
+// If the transport implements EventTransport, its event channel is
+// registered with the EventBus so filtered events are delivered to it.
 func (v *VirtualApp) AddTransport(t Transport) {
 	v.transports = append(v.transports, t)
+	if et, ok := t.(EventTransport); ok {
+		v.eventBus.RegisterTransport(et.EventChannel())
+	}
 }
 
 // Transports returns all transports
@@ -73,8 +85,10 @@ func (v *VirtualApp) Addresses() map[string]string {
 	return addresses
 }
 
-// Start starts all transports
+// Start starts the EventBus dispatcher and all transports.
 func (v *VirtualApp) Start() {
+	go v.eventBus.Run(v.ctx)
+
 	for _, t := range v.transports {
 		v.wg.Add(1)
 		go func(transport Transport) {
@@ -84,9 +98,10 @@ func (v *VirtualApp) Start() {
 	}
 }
 
-// Stop gracefully shuts down all transports
+// Stop gracefully shuts down the EventBus and all transports.
 func (v *VirtualApp) Stop() {
 	v.cancel()
+	v.eventBus.Stop()
 	for _, t := range v.transports {
 		t.Stop()
 	}
