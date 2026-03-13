@@ -432,6 +432,52 @@ func (_c *MockCertificateAuthority_NewVerifier_Call) RunAndReturn(run func() *cr
 	return _c
 }
 
+// PrivateKey provides a mock function for the type MockCertificateAuthority
+func (_mock *MockCertificateAuthority) PrivateKey() ed25519.PrivateKey {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PrivateKey")
+	}
+
+	var r0 ed25519.PrivateKey
+	if returnFunc, ok := ret.Get(0).(func() ed25519.PrivateKey); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(ed25519.PrivateKey)
+		}
+	}
+	return r0
+}
+
+// MockCertificateAuthority_PrivateKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrivateKey'
+type MockCertificateAuthority_PrivateKey_Call struct {
+	*mock.Call
+}
+
+// PrivateKey is a helper method to define mock.On call
+func (_e *MockCertificateAuthority_Expecter) PrivateKey() *MockCertificateAuthority_PrivateKey_Call {
+	return &MockCertificateAuthority_PrivateKey_Call{Call: _e.mock.On("PrivateKey")}
+}
+
+func (_c *MockCertificateAuthority_PrivateKey_Call) Run(run func()) *MockCertificateAuthority_PrivateKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCertificateAuthority_PrivateKey_Call) Return(privateKey ed25519.PrivateKey) *MockCertificateAuthority_PrivateKey_Call {
+	_c.Call.Return(privateKey)
+	return _c
+}
+
+func (_c *MockCertificateAuthority_PrivateKey_Call) RunAndReturn(run func() ed25519.PrivateKey) *MockCertificateAuthority_PrivateKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PublicKey provides a mock function for the type MockCertificateAuthority
 func (_mock *MockCertificateAuthority) PublicKey() ed25519.PublicKey {
 	ret := _mock.Called()

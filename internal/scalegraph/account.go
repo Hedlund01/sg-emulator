@@ -345,9 +345,14 @@ func (a *Account) handleBurnTx(trx *BurnTransaction) error {
 
 func (a *Account) handleMintTokenTx(trx *MintTokenTransaction) error {
 	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		if trx.Token().Nonce() != int64(a.outgoingTxCount)+1 {
+			return fmt.Errorf("nonce mismatch: expected %d, got %d", int64(a.outgoingTxCount)+1, trx.Token().Nonce())
+		}
+
 		if err := a.mintToken(trx.Token()); err != nil {
 			return fmt.Errorf("failed to mint token: %w", err)
 		}
+		a.outgoingTxCount++
 	} else if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
 		return fmt.Errorf("sender should be nil for mint token transaction")
 	}
@@ -481,6 +486,7 @@ func (a *Account) rollbackMintTokenTx(trx *MintTokenTransaction) error {
 	}
 	delete(a.tokenStore, tokenId)
 	a.mbr -= MBR_TOKEN_COST
+	a.outgoingTxCount--
 	return nil
 }
 

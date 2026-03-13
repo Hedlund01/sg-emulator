@@ -293,10 +293,11 @@ func TestRollbackMintTokenRestoresState(t *testing.T) {
 	lenAfterFirstMint := acc.Blockchain().Len()
 
 	// Mint a second token with a different value so it gets a different ID.
-	payload2 := &sgcrypto.MintTokenPayload{TokenValue: "other-value"}
+	nonce2 := int64(acc.GetNonce()) + 1
+	payload2 := &sgcrypto.MintTokenPayload{TokenValue: "other-value", Nonce: nonce2}
 	sig2, err := sgcrypto.Sign(payload2, kp.PrivateKey, acc.ID().String())
 	require.NoError(t, err)
-	tok2 := newToken("other-value", *sig2, nil)
+	tok2 := newToken("other-value", *sig2, nil, nonce2)
 	mintTx2 := newMintTokenTransaction(acc, tok2)
 	require.NoError(t, acc.appendTransaction(mintTx2))
 	require.Equal(t, 2, len(acc.GetTokens()), "should have two tokens before rollback")

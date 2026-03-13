@@ -167,7 +167,8 @@ func signTransfer(from *accountCreds, toID string, amount float64, nonce uint64)
 // signMintToken builds a signed MintTokenRequest.
 // It returns the request and the raw signature bytes so the caller can derive
 // the token ID via tokenIDFromRawSig.
-func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string) (*tokenv1.MintTokenRequest, []byte, error) {
+// nonce must equal the minter's current outgoingTxCount + 1.
+func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string, nonce int64) (*tokenv1.MintTokenRequest, []byte, error) {
 	var cbPtr *string
 	if clawbackAddr != "" {
 		cbPtr = &clawbackAddr
@@ -175,6 +176,7 @@ func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string) 
 	payload := &crypto.MintTokenPayload{
 		TokenValue:      tokenValue,
 		ClawbackAddress: cbPtr,
+		Nonce:           nonce,
 	}
 	sig, err := crypto.Sign(payload, owner.privKey, owner.id)
 	if err != nil {
@@ -182,6 +184,7 @@ func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string) 
 	}
 	protoPayload := &tokenv1.MintTokenPayload{
 		TokenValue: tokenValue,
+		Nonce:      nonce,
 	}
 	if clawbackAddr != "" {
 		protoPayload.ClawbackAddress = clawbackAddr
@@ -193,6 +196,22 @@ func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string) 
 			Certificate: owner.certPEM,
 		},
 	}, sig.Value, nil
+}
+
+// signLookupToken builds a signed LookupTokenRequest.
+func signLookupToken(account *accountCreds, tokenID string) (*tokenv1.LookupTokenRequest, error) {
+	payload := &crypto.LookupTokenPayload{TokenID: tokenID, AccountID: account.id}
+	sig, err := crypto.Sign(payload, account.privKey, account.id)
+	if err != nil {
+		return nil, err
+	}
+	return &tokenv1.LookupTokenRequest{
+		SignedEnvelope: &tokenv1.SignedLookupTokenEnvelope{
+			Payload:     &tokenv1.LookupTokenPayload{TokenId: tokenID, AccountId: account.id},
+			Signature:   toProtoSig(sig),
+			Certificate: account.certPEM,
+		},
+	}, nil
 }
 
 // signAuthorizeTokenTransfer builds a signed AuthorizeTokenTransferRequest.

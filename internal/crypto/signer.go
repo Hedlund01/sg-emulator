@@ -20,6 +20,11 @@ type Signature struct {
 	Timestamp int64  `json:"timestamp"` // Unix timestamp when signed
 }
 
+func (s Signature) String() string {
+	return fmt.Sprintf("Signature{Algorithm: %s, SignerID: %s, Timestamp: %d, Value: %x}",
+		s.Algorithm, s.SignerID, s.Timestamp, s.Value)
+}
+
 // SignedEnvelope wraps a payload with its signature and certificate
 type SignedEnvelope[T SignableData] struct {
 	Payload     T         `json:"payload"`
@@ -127,6 +132,7 @@ func (r *GetAccountPayload) Bytes() []byte {
 type MintTokenPayload struct {
 	TokenValue      string  `json:"token_value"`
 	ClawbackAddress *string `json:"clawback_address,omitempty"`
+	Nonce           int64   `json:"nonce"`
 }
 
 // Bytes returns the canonical byte representation for signing
@@ -134,6 +140,7 @@ func (r *MintTokenPayload) Bytes() []byte {
 	data, _ := json.Marshal(MintTokenPayload{
 		TokenValue:      r.TokenValue,
 		ClawbackAddress: r.ClawbackAddress,
+		Nonce:           r.Nonce,
 	})
 	return data
 }
@@ -225,6 +232,20 @@ func (r *SubscribePayload) Bytes() []byte {
 	data, _ := json.Marshal(SubscribePayload{
 		AccountID:  r.AccountID,
 		EventTypes: r.EventTypes,
+	})
+	return data
+}
+
+type LookupTokenPayload struct {
+	TokenID   string `json:"token_id"`
+	AccountID string `json:"account_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *LookupTokenPayload) Bytes() []byte {
+	data, _ := json.Marshal(LookupTokenPayload{
+		TokenID:   r.TokenID,
+		AccountID: r.AccountID,
 	})
 	return data
 }

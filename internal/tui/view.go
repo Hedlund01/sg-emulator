@@ -88,6 +88,8 @@ func (m Model) View() string {
 		content = m.viewBurnToken()
 	case ViewClawbackToken:
 		content = m.viewClawbackToken()
+	case ViewLookupToken:
+		content = m.viewLookupToken()
 	}
 
 	return lipgloss.Place(
@@ -760,6 +762,7 @@ func (m Model) viewTokenMenu() string {
 		"View Account Tokens",
 		"Burn Token",
 		"Clawback Token",
+		"Lookup Token",
 	}
 
 	var content string
@@ -1330,4 +1333,64 @@ func (m Model) viewTokenList() string {
 		"",
 		help,
 	)
+}
+
+func (m Model) viewLookupToken() string {
+	title := titleStyle.Render("Lookup Token")
+
+	accounts := m.cachedAccounts
+	if len(accounts) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "No accounts available. Create an account first.", "", helpStyle.Render("esc: back"))
+	}
+
+	var content string
+
+	switch m.tokenStep {
+	case 0:
+		content = "Select account to look up token in:\n\n"
+		for i, acc := range accounts {
+			cursor := "  "
+			if i == m.tokenAccountIndex {
+				cursor = "> "
+				content += cursor + selectedStyle.Render(m.getAccountDisplayName(acc)) + "\n"
+			} else {
+				content += cursor + m.getAccountDisplayName(acc) + "\n"
+			}
+		}
+	case 1:
+		content = fmt.Sprintf("Account: %s\n\n", m.getAccountDisplayName(accounts[m.tokenAccountIndex]))
+		content += "Enter token ID:\n"
+		content += m.lookupTokenInput.View() + "\n"
+	case 2:
+		content = fmt.Sprintf("Account: %s\n\n", m.getAccountDisplayName(accounts[m.tokenAccountIndex]))
+		if m.lookupResult == nil {
+			content += "Token not found.\n"
+		} else {
+			t := m.lookupResult
+			content += "Token found:\n\n"
+			content += fmt.Sprintf("  ID:    %s\n", t.ID())
+			content += fmt.Sprintf("  Value: %s\n", t.Value())
+			if t.ClawbackAddress() != nil {
+				content += fmt.Sprintf("  Clawback: %s\n", t.ClawbackAddress().String())
+			}
+		}
+	}
+
+	var help string
+	switch m.tokenStep {
+	case 0:
+		help = helpStyle.Render("↑/↓: navigate • enter: select • esc: back")
+	case 1:
+		help = helpStyle.Render("enter: lookup • esc: back")
+	case 2:
+		help = helpStyle.Render("enter/q: back to menu • esc: back")
+	}
+
+	parts := []string{title, "", content}
+	if status := m.renderStatus(); status != "" {
+		parts = append(parts, status)
+	}
+	parts = append(parts, "", help)
+
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

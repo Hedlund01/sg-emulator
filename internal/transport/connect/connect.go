@@ -169,6 +169,33 @@ func (h *tokenHandler) BurnToken(ctx context.Context, req *tokenv1.BurnTokenRequ
 	return &tokenv1.BurnTokenResponse{Success: true}, nil
 }
 
+// LookupToken handles a lookup token request.
+func (h *tokenHandler) LookupToken(ctx context.Context, req *tokenv1.LookupTokenRequest) (*tokenv1.LookupTokenResponse, error) {
+	envelope, err := convertLookupTokenEnvelope(req)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	resp, err := h.client.LookupTokenSigned(ctx, envelope)
+	if err != nil {
+		h.logger.Error("LookupToken failed", "error", err)
+		return &tokenv1.LookupTokenResponse{Success: false, ErrorMessage: err.Error()}, nil
+	}
+	var protoToken *tokenv1.Token
+	if resp.Token != nil {
+		t := resp.Token
+		var cb string
+		if t.ClawbackAddress() != nil {
+			cb = t.ClawbackAddress().String()
+		}
+		protoToken = &tokenv1.Token{
+			TokenId:         t.ID(),
+			TokenValue:      t.Value(),
+			ClawbackAddress: cb,
+		}
+	}
+	return &tokenv1.LookupTokenResponse{Success: true, Token: protoToken}, nil
+}
+
 // ClawbackToken handles a clawback token request.
 func (h *tokenHandler) ClawbackToken(ctx context.Context, req *tokenv1.ClawbackTokenRequest) (*tokenv1.ClawbackTokenResponse, error) {
 	envelope, err := convertClawbackTokenEnvelope(req)

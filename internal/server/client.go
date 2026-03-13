@@ -362,6 +362,18 @@ func (c *Client) AdminMint(ctx context.Context, to scalegraph.ScalegraphId, amou
 	return err
 }
 
+func (c *Client) LookupTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.LookupTokenPayload]) (*scalegraph.LookupTokenResponse, error) {
+	acc, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	return Send[scalegraph.LookupTokenRequest, scalegraph.LookupTokenResponse](c, ctx, &scalegraph.LookupTokenRequest{
+		TokenID:        signedReq.Payload.TokenID,
+		AccountID:      acc,
+		SignedEnvelope: signedReq,
+	})
+}
+
 func (c *Client) ClawbackTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.ClawbackTokenPayload]) (*scalegraph.ClawbackTokenResponse, error) {
 	traceID := trace.GetTraceID(ctx)
 	logAttrs := []any{"from", signedReq.Payload.From, "to", signedReq.Payload.To, "token_id", signedReq.Payload.TokenID, "signed", true}

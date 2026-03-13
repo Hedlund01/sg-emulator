@@ -103,6 +103,30 @@ func (a *App) GetAccount(ctx context.Context, req *GetAccountRequest) (*GetAccou
 	return &GetAccountResponse{Account: acc}, nil
 }
 
+func (a *App) LookupToken(ctx context.Context, req *LookupTokenRequest) (*LookupTokenResponse, error) {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+	logger.Debug("Lookup token operation initiated", "account_id", req.AccountID, "token_id", req.TokenID)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	acc, exist := a.accounts[req.AccountID]
+	if !exist {
+		logger.Warn("Account not found for token lookup", "account_id", req.AccountID)
+		return &LookupTokenResponse{}, nil
+	}
+
+	token, exists := acc.GetToken(req.TokenID)
+	if !exists {
+		logger.Warn("Token not found in account", "token_id", req.TokenID, "account_id", req.AccountID)
+		return nil, fmt.Errorf("token with ID %s, not found in account: %s", req.TokenID, req.AccountID)
+	}
+
+	return &LookupTokenResponse{Token: token}, nil
+}
+
 // Transfer transfers funds between two accounts atomically
 func (a *App) Transfer(ctx context.Context, req *TransferRequest) (*TransferResponse, error) {
 	logger := a.logger
@@ -200,7 +224,7 @@ func (a *App) MintToken(ctx context.Context, req *MintTokenRequest) (*MintTokenR
 		return nil, fmt.Errorf("destination account not found: %s", signerID)
 	}
 
-	token := newToken(req.TokenValue, req.SignedEnvelope.Signature, req.ClawbackAddress)
+	token := newToken(req.TokenValue, req.SignedEnvelope.Signature, req.ClawbackAddress, req.SignedEnvelope.Payload.Nonce)
 	mintTokenTx := newMintTokenTransaction(toAcc, token)
 
 	if err := toAcc.appendTransaction(mintTokenTx); err != nil {

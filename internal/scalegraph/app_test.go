@@ -268,7 +268,7 @@ func TestMintTokenEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build a real signed envelope (same path as the TUI/REST transport)
-	payload := &sgcrypto.MintTokenPayload{TokenValue: "hello-token"}
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "hello-token", Nonce: 1}
 	certDER := cert.Raw
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
 	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
@@ -302,7 +302,7 @@ func TestMintTokenEndToEndWithClawback(t *testing.T) {
 	clawbackID := acc.ID()
 
 	clawbackStr := clawbackID.String()
-	payload := &sgcrypto.MintTokenPayload{TokenValue: "clawback-token", ClawbackAddress: &clawbackStr}
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "clawback-token", ClawbackAddress: &clawbackStr, Nonce: 1}
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
 	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
 	require.NoError(t, err)
@@ -333,7 +333,7 @@ func TestMintTokenInsufficientBalanceForMBR(t *testing.T) {
 	acc, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, 0)
 	require.NoError(t, err)
 
-	payload := &sgcrypto.MintTokenPayload{TokenValue: "some-token"}
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "some-token", Nonce: 1}
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
 	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
 	require.NoError(t, err)

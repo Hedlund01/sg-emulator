@@ -122,11 +122,12 @@ func getTransactionAmount(tx ITransaction) float64 {
 func testCreateToken(t *testing.T, acc *Account, privKey ed25519.PrivateKey) *Token {
 	t.Helper()
 
-	payload := &sgcrypto.MintTokenPayload{TokenValue: "test-value"}
+	nonce := int64(acc.GetNonce()) + 1
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "test-value", Nonce: nonce}
 	sig, err := sgcrypto.Sign(payload, privKey, acc.ID().String())
 	require.NoError(t, err, "failed to sign token payload")
 
-	return newToken("test-value", *sig, nil)
+	return newToken("test-value", *sig, nil, nonce)
 }
 
 // testMintTokenIntoAccount mints a token directly into acc by appending a

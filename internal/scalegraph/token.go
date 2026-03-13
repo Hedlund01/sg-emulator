@@ -12,6 +12,7 @@ type IToken interface {
 	Value() string
 	Signature() crypto.Signature
 	ClawbackAddress() *ScalegraphId
+	Nonce() int64
 	Equal(other IToken) bool
 	String() string
 }
@@ -46,21 +47,23 @@ func TokenString(t IToken) string {
 	if t == nil {
 		return "Token{nil}"
 	}
-	return fmt.Sprintf("Token{ID: %s, Value: %s, ClawbackAddress: %v}",
-		t.ID(), t.Value(), t.ClawbackAddress())
+	return fmt.Sprintf("Token{ID: %s, Value: %s, Nonce: %d, ClawbackAddress: %v, Signature: %s}",
+		t.ID(), t.Value(), t.Nonce(), t.ClawbackAddress(), t.Signature())
 }
 
 type Token struct {
 	value           string
 	signature       crypto.Signature
 	clawbackAddress *ScalegraphId
+	nonce 		 int64
 }
 
-func newToken(value string, signature crypto.Signature, clawbackAddress *ScalegraphId) *Token {
+func newToken(value string, signature crypto.Signature, clawbackAddress *ScalegraphId, nonce int64) *Token {
 	return &Token{
 		value:           value,
 		signature:       signature,
 		clawbackAddress: clawbackAddress,
+		nonce:           nonce,
 	}
 }
 
@@ -90,4 +93,8 @@ func (t *Token) Equal(other IToken) bool {
 // Can be overridden by specific token types if custom formatting is needed.
 func (t *Token) String() string {
 	return TokenString(t)
+}
+
+func (t *Token) Nonce() int64 {
+	return t.nonce
 }

@@ -84,6 +84,7 @@ func (s *Server) registerHandlers() {
 	RegisterHandler(s, s.handleUnauthorizeTokenTransfer)
 	RegisterHandler(s, s.handleBurnToken)
 	RegisterHandler(s, s.handleClawbackToken)
+	RegisterHandler(s, s.handleTokenLookup)
 }
 
 func (s *Server) handleCreateAccount(ctx context.Context, req *scalegraph.CreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {
@@ -185,6 +186,14 @@ func (s *Server) handleClawbackToken(ctx context.Context, req *scalegraph.Clawba
 		return nil, err
 	}
 	return &scalegraph.ClawbackTokenResponse{}, nil
+}
+
+func (s *Server) handleTokenLookup(ctx context.Context, req *scalegraph.LookupTokenRequest) (*scalegraph.LookupTokenResponse, error) {
+	resp, err := s.app.LookupToken(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (s *Server) handleAdminCreateAccount(ctx context.Context, req *scalegraph.AdminCreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {

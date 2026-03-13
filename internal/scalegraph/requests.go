@@ -313,3 +313,28 @@ func (r *SubscribeEventsRequest) Verify(verifier *crypto.Verifier, caPublicKey e
 			return nil
 		})
 }
+
+type LookupTokenRequest struct {
+	TokenID        string
+	AccountID      ScalegraphId
+	SignedEnvelope *crypto.SignedEnvelope[*crypto.LookupTokenPayload]
+}
+
+type LookupTokenResponse struct {
+	Token *Token
+}
+
+func (r *LookupTokenRequest) RequiresSignature() bool { return true }
+
+func (r *LookupTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.SignedEnvelope.Signature.SignerID,
+		func(signed *crypto.LookupTokenPayload) error {
+			if signed.TokenID != r.TokenID {
+				return fmt.Errorf("TokenID mismatch")
+			}
+			if signed.AccountID != r.AccountID.String() {
+				return fmt.Errorf("AccountID mismatch")
+			}
+			return nil
+		})
+}

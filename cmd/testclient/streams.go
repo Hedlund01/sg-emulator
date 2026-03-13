@@ -201,7 +201,7 @@ func RunStreamLoadTest(ctx context.Context, cfg *config) StreamLoadResult {
 	var triggerGotEvent bool
 
 	if triggerConnected {
-		mintReq, rawSig, err := signMintToken(triggerAcc, "load-test-token", "")
+		mintReq, rawSig, err := signMintToken(triggerAcc, "load-test-token", "", 1)
 		if err == nil {
 			mintTime := time.Now()
 			resp, err := c.token.MintToken(ctx, mintReq)
@@ -251,7 +251,7 @@ func RunStreamLoadTest(ctx context.Context, cfg *config) StreamLoadResult {
 			go func(idx int, s subEntry) {
 				defer fwg.Done()
 
-				mintReq, rawSig, err := signMintToken(s.acc, "fanout-test-token", "")
+				mintReq, rawSig, err := signMintToken(s.acc, "fanout-test-token", "", 1)
 				if err != nil {
 					mu.Lock()
 					if len(errMsgs) < 10 {

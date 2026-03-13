@@ -31,10 +31,10 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 	switch bcfg.workload {
 	case "currency":
 		lats, errs := runWorkerPool(ctx, cfg, bcfg, "currency", bcfg.workers)
-		printBenchResults(bcfg, "currency", "currency (Transfer)", lats, errs)
+		printBenchResults(bcfg, "currency", "1 op = Transfer", lats, errs)
 	case "token":
 		lats, errs := runWorkerPool(ctx, cfg, bcfg, "token", bcfg.workers)
-		printBenchResults(bcfg, "token", "token (MintToken + AuthorizeTokenTransfer + TransferToken)", lats, errs)
+		printBenchResults(bcfg, "token", "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", lats, errs)
 	case "mixed":
 		half := bcfg.workers / 2
 		rest := bcfg.workers - half
@@ -64,13 +64,13 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 
 		wg.Wait()
 
-		printBenchResults(bcfg, "mixed", "mixed/currency (Transfer)", cLats, cErrs)
+		printBenchResults(bcfg, "mixed", "mixed/currency  — 1 op = Transfer", cLats, cErrs)
 		fmt.Println()
-		printBenchResults(bcfg, "mixed", "mixed/token (MintToken + AuthorizeTokenTransfer + TransferToken)", tLats, tErrs)
+		printBenchResults(bcfg, "mixed", "mixed/token     — 1 op = MintToken + AuthorizeTokenTransfer + TransferToken", tLats, tErrs)
 		fmt.Println()
 
 		allLats := append(cLats, tLats...)
-		printBenchResults(bcfg, "mixed", "mixed/combined", allLats, cErrs+tErrs)
+		printBenchResults(bcfg, "mixed", "mixed/combined  — 1 op = one currency op or one token op", allLats, cErrs+tErrs)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown workload %q — use currency, token, or mixed\n", bcfg.workload)
 	}
@@ -193,7 +193,7 @@ func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig) ([]time.
 		mintSeq++
 
 		// 1. Mint a new token.
-		mintReq, rawSig, err := signMintToken(sender, fmt.Sprintf("bench-%d", mintSeq), "")
+		mintReq, rawSig, err := signMintToken(sender, fmt.Sprintf("bench-%d", mintSeq), "", int64(mintSeq))
 		if err != nil {
 			errs++
 			continue
@@ -249,7 +249,7 @@ func printBenchResults(bcfg *benchConfig, headerWorkload, workloadDesc string, l
 
 	fmt.Printf("=== Throughput Benchmark (workload=%s, workers=%d, duration=%s) ===\n",
 		headerWorkload, bcfg.workers, bcfg.duration)
-	fmt.Printf("Workload    : %s\n", workloadDesc)
+	fmt.Printf("1 op        : %s\n", workloadDesc)
 	fmt.Printf("Total ops   : %s\n", formatInt(int(totalOps)))
 	fmt.Printf("Errors      : %d\n", errs)
 	fmt.Printf("Throughput  : %.1f ops/s\n", throughput)

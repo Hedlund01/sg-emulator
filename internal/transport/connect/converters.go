@@ -63,6 +63,24 @@ func convertMintTokenEnvelope(req *tokenv1.MintTokenRequest) (*crypto.SignedEnve
 		Payload: &crypto.MintTokenPayload{
 			TokenValue:      env.GetPayload().GetTokenValue(),
 			ClawbackAddress: clawbackAddr,
+			Nonce:           env.GetPayload().GetNonce(),
+		},
+		Signature:   sig,
+		Certificate: env.GetCertificate(),
+	}, nil
+}
+
+// convertLookupTokenEnvelope converts a proto LookupTokenRequest into a domain SignedEnvelope.
+func convertLookupTokenEnvelope(req *tokenv1.LookupTokenRequest) (*crypto.SignedEnvelope[*crypto.LookupTokenPayload], error) {
+	env := req.GetSignedEnvelope()
+	sig, err := convertSignature(env.GetSignature())
+	if err != nil {
+		return nil, err
+	}
+	return &crypto.SignedEnvelope[*crypto.LookupTokenPayload]{
+		Payload: &crypto.LookupTokenPayload{
+			TokenID:   env.GetPayload().GetTokenId(),
+			AccountID: env.GetPayload().GetAccountId(),
 		},
 		Signature:   sig,
 		Certificate: env.GetCertificate(),

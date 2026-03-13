@@ -27,6 +27,7 @@ const (
 	ViewTokenList
 	ViewBurnToken
 	ViewClawbackToken
+	ViewLookupToken
 )
 
 // AccountCredentials caches loaded cryptographic credentials
@@ -84,6 +85,8 @@ type Model struct {
 	tokenClawbackIndex  int // 0 = "No clawback", 1+ = account index (MintToken step 2)
 	tokenTokenIndex     int // selected token index within an account's token list
 	tokenValueInput     textinput.Model
+	lookupTokenInput    textinput.Model
+	lookupResult        *scalegraph.Token
 
 	// Status message
 	statusMsg string
@@ -109,6 +112,12 @@ func NewModel(application *server.Client, srv *server.Server) Model {
 	tokenValueInput.CharLimit = 100
 	tokenValueInput.Width = 40
 
+	// Initialize lookup token input
+	lookupTokenInput := textinput.New()
+	lookupTokenInput.Placeholder = "token ID (hex)"
+	lookupTokenInput.CharLimit = 200
+	lookupTokenInput.Width = 60
+
 	return Model{
 		app:             application,
 		server:          srv,
@@ -118,6 +127,7 @@ func NewModel(application *server.Client, srv *server.Server) Model {
 		balanceInput:    balanceInput,
 		nameInput:       nameInput,
 		tokenValueInput: tokenValueInput,
+		lookupTokenInput: lookupTokenInput,
 	}
 }
 

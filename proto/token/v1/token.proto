@@ -7,6 +7,9 @@ import "common/v1/common.proto";
 
 option go_package = "sg-emulator/gen/token/v1;tokenv1";
 
+
+
+
 // ---------------------------------------------------------------------------
 // MintToken
 // ---------------------------------------------------------------------------
@@ -14,6 +17,7 @@ option go_package = "sg-emulator/gen/token/v1;tokenv1";
 message MintTokenPayload {
   string token_value       = 1 [(buf.validate.field).string = {min_len: 1}];
   string clawback_address  = 2; // optional; empty means no clawback authority
+  int64 nonce             = 3 [(buf.validate.field).int64 = {gt: 0}];
 }
 
 message SignedMintTokenEnvelope {
@@ -154,6 +158,40 @@ message ClawbackTokenResponse {
 }
 
 // ---------------------------------------------------------------------------
+// LookupToken
+// ---------------------------------------------------------------------------
+
+message LookupTokenPayload{
+  string token_id = 1 [(buf.validate.field).string = {min_len: 1}];
+  string account_id = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SignedLookupTokenEnvelope {
+  LookupTokenPayload payload     = 1 [(buf.validate.field).required = true];
+  common.v1.Signature signature   = 2 [(buf.validate.field).required = true];
+  string              certificate = 3 [(buf.validate.field).required = true];
+}
+
+message LookupTokenRequest {
+  SignedLookupTokenEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message Token{
+  string token_id         = 1;
+  string token_value      = 2;
+  string owner            = 3;
+  string clawback_address = 4; // empty means no clawback authority
+}
+
+
+message LookupTokenResponse {
+  bool   success       = 1;
+  string error_message = 2;
+  Token  token         = 3;
+}
+
+
+// ---------------------------------------------------------------------------
 // TokenService
 // ---------------------------------------------------------------------------
 
@@ -164,4 +202,5 @@ service TokenService {
   rpc UnauthorizeTokenTransfer(UnauthorizeTokenTransferRequest) returns (UnauthorizeTokenTransferResponse);
   rpc BurnToken(BurnTokenRequest)                           returns (BurnTokenResponse);
   rpc ClawbackToken(ClawbackTokenRequest)                   returns (ClawbackTokenResponse);
+  rpc LookupToken(LookupTokenRequest)                       returns (LookupTokenResponse);
 }

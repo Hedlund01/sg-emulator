@@ -90,6 +90,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateBurnToken(msg)
 		case ViewClawbackToken:
 			return m.updateClawbackToken(msg)
+		case ViewLookupToken:
+			return m.updateLookupToken(msg)
 		}
 
 	case tea.WindowSizeMsg:
@@ -542,7 +544,7 @@ func (m *Model) getCredentials(accountID scalegraph.ScalegraphId) (*AccountCrede
 }
 
 func (m Model) updateTokenMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	const tokenMenuItemCount = 7
+	const tokenMenuItemCount = 8
 	switch msg.String() {
 	case "esc":
 		m.view = ViewMenu
@@ -585,6 +587,11 @@ func (m Model) updateTokenMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = ViewBurnToken
 		case 6:
 			m.view = ViewClawbackToken
+		case 7:
+			m.view = ViewLookupToken
+			m.lookupTokenInput.SetValue("")
+			m.lookupTokenInput.Blur()
+			m.lookupResult = nil
 		}
 	}
 	return m, nil
@@ -670,8 +677,10 @@ func (m Model) updateMintToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			nonce := int64(accounts[m.tokenAccountIndex].GetNonce()) + 1
 			payload := &crypto.MintTokenPayload{
 				TokenValue: m.tokenValueInput.Value(),
+				Nonce:      nonce,
 			}
 			if clawbackAddr != nil {
 				clawbackStr := clawbackAddr.String()
@@ -1351,6 +1360,99 @@ func (m Model) updateTokenList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.tokenListOffset = m.tokenTokenIndex - maxDisplay + 1
 				}
 			}
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateLookupToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	accounts := m.cachedAccounts
+
+	switch msg.String() {
+	case "esc":
+		if m.tokenStep > 0 {
+			m.tokenStep--
+			m.statusMsg = ""
+			m.lookupResult = nil
+			if m.tokenStep == 1 {
+				m.lookupTokenInput.Focus()
+			}
+		} else {
+			m.view = ViewTokenMenu
+		}
+		return m, nil
+	}
+
+	switch m.tokenStep {
+	case 0: // Select account
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenAccountIndex > 0 {
+				m.tokenAccountIndex--
+			}
+		case "down", "j":
+			if m.tokenAccountIndex < len(accounts)-1 {
+				m.tokenAccountIndex++
+			}
+		case "enter":
+			m.tokenStep = 1
+			m.lookupTokenInput.SetValue("")
+			m.lookupTokenInput.Focus()
+			m.lookupResult = nil
+			m.statusMsg = ""
+		}
+	case 1: // Enter token ID
+		switch msg.String() {
+		case "enter":
+			tokenID := m.lookupTokenInput.Value()
+			if tokenID == "" {
+				m.statusMsg = "Token ID cannot be empty"
+				return m, nil
+			}
+
+			signerID := accounts[m.tokenAccountIndex].ID()
+			creds, err := m.getCredentials(signerID)
+			if err != nil {
+				m.statusMsg = "Failed to load credentials: " + err.Error()
+				return m, nil
+			}
+			privKey, err := crypto.DecodePrivateKeyPEM([]byte(creds.PrivateKeyPEM))
+			if err != nil {
+				m.statusMsg = "Failed to parse private key: " + err.Error()
+				return m, nil
+			}
+
+			payload := &crypto.LookupTokenPayload{
+				TokenID:   tokenID,
+				AccountID: signerID.String(),
+			}
+			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, signerID.String(), creds.CertificatePEM)
+			if err != nil {
+				m.statusMsg = "Failed to sign request: " + err.Error()
+				return m, nil
+			}
+
+			resp, err := m.app.LookupTokenSigned(context.Background(), signedEnvelope)
+			if err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+
+			m.lookupResult = resp.Token
+			m.lookupTokenInput.Blur()
+			m.tokenStep = 2
+			m.statusMsg = ""
+		default:
+			var cmd tea.Cmd
+			m.lookupTokenInput, cmd = m.lookupTokenInput.Update(msg)
+			return m, cmd
+		}
+	case 2: // Show result
+		switch msg.String() {
+		case "enter", "q":
+			m.view = ViewTokenMenu
+			m.tokenStep = 0
+			m.lookupResult = nil
 		}
 	}
 	return m, nil

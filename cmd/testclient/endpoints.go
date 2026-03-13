@@ -118,6 +118,9 @@ func RunEndpointTests(ctx context.Context, cfg *config) []endpointResult {
 		}
 	}
 
+	// acc0Nonce tracks acc0's outgoingTxCount. After the Transfer above, it is 1.
+	var acc0Nonce int64 = 1
+
 	// ------------------------------------------------------------------
 	// 2. Subscribe + MintToken (event delivery check)
 	//
@@ -142,7 +145,8 @@ func RunEndpointTests(ctx context.Context, cfg *config) []endpointResult {
 
 		// b) Mint a token.
 		{
-			req, rawSig, err := signMintToken(acc0, "test-token-v1", "")
+			acc0Nonce++
+			req, rawSig, err := signMintToken(acc0, "test-token-v1", "", acc0Nonce)
 			if err != nil {
 				cancelSub()
 				fail(name, start, fmt.Errorf("sign mint: %w", err))
@@ -232,7 +236,8 @@ afterMint:
 	{
 		name := "TokenService/UnauthorizeTokenTransfer"
 		start := time.Now()
-		req2, rawSig2, err := signMintToken(acc0, "test-token-unauth", "")
+		acc0Nonce++
+		req2, rawSig2, err := signMintToken(acc0, "test-token-unauth", "", acc0Nonce)
 		if err != nil {
 			fail(name, start, fmt.Errorf("mint for unauth: %w", err))
 			goto afterUnauth
@@ -289,7 +294,8 @@ afterUnauth:
 	{
 		name := "TokenService/BurnToken"
 		start := time.Now()
-		req3, rawSig3, err := signMintToken(acc0, "test-token-burn", "")
+		acc0Nonce++
+		req3, rawSig3, err := signMintToken(acc0, "test-token-burn", "", acc0Nonce)
 		if err != nil {
 			fail(name, start, fmt.Errorf("mint for burn: %w", err))
 			goto afterBurn
@@ -331,7 +337,8 @@ afterBurn:
 	{
 		name := "TokenService/ClawbackToken"
 		start := time.Now()
-		req4, rawSig4, err := signMintToken(acc0, "test-token-clawback", acc1.id)
+		acc0Nonce++
+		req4, rawSig4, err := signMintToken(acc0, "test-token-clawback", acc1.id, acc0Nonce)
 		if err != nil {
 			fail(name, start, fmt.Errorf("mint for clawback: %w", err))
 			goto afterClawback
@@ -367,7 +374,32 @@ afterBurn:
 afterClawback:
 
 	// ------------------------------------------------------------------
-	// 8. Subscribe duplicate – second call from same account must fail
+	// 8. LookupToken – look up mintedTokenID on acc1 (transferred there in step 4)
+	// ------------------------------------------------------------------
+	if mintedTokenID != "" {
+		name := "TokenService/LookupToken"
+		start := time.Now()
+		req, err := signLookupToken(acc1, mintedTokenID)
+		if err != nil {
+			fail(name, start, fmt.Errorf("sign: %w", err))
+		} else {
+			resp, err := c.token.LookupToken(ctx, req)
+			if err != nil {
+				fail(name, start, err)
+			} else if !resp.GetSuccess() {
+				fail(name, start, fmt.Errorf("server error: %s", resp.GetErrorMessage()))
+			} else if resp.GetToken() == nil {
+				fail(name, start, fmt.Errorf("expected token in response, got nil"))
+			} else if resp.GetToken().GetTokenId() != mintedTokenID {
+				fail(name, start, fmt.Errorf("token ID mismatch: got %s, want %s", resp.GetToken().GetTokenId(), mintedTokenID))
+			} else {
+				pass(name, start)
+			}
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// 9. Subscribe duplicate – second call from same account must fail
 	// ------------------------------------------------------------------
 	{
 		name := "EventService/Subscribe (duplicate → AlreadyExists)"
