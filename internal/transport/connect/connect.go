@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	protovalidate "buf.build/go/protovalidate"
 	"connectrpc.com/connect"
+	"github.com/ThreeDotsLabs/watermill/message"
 	"google.golang.org/protobuf/proto"
 
 	accountv1 "sg-emulator/gen/account/v1"
@@ -29,7 +31,6 @@ import (
 )
 
 // Transport implements the ConnectRPC transport for VirtualApps.
-// It also implements server.EventTransport for event delivery.
 type Transport struct {
 	address     string
 	client      *server.Client
@@ -38,33 +39,26 @@ type Transport struct {
 	exposeAdmin bool
 
 	// Event support
-	eventCh     chan server.EventDelivery
-	subscribers map[string]chan server.EventDelivery
-	subMu       sync.RWMutex
-	verifier    *crypto.Verifier
-	caPublicKey ed25519.PublicKey
-	eventBus    *server.EventBus
+	wmSubscriber        message.Subscriber
+	activeSubscriptions map[string]struct{}
+	activeSubMu         sync.Mutex
+	verifier            *crypto.Verifier
+	caPublicKey         ed25519.PublicKey
 }
 
 // New creates a new ConnectRPC transport with the given address and client.
-func New(address string, client *server.Client, verifier *crypto.Verifier, caPublicKey ed25519.PublicKey, exposeAdmin bool, eventBus *server.EventBus, logger *slog.Logger) *Transport {
+func New(address string, client *server.Client, verifier *crypto.Verifier, caPublicKey ed25519.PublicKey, exposeAdmin bool, wmSubscriber message.Subscriber, logger *slog.Logger) *Transport {
 	logger.Info("gRPC transport created", "address", address)
 	return &Transport{
-		address:     address,
-		client:      client,
-		logger:      logger,
-		exposeAdmin: exposeAdmin,
-		eventCh:     make(chan server.EventDelivery, 256),
-		subscribers: make(map[string]chan server.EventDelivery),
-		verifier:    verifier,
-		caPublicKey: caPublicKey,
-		eventBus:    eventBus,
+		address:             address,
+		client:              client,
+		logger:              logger,
+		exposeAdmin:         exposeAdmin,
+		wmSubscriber:        wmSubscriber,
+		activeSubscriptions: make(map[string]struct{}),
+		verifier:            verifier,
+		caPublicKey:         caPublicKey,
 	}
-}
-
-// EventChannel returns the channel the EventBus delivers events to.
-func (t *Transport) EventChannel() chan<- server.EventDelivery {
-	return t.eventCh 
 }
 
 // currencyHandler implements currencyv1connect.CurrencyServiceHandler.
@@ -286,7 +280,6 @@ type eventHandler struct {
 
 // Subscribe handles a server-streaming event subscription request.
 // The request must be signed by the subscribing account's private key.
-// Signature verification and subscriber management are owned by this transport.
 func (h *eventHandler) Subscribe(ctx context.Context, req *eventv1.SubscribeRequest, stream *connect.ServerStream[eventv1.SubscribeResponse]) error {
 	// Validate the proto message manually (streaming RPCs don't use unary interceptors)
 	validator, err := protovalidate.New()
@@ -320,40 +313,34 @@ func (h *eventHandler) Subscribe(ctx context.Context, req *eventv1.SubscribeRequ
 		return connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("signature verification failed: %w", err))
 	}
 
-	// Register a per-subscriber channel
 	subscriberID := envelope.Payload.AccountID
-	subCh := make(chan server.EventDelivery, 256)
 
-	h.transport.subMu.Lock()
-	if _, exists := h.transport.subscribers[subscriberID]; exists {
-		h.transport.subMu.Unlock()
-		return connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("account %s already has an active subscription", subscriberID))
+	// Guard: one active subscription per account.
+	h.transport.activeSubMu.Lock()
+	if _, exists := h.transport.activeSubscriptions[subscriberID]; exists {
+		h.transport.activeSubMu.Unlock()
+		return connect.NewError(connect.CodeAlreadyExists, errors.New("subscription already active"))
 	}
-	h.transport.subscribers[subscriberID] = subCh
-	h.transport.subMu.Unlock()
-
-	// Build EventBus filter and register so the EventBus dispatches events for this account.
-	eventFilter := &server.EventFilter{
-		AccountIDs: map[string]struct{}{subscriberID: {}},
-		EventTypes: make(map[eventv1.EventType]struct{}),
-	}
-	for _, et := range req.GetSignedEnvelope().GetPayload().GetEventTypes() {
-		eventFilter.EventTypes[et] = struct{}{}
-	}
-	if _, err := h.transport.eventBus.Subscribe(subscriberID, eventFilter); err != nil {
-		// Undo the transport registration and surface as AlreadyExists.
-		h.transport.subMu.Lock()
-		delete(h.transport.subscribers, subscriberID)
-		h.transport.subMu.Unlock()
-		return connect.NewError(connect.CodeAlreadyExists, err)
-	}
-
+	h.transport.activeSubscriptions[subscriberID] = struct{}{}
+	h.transport.activeSubMu.Unlock()
 	defer func() {
-		h.transport.subMu.Lock()
-		delete(h.transport.subscribers, subscriberID)
-		h.transport.subMu.Unlock()
-		h.transport.eventBus.Unsubscribe(subscriberID)
+		h.transport.activeSubMu.Lock()
+		delete(h.transport.activeSubscriptions, subscriberID)
+		h.transport.activeSubMu.Unlock()
 	}()
+
+	// Build event type filter set (empty = accept all).
+	filterTypes := map[string]struct{}{}
+	for _, et := range req.GetSignedEnvelope().GetPayload().GetEventTypes() {
+		filterTypes[et.String()] = struct{}{}
+	}
+
+	// Subscribe via Watermill to the per-account topic.
+	topic := "events." + subscriberID
+	msgs, err := h.transport.wmSubscriber.Subscribe(ctx, topic)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
 
 	h.logger.Info("Client subscribed to events", "account_id", subscriberID)
 
@@ -362,21 +349,36 @@ func (h *eventHandler) Subscribe(ctx context.Context, req *eventv1.SubscribeRequ
 	// arrives, causing a deadlock when the test calls MintToken only after
 	// openSubscription returns.
 	if err := stream.Send(&eventv1.SubscribeResponse{}); err != nil {
-		return connect.NewError(connect.CodeInternal, fmt.Errorf("send ready signal: %w", err))
+		return err
 	}
 
-	// Stream events until client disconnects
+	// Stream events until client disconnects or broker shuts down.
 	for {
 		select {
-		case delivery, ok := <-subCh:
+		case msg, ok := <-msgs:
 			if !ok {
-				h.logger.Info("Subscriber channel closed", "account_id", subscriberID)
-				return nil
+				return nil // subscriber channel closed
 			}
-			if err := stream.Send(&eventv1.SubscribeResponse{Event: delivery.Event}); err != nil {
+			// Apply event type filter.
+			if len(filterTypes) > 0 {
+				et := msg.Metadata.Get("event_type")
+				if _, pass := filterTypes[et]; !pass {
+					msg.Ack()
+					continue
+				}
+			}
+			event := &eventv1.Event{}
+			if err := proto.Unmarshal(msg.Payload, event); err != nil {
+				h.logger.Error("failed to unmarshal event", "error", err)
+				msg.Ack()
+				continue
+			}
+			if err := stream.Send(&eventv1.SubscribeResponse{Event: event}); err != nil {
 				h.logger.Debug("Failed to send event to subscriber", "account_id", subscriberID, "error", err)
+				msg.Nack()
 				return err
 			}
+			msg.Ack()
 		case <-ctx.Done():
 			h.logger.Info("Client disconnected", "account_id", subscriberID)
 			return nil
@@ -399,39 +401,8 @@ func validationInterceptor(validator protovalidate.Validator) connect.UnaryInter
 	}
 }
 
-// startEventRouter reads events from the transport's eventCh and routes them
-// to the appropriate per-subscriber channel based on AccountID.
-func (t *Transport) startEventRouter(ctx context.Context) {
-	for {
-		select {
-		case delivery, ok := <-t.eventCh:
-			if !ok {
-				return
-			}
-			t.subMu.RLock()
-			ch, exists := t.subscribers[delivery.AccountID]
-			t.subMu.RUnlock()
-			if !exists {
-				continue
-			}
-			select {
-			case ch <- delivery:
-			default:
-				t.logger.Warn("Subscriber channel full, dropping event",
-					"account_id", delivery.AccountID,
-					"event_type", delivery.Event.GetType(),
-				)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
 // Start begins listening for ConnectRPC requests.
 func (t *Transport) Start(ctx context.Context) error {
-	go t.startEventRouter(ctx)
-
 	validator, err := protovalidate.New()
 	if err != nil {
 		return err

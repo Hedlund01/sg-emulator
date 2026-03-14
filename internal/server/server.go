@@ -7,6 +7,10 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill/message"
+	"google.golang.org/protobuf/proto"
+
 	"sg-emulator/internal/ca"
 	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
@@ -374,7 +378,7 @@ func (s *Server) handleRequest(req messages.Request) messages.Response {
 }
 
 // publishEvent constructs an event from the request/response and publishes it
-// to all VirtualApp event buses.
+// to all VirtualApp GoChannels, one topic per involved account.
 func (s *Server) publishEvent(requestPayload any, responsePayload any) {
 	info := extractEventInfo(requestPayload, responsePayload)
 	if info == nil {
@@ -386,68 +390,22 @@ func (s *Server) publishEvent(requestPayload any, responsePayload any) {
 		return
 	}
 
+	payload, err := proto.Marshal(event)
+	if err != nil {
+		s.logger.Error("failed to marshal event", "error", err)
+		return
+	}
+
+	accountIDs := eventInvolvedAccounts(event)
 	vapps := s.registry.List()
 	for _, vapp := range vapps {
-		vapp.EventBus().Send(event)
-	}
-}
-
-// extractEventInfo maps a domain request payload to an event info struct
-// that BuildEvent can convert into a proto Event.
-func extractEventInfo(requestPayload any, responsePayload any) any {
-	switch req := requestPayload.(type) {
-	case *scalegraph.TransferRequest:
-		return &transferEventInfo{
-			From:   req.From.String(),
-			To:     req.To.String(),
-			Amount: req.Amount,
+		pub := vapp.Publisher()
+		for _, accountID := range accountIDs {
+			msg := message.NewMessage(watermill.NewUUID(), payload)
+			msg.Metadata.Set("event_type", event.GetType().String())
+			if err := pub.Publish("events."+accountID, msg); err != nil {
+				s.logger.Warn("failed to publish event", "topic", "events."+accountID, "error", err)
+			}
 		}
-	case *scalegraph.MintRequest:
-		return &mintEventInfo{
-			To:     req.To.String(),
-			Amount: req.Amount,
-		}
-	case *scalegraph.MintTokenRequest:
-		info := &mintTokenEventInfo{
-			AccountID:  req.SignedEnvelope.Signature.SignerID,
-			TokenValue: req.TokenValue,
-		}
-		if req.ClawbackAddress != nil {
-			info.ClawbackAddress = req.ClawbackAddress.String()
-		}
-		// Extract token ID from response
-		if resp, ok := responsePayload.(*scalegraph.MintTokenResponse); ok {
-			info.TokenID = resp.TokenID
-		}
-		return info
-	case *scalegraph.TransferTokenRequest:
-		return &transferTokenEventInfo{
-			From:    req.From.String(),
-			To:      req.To.String(),
-			TokenID: req.TokenId,
-		}
-	case *scalegraph.AuthorizeTokenTransferRequest:
-		return &authorizeTokenTransferEventInfo{
-			AccountID: req.AccountID.String(),
-			TokenID:   req.TokenId,
-		}
-	case *scalegraph.UnauthorizeTokenTransferRequest:
-		return &unauthorizeTokenTransferEventInfo{
-			AccountID: req.AccountID.String(),
-			TokenID:   req.TokenId,
-		}
-	case *scalegraph.BurnTokenRequest:
-		return &burnTokenEventInfo{
-			AccountID: req.AccountID.String(),
-			TokenID:   req.TokenId,
-		}
-	case *scalegraph.ClawbackTokenRequest:
-		return &clawbackTokenEventInfo{
-			From:    req.From.String(),
-			To:      req.To.String(),
-			TokenID: req.TokenId,
-		}
-	default:
-		return nil
 	}
 }

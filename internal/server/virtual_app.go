@@ -5,6 +5,10 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
+
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server/messages"
 )
@@ -15,7 +19,7 @@ type VirtualApp struct {
 	id         scalegraph.ScalegraphId
 	client     *Client
 	transports []Transport
-	eventBus   *EventBus
+	goChannel  *gochannel.GoChannel
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
@@ -31,52 +35,62 @@ func newVirtualApp(requestChan chan<- messages.Request, logger *slog.Logger) (*V
 
 	logger.Debug("Creating virtual app", "id", id)
 	ctx, cancel := context.WithCancel(context.Background())
+
+	gc := gochannel.NewGoChannel(
+		gochannel.Config{
+			OutputChannelBuffer:            256,
+			Persistent:                     false,
+			BlockPublishUntilSubscriberAck: false,
+		},
+		watermill.NewStdLogger(false, false),
+	)
+
 	return &VirtualApp{
 		id:         id,
 		client:     NewClient(requestChan, logger.With("vapp_id", id)),
 		transports: make([]Transport, 0),
-		eventBus:   NewEventBus(logger.With("vapp_id", id, "component", "event-bus")),
+		goChannel:  gc,
 		ctx:        ctx,
 		cancel:     cancel,
 	}, nil
 }
 
-// ID returns the VirtualApp's unique identifier
+// ID returns the VirtualApp's unique identifier.
 func (v *VirtualApp) ID() scalegraph.ScalegraphId {
 	return v.id
 }
 
-// Client returns the VirtualApp's client for making requests
+// Client returns the VirtualApp's client for making requests.
 func (v *VirtualApp) Client() *Client {
 	return v.client
 }
 
-// EventBus returns the VirtualApp's event bus for pub/sub
-func (v *VirtualApp) EventBus() *EventBus {
-	return v.eventBus
+// Publisher returns the Watermill publisher for this VirtualApp.
+func (v *VirtualApp) Publisher() message.Publisher {
+	return v.goChannel
 }
 
-// Context returns the VirtualApp's context
+// Subscriber returns the Watermill subscriber for this VirtualApp.
+func (v *VirtualApp) Subscriber() message.Subscriber {
+	return v.goChannel
+}
+
+// Context returns the VirtualApp's context.
 func (v *VirtualApp) Context() context.Context {
 	return v.ctx
 }
 
 // AddTransport adds a transport to the VirtualApp.
-// If the transport implements EventTransport, its event channel is
-// registered with the EventBus so filtered events are delivered to it.
 func (v *VirtualApp) AddTransport(t Transport) {
 	v.transports = append(v.transports, t)
-	if et, ok := t.(EventTransport); ok {
-		v.eventBus.RegisterTransport(et.EventChannel())
-	}
 }
 
-// Transports returns all transports
+// Transports returns all transports.
 func (v *VirtualApp) Transports() []Transport {
 	return v.transports
 }
 
-// Addresses returns a map of transport type to address
+// Addresses returns a map of transport type to address.
 func (v *VirtualApp) Addresses() map[string]string {
 	addresses := make(map[string]string)
 	for _, t := range v.transports {
@@ -85,10 +99,8 @@ func (v *VirtualApp) Addresses() map[string]string {
 	return addresses
 }
 
-// Start starts the EventBus dispatcher and all transports.
+// Start starts all transports.
 func (v *VirtualApp) Start() {
-	go v.eventBus.Run(v.ctx)
-
 	for _, t := range v.transports {
 		v.wg.Add(1)
 		go func(transport Transport) {
@@ -98,10 +110,10 @@ func (v *VirtualApp) Start() {
 	}
 }
 
-// Stop gracefully shuts down the EventBus and all transports.
+// Stop gracefully shuts down the GoChannel and all transports.
 func (v *VirtualApp) Stop() {
 	v.cancel()
-	v.eventBus.Stop()
+	v.goChannel.Close()
 	for _, t := range v.transports {
 		t.Stop()
 	}
