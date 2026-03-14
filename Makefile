@@ -40,9 +40,9 @@ test-streams:
 	$(BINARY_DIR)/$(TESTCLIENT_NAME) -mode streams -addr $(GRPC_ADDR) -base-dir . \
 		-max-streams $(MAX_STREAMS) -step $(STEP_SIZE) -fanout=$(FANOUT) -timeout $(STREAMS_TIMEOUT)
 
-# Run throughput benchmark (requires a running server at localhost:50051)
-bench-grpc: build
-	@echo "Running throughput benchmark against $(GRPC_ADDR)..."
+# Run throughput benchmark (reports ops/s, tx/s, and tx latency; requires a running server at localhost:50051)
+bench-grpc: 
+	@echo "Running benchmark against $(GRPC_ADDR) (ops/s, tx/s, tx latency)..."
 	$(BINARY_DIR)/$(TESTCLIENT_NAME) -mode bench -addr $(GRPC_ADDR) -base-dir . \
 		-workload $(BENCH_WORKLOAD) -workers $(BENCH_WORKERS) \
 		-duration $(BENCH_DURATION) -warmup $(BENCH_WARMUP)

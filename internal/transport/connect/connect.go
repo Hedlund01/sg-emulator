@@ -191,6 +191,7 @@ func (h *tokenHandler) LookupToken(ctx context.Context, req *tokenv1.LookupToken
 			TokenId:         t.ID(),
 			TokenValue:      t.Value(),
 			ClawbackAddress: cb,
+			Owner:           envelope.Payload.AccountID,
 		}
 	}
 	return &tokenv1.LookupTokenResponse{Success: true, Token: protoToken}, nil

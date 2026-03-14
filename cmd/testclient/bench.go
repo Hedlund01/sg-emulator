@@ -12,6 +12,21 @@ import (
 	adminv1 "sg-emulator/gen/admin/v1"
 )
 
+// Benchmark metric contract:
+//
+//  1. The benchmark has two phases: warmup and measure.
+//  2. Warmup operations are executed but excluded from all reported metrics
+//     (throughput counters and latency percentiles). This avoids startup effects
+//     skewing measured numbers.
+//  3. Ops metrics treat one complete workload unit as one operation:
+//     - currency: 1 op = Transfer
+//     - token: 1 op = MintToken + AuthorizeTokenTransfer + TransferToken
+//  4. Tx metrics treat each RPC transaction separately:
+//     - currency op contributes up to 1 tx
+//     - token op contributes up to 3 tx
+//  5. We report both attempted and successful tx rates, plus per-tx latency
+//     percentiles, to make partial workflow failures visible.
+
 // benchConfig holds benchmark-specific configuration.
 type benchConfig struct {
 	workload string
@@ -20,64 +35,205 @@ type benchConfig struct {
 	warmup   time.Duration
 }
 
+// currencyAccountPair holds a pre-created sender/receiver pair for currency workloads.
+type currencyAccountPair struct{ sender, receiver *accountCreds }
+
+// tokenAccountPair holds a pre-created sender/receiver pair for token workloads.
+type tokenAccountPair struct{ sender, receiver *accountCreds }
+
+// tokenTransferRecord records a successfully transferred token during the measured phase.
+type tokenTransferRecord struct {
+	tokenID  string
+	receiver *accountCreds
+}
+
 // workerResult is returned by each benchmark worker goroutine.
 type workerResult struct {
-	lats []time.Duration
-	errs int64
+	opLats      []time.Duration
+	txLats      []time.Duration
+	opAttempted int64
+	opSucceeded int64
+	opFailed    int64
+	txAttempted int64
+	txSucceeded int64
+	txFailed    int64
+	transfers   []tokenTransferRecord
+}
+
+func (r *workerResult) recordOpAttempt(measured bool) {
+	if measured {
+		r.opAttempted++
+	}
+}
+
+func (r *workerResult) recordOpSuccess(measured bool, lat time.Duration) {
+	if measured {
+		r.opSucceeded++
+		r.opLats = append(r.opLats, lat)
+	}
+}
+
+func (r *workerResult) recordOpFailure(measured bool) {
+	if measured {
+		r.opFailed++
+	}
+}
+
+func (r *workerResult) recordTxAttempt(measured bool) {
+	if measured {
+		r.txAttempted++
+	}
+}
+
+func (r *workerResult) recordTxSuccess(measured bool, lat time.Duration) {
+	if measured {
+		r.txSucceeded++
+		r.txLats = append(r.txLats, lat)
+	}
+}
+
+func (r *workerResult) recordTxFailure(measured bool, lat time.Duration) {
+	if measured {
+		r.txFailed++
+		r.txLats = append(r.txLats, lat)
+	}
+}
+
+func mergeWorkerResult(dst *workerResult, src workerResult) {
+	dst.opLats = append(dst.opLats, src.opLats...)
+	dst.txLats = append(dst.txLats, src.txLats...)
+	dst.opAttempted += src.opAttempted
+	dst.opSucceeded += src.opSucceeded
+	dst.opFailed += src.opFailed
+	dst.txAttempted += src.txAttempted
+	dst.txSucceeded += src.txSucceeded
+	dst.txFailed += src.txFailed
+	dst.transfers = append(dst.transfers, src.transfers...)
+}
+
+// setupCurrencyAccounts pre-creates n sender/receiver pairs for the currency workload.
+func setupCurrencyAccounts(ctx context.Context, c *clients, n int) ([]currencyAccountPair, error) {
+	pairs := make([]currencyAccountPair, n)
+	for i := range pairs {
+		sender, err := createTestAccount(ctx, c.admin, 1_000_000)
+		if err != nil {
+			return nil, fmt.Errorf("setup currency pair %d sender: %w", i, err)
+		}
+		receiver, err := createTestAccount(ctx, c.admin, 0)
+		if err != nil {
+			return nil, fmt.Errorf("setup currency pair %d receiver: %w", i, err)
+		}
+		pairs[i] = currencyAccountPair{sender: sender, receiver: receiver}
+	}
+	return pairs, nil
+}
+
+// setupTokenAccounts pre-creates n sender/receiver pairs for the token workload.
+func setupTokenAccounts(ctx context.Context, c *clients, n int) ([]tokenAccountPair, error) {
+	pairs := make([]tokenAccountPair, n)
+	for i := range pairs {
+		sender, err := createTestAccount(ctx, c.admin, 1_000_000)
+		if err != nil {
+			return nil, fmt.Errorf("setup token pair %d sender: %w", i, err)
+		}
+		receiver, err := createTestAccount(ctx, c.admin, 1_000_000)
+		if err != nil {
+			return nil, fmt.Errorf("setup token pair %d receiver: %w", i, err)
+		}
+		if _, err := c.admin.Mint(ctx, &adminv1.MintRequest{AccountId: sender.id, Amount: 100.0}); err != nil {
+			return nil, fmt.Errorf("setup token pair %d sender mint: %w", i, err)
+		}
+		if _, err := c.admin.Mint(ctx, &adminv1.MintRequest{AccountId: receiver.id, Amount: 100.0}); err != nil {
+			return nil, fmt.Errorf("setup token pair %d receiver mint: %w", i, err)
+		}
+		pairs[i] = tokenAccountPair{sender: sender, receiver: receiver}
+	}
+	return pairs, nil
 }
 
 // RunBenchmark runs the throughput benchmark for the configured workload.
 func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 	switch bcfg.workload {
 	case "currency":
-		lats, errs := runWorkerPool(ctx, cfg, bcfg, "currency", bcfg.workers)
-		printBenchResults(bcfg, "currency", "1 op = Transfer", lats, errs)
+		res := runWorkerPool(ctx, cfg, bcfg, "currency", bcfg.workers)
+		printBenchResults(bcfg, "currency", bcfg.workers, "1 op = Transfer", "1 tx = Transfer RPC", res)
 	case "token":
-		lats, errs := runWorkerPool(ctx, cfg, bcfg, "token", bcfg.workers)
-		printBenchResults(bcfg, "token", "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", lats, errs)
+		res := runWorkerPool(ctx, cfg, bcfg, "token", bcfg.workers)
+		printBenchResults(bcfg, "token", bcfg.workers, "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", "1 tx = one token RPC (MintToken, AuthorizeTokenTransfer, or TransferToken)", res)
+		if len(res.transfers) > 0 {
+			confirmed, failed := verifyTokenTransfers(ctx, cfg, res.transfers)
+			printVerificationStats(confirmed, failed)
+		}
 	case "mixed":
 		half := bcfg.workers / 2
 		rest := bcfg.workers - half
 
 		var mu sync.Mutex
-		var cLats, tLats []time.Duration
-		var cErrs, tErrs int64
+		var cRes, tRes workerResult
 
 		var wg sync.WaitGroup
 		wg.Add(2)
 
 		go func() {
 			defer wg.Done()
-			l, e := runWorkerPool(ctx, cfg, bcfg, "currency", half)
+			res := runWorkerPool(ctx, cfg, bcfg, "currency", half)
 			mu.Lock()
-			cLats, cErrs = l, e
+			cRes = res
 			mu.Unlock()
 		}()
 
 		go func() {
 			defer wg.Done()
-			l, e := runWorkerPool(ctx, cfg, bcfg, "token", rest)
+			res := runWorkerPool(ctx, cfg, bcfg, "token", rest)
 			mu.Lock()
-			tLats, tErrs = l, e
+			tRes = res
 			mu.Unlock()
 		}()
 
 		wg.Wait()
 
-		printBenchResults(bcfg, "mixed", "mixed/currency  — 1 op = Transfer", cLats, cErrs)
+		printBenchResults(bcfg, "mixed/currency", half, "1 op = Transfer", "1 tx = Transfer RPC", cRes)
 		fmt.Println()
-		printBenchResults(bcfg, "mixed", "mixed/token     — 1 op = MintToken + AuthorizeTokenTransfer + TransferToken", tLats, tErrs)
+		printBenchResults(bcfg, "mixed/token", rest, "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", "1 tx = one token RPC (MintToken, AuthorizeTokenTransfer, or TransferToken)", tRes)
+		if len(tRes.transfers) > 0 {
+			confirmed, failed := verifyTokenTransfers(ctx, cfg, tRes.transfers)
+			printVerificationStats(confirmed, failed)
+		}
 		fmt.Println()
 
-		allLats := append(cLats, tLats...)
-		printBenchResults(bcfg, "mixed", "mixed/combined  — 1 op = one currency op or one token op", allLats, cErrs+tErrs)
+		var combined workerResult
+		mergeWorkerResult(&combined, cRes)
+		mergeWorkerResult(&combined, tRes)
+		printBenchResults(bcfg, "mixed/combined", bcfg.workers, "1 op = one currency op or one token op", "1 tx = one underlying RPC from either workload", combined)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown workload %q — use currency, token, or mixed\n", bcfg.workload)
 	}
 }
 
 // runWorkerPool launches numWorkers goroutines and collects all latency samples.
-func runWorkerPool(ctx context.Context, cfg *config, bcfg *benchConfig, workload string, numWorkers int) ([]time.Duration, int64) {
+func runWorkerPool(ctx context.Context, cfg *config, bcfg *benchConfig, workload string, numWorkers int) workerResult {
+	setupC := newClients(cfg.addr)
+
+	var currencyPairs []currencyAccountPair
+	var tokenPairs []tokenAccountPair
+
+	switch workload {
+	case "currency":
+		pairs, err := setupCurrencyAccounts(ctx, setupC, numWorkers)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "account setup failed: %v\n", err)
+			return workerResult{}
+		}
+		currencyPairs = pairs
+	case "token":
+		pairs, err := setupTokenAccounts(ctx, setupC, numWorkers)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "account setup failed: %v\n", err)
+			return workerResult{}
+		}
+		tokenPairs = pairs
+	}
+
 	results := make([]workerResult, numWorkers)
 	var wg sync.WaitGroup
 
@@ -85,50 +241,42 @@ func runWorkerPool(ctx context.Context, cfg *config, bcfg *benchConfig, workload
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			lats, errs := runWorker(ctx, cfg, bcfg, workload)
-			results[idx] = workerResult{lats: lats, errs: errs}
+			results[idx] = runWorker(ctx, cfg, bcfg, workload, idx, currencyPairs, tokenPairs)
 		}(i)
 	}
 
 	wg.Wait()
 
-	var allLats []time.Duration
-	var totalErrs int64
+	var total workerResult
 	for _, r := range results {
-		allLats = append(allLats, r.lats...)
-		totalErrs += r.errs
+		mergeWorkerResult(&total, r)
 	}
-	return allLats, totalErrs
+
+	return total
 }
 
 // runWorker executes a single benchmark worker and returns its latency samples.
 // Phase 1 (warmup): run operations but discard latencies.
 // Phase 2 (measure): run operations and record latencies.
-func runWorker(ctx context.Context, cfg *config, bcfg *benchConfig, workload string) ([]time.Duration, int64) {
+func runWorker(ctx context.Context, cfg *config, bcfg *benchConfig, workload string, accountIdx int, currencyPairs []currencyAccountPair, tokenPairs []tokenAccountPair) workerResult {
 	c := newClients(cfg.addr)
 
 	switch workload {
 	case "currency":
-		return runCurrencyWorker(ctx, c, bcfg)
+		return runCurrencyWorker(ctx, c, bcfg, currencyPairs[accountIdx])
 	case "token":
-		return runTokenWorker(ctx, c, bcfg)
+		return runTokenWorker(ctx, c, bcfg, tokenPairs[accountIdx])
 	default:
-		return nil, 0
+		return workerResult{}
 	}
 }
 
-func runCurrencyWorker(ctx context.Context, c *clients, bcfg *benchConfig) ([]time.Duration, int64) {
-	sender, err := createTestAccount(ctx, c.admin, 1_000_000)
-	if err != nil {
-		return nil, 1
-	}
-	receiver, err := createTestAccount(ctx, c.admin, 0)
-	if err != nil {
-		return nil, 1
-	}
+func runCurrencyWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair currencyAccountPair) workerResult {
+	var res workerResult
 
-	var lats []time.Duration
-	var errs int64
+	sender := pair.sender
+	receiver := pair.receiver
+
 	var nonce uint64 = 1
 
 	warmupEnd := time.Now().Add(bcfg.warmup)
@@ -136,49 +284,45 @@ func runCurrencyWorker(ctx context.Context, c *clients, bcfg *benchConfig) ([]ti
 
 	for time.Now().Before(benchEnd) {
 		if ctx.Err() != nil {
-			return lats, errs
+			return res
 		}
 
-		start := time.Now()
+		opStart := time.Now()
+		measured := !opStart.Before(warmupEnd)
+		res.recordOpAttempt(measured)
+
 		req, err := signTransfer(sender, receiver.id, 0.01, nonce)
 		if err != nil {
-			errs++
+			res.recordOpFailure(measured)
 			nonce++
 			continue
 		}
+
+		res.recordTxAttempt(measured)
+		txStart := time.Now()
 		resp, err := c.currency.Transfer(ctx, req)
-		elapsed := time.Since(start)
+		txElapsed := time.Since(txStart)
 		nonce++
 
 		if err != nil || !resp.GetSuccess() {
-			errs++
+			res.recordTxFailure(measured, txElapsed)
+			res.recordOpFailure(measured)
 			continue
 		}
+		res.recordTxSuccess(measured, txElapsed)
 
-		if time.Now().After(warmupEnd) {
-			lats = append(lats, elapsed)
-		}
+		res.recordOpSuccess(measured, time.Since(opStart))
 	}
 
-	return lats, errs
+	return res
 }
 
-func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig) ([]time.Duration, int64) {
-	sender, err := createTestAccount(ctx, c.admin, 1_000_000)
-	if err != nil {
-		return nil, 1
-	}
-	receiver, err := createTestAccount(ctx, c.admin, 1_000_000)
-	if err != nil {
-		return nil, 1
-	}
+func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair tokenAccountPair) workerResult {
+	var res workerResult
 
-	// Pre-mint currency to cover MBR requirements.
-	_, _ = c.admin.Mint(ctx, &adminv1.MintRequest{AccountId: sender.id, Amount: 100.0})
-	_, _ = c.admin.Mint(ctx, &adminv1.MintRequest{AccountId: receiver.id, Amount: 100.0})
+	sender := pair.sender
+	receiver := pair.receiver
 
-	var lats []time.Duration
-	var errs int64
 	var mintSeq uint64
 
 	warmupEnd := time.Now().Add(bcfg.warmup)
@@ -186,75 +330,138 @@ func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig) ([]time.
 
 	for time.Now().Before(benchEnd) {
 		if ctx.Err() != nil {
-			return lats, errs
+			return res
 		}
 
-		start := time.Now()
+		opStart := time.Now()
+		measured := !opStart.Before(warmupEnd)
+		res.recordOpAttempt(measured)
+
 		mintSeq++
 
 		// 1. Mint a new token.
 		mintReq, rawSig, err := signMintToken(sender, fmt.Sprintf("bench-%d", mintSeq), "", int64(mintSeq))
 		if err != nil {
-			errs++
+			res.recordOpFailure(measured)
 			continue
 		}
+
+		res.recordTxAttempt(measured)
+		mintStart := time.Now()
 		mintResp, err := c.token.MintToken(ctx, mintReq)
+		mintElapsed := time.Since(mintStart)
 		if err != nil || !mintResp.GetSuccess() {
-			errs++
+			res.recordTxFailure(measured, mintElapsed)
+			res.recordOpFailure(measured)
 			continue
 		}
+		res.recordTxSuccess(measured, mintElapsed)
 		tokenID := tokenIDFromRawSig(rawSig)
 
 		// 2. Receiver authorizes the incoming transfer.
 		authReq, err := signAuthorizeTokenTransfer(receiver, tokenID)
 		if err != nil {
-			errs++
+			res.recordOpFailure(measured)
 			continue
 		}
+
+		res.recordTxAttempt(measured)
+		authStart := time.Now()
 		authResp, err := c.token.AuthorizeTokenTransfer(ctx, authReq)
+		authElapsed := time.Since(authStart)
 		if err != nil || !authResp.GetSuccess() {
-			errs++
+			res.recordTxFailure(measured, authElapsed)
+			res.recordOpFailure(measured)
 			continue
 		}
+		res.recordTxSuccess(measured, authElapsed)
 
 		// 3. Transfer the token.
 		xferReq, err := signTransferToken(sender, receiver.id, tokenID)
 		if err != nil {
-			errs++
+			res.recordOpFailure(measured)
 			continue
 		}
+
+		res.recordTxAttempt(measured)
+		xferStart := time.Now()
 		xferResp, err := c.token.TransferToken(ctx, xferReq)
-		elapsed := time.Since(start)
+		xferElapsed := time.Since(xferStart)
 
 		if err != nil || !xferResp.GetSuccess() {
-			errs++
+			res.recordTxFailure(measured, xferElapsed)
+			res.recordOpFailure(measured)
 			continue
 		}
+		res.recordTxSuccess(measured, xferElapsed)
 
-		if time.Now().After(warmupEnd) {
-			lats = append(lats, elapsed)
+		if measured {
+			res.transfers = append(res.transfers, tokenTransferRecord{tokenID: tokenID, receiver: receiver})
 		}
+
+		res.recordOpSuccess(measured, time.Since(opStart))
 	}
 
-	return lats, errs
+	return res
+}
+
+// verifyTokenTransfers checks on-chain ownership for each recorded transfer.
+func verifyTokenTransfers(ctx context.Context, cfg *config, transfers []tokenTransferRecord) (confirmed, failed int) {
+	c := newClients(cfg.addr)
+	for _, rec := range transfers {
+		req, err := signLookupToken(rec.receiver, rec.tokenID)
+		if err != nil {
+			failed++
+			continue
+		}
+		resp, err := c.token.LookupToken(ctx, req)
+		if err != nil || resp.GetToken().GetOwner() != rec.receiver.id {
+			failed++
+			continue
+		}
+		confirmed++
+	}
+	return confirmed, failed
+}
+
+// printVerificationStats prints a summary of post-benchmark token transfer verification.
+func printVerificationStats(confirmed, failed int) {
+	fmt.Println()
+	fmt.Println("=== Token Transfer Verification ===")
+	fmt.Printf("Confirmed transfers : %s\n", formatInt(confirmed))
+	fmt.Printf("Failed / missing    : %s\n", formatInt(failed))
 }
 
 // printBenchResults prints a formatted benchmark report.
-func printBenchResults(bcfg *benchConfig, headerWorkload, workloadDesc string, lats []time.Duration, errs int64) {
-	totalOps := int64(len(lats)) + errs
-	throughput := float64(len(lats)) / bcfg.duration.Seconds()
+func printBenchResults(bcfg *benchConfig, headerWorkload string, workers int, opDesc, txDesc string, res workerResult) {
+	opAttemptRate := float64(res.opAttempted) / bcfg.duration.Seconds()
+	opSuccessRate := float64(res.opSucceeded) / bcfg.duration.Seconds()
+	txAttemptRate := float64(res.txAttempted) / bcfg.duration.Seconds()
+	txSuccessRate := float64(res.txSucceeded) / bcfg.duration.Seconds()
 
-	p50 := latPercentile(lats, 0.50)
-	p95 := latPercentile(lats, 0.95)
+	opP50 := latPercentile(res.opLats, 0.50)
+	opP95 := latPercentile(res.opLats, 0.95)
+	txP50 := latPercentile(res.txLats, 0.50)
+	txP95 := latPercentile(res.txLats, 0.95)
 
 	fmt.Printf("=== Throughput Benchmark (workload=%s, workers=%d, duration=%s) ===\n",
-		headerWorkload, bcfg.workers, bcfg.duration)
-	fmt.Printf("1 op        : %s\n", workloadDesc)
-	fmt.Printf("Total ops   : %s\n", formatInt(int(totalOps)))
-	fmt.Printf("Errors      : %d\n", errs)
-	fmt.Printf("Throughput  : %.1f ops/s\n", throughput)
-	fmt.Printf("p50 latency : %.1f ms\n", durMs(p50))
-	fmt.Printf("p95 latency : %.1f ms\n", durMs(p95))
+		headerWorkload, workers, bcfg.duration)
+	fmt.Printf("1 op              : %s\n", opDesc)
+	fmt.Printf("1 tx              : %s\n", txDesc)
+	fmt.Printf("Ops attempted     : %s\n", formatInt(int(res.opAttempted)))
+	fmt.Printf("Ops succeeded     : %s\n", formatInt(int(res.opSucceeded)))
+	fmt.Printf("Ops failed        : %s\n", formatInt(int(res.opFailed)))
+	fmt.Printf("Ops attempted/s   : %.1f\n", opAttemptRate)
+	fmt.Printf("Ops succeeded/s   : %.1f\n", opSuccessRate)
+	fmt.Printf("Tx attempted      : %s\n", formatInt(int(res.txAttempted)))
+	fmt.Printf("Tx succeeded      : %s\n", formatInt(int(res.txSucceeded)))
+	fmt.Printf("Tx failed         : %s\n", formatInt(int(res.txFailed)))
+	fmt.Printf("Tx attempted/s    : %.1f\n", txAttemptRate)
+	fmt.Printf("Tx succeeded/s    : %.1f\n", txSuccessRate)
+	fmt.Printf("Op p50 latency    : %.1f ms\n", durMs(opP50))
+	fmt.Printf("Op p95 latency    : %.1f ms\n", durMs(opP95))
+	fmt.Printf("Tx p50 latency    : %.1f ms\n", durMs(txP50))
+	fmt.Printf("Tx p95 latency    : %.1f ms\n", durMs(txP95))
 }
 
 // latPercentile returns the p-th percentile of a slice of durations.
