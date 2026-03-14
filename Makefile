@@ -51,8 +51,8 @@ bench-grpc:
 test-grpc: test-endpoints test-streams
 
 GRPC_ADDR ?= localhost:50051
-MAX_STREAMS ?= 6000
-STEP_SIZE ?= 100
+MAX_STREAMS ?= 2000
+STEP_SIZE ?= 1000
 FANOUT ?= true
 ENDPOINTS_TIMEOUT ?= 60s
 STREAMS_TIMEOUT ?= 120s

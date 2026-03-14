@@ -129,7 +129,7 @@ func main() {
 
 			grpcAddr := fmt.Sprintf("localhost:%d", 50051+i)
 			grpcLogger := rootLogger.With("component", "grpc", "index", i, "address", grpcAddr)
-			vapp.AddTransport(grpc.New(grpcAddr, vapp.Client(), certAuth.NewVerifier(), certAuth.PublicKey(), *exposeAdmin, vapp.EventBus(), grpcLogger))
+			vapp.AddTransport(grpc.New(grpcAddr, vapp.Client(), certAuth.NewVerifier(), certAuth.PublicKey(), *exposeAdmin, vapp.Subscriber(), grpcLogger))
 			vapp.Start()
 
 			slog.Info("Created gRPC virtual app",
