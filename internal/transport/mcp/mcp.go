@@ -84,6 +84,17 @@ type LookupTokenArgs struct {
 	TokenID   string `json:"token_id" jsonschema:"The token ID to look up"`
 }
 
+// AdminCreateAccountArgs represents arguments for admin_create_account tool
+type AdminCreateAccountArgs struct {
+	Balance float64 `json:"balance" jsonschema:"Initial balance for the account (default: 0)"`
+}
+
+// AdminMintArgs represents arguments for admin_mint tool
+type AdminMintArgs struct {
+	To     string  `json:"to" jsonschema:"Account ID to mint tokens to (hex string)"`
+	Amount float64 `json:"amount" jsonschema:"Amount to mint"`
+}
+
 // CreateSignedRequestArgs represents arguments for create_signed_request tool
 type CreateSignedRequestArgs struct {
 	Type            string  `json:"type" jsonschema:"Type of request: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token', 'burn_token', 'clawback_token', or 'lookup_token'"`
@@ -635,6 +646,42 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			text += "\n"
 		}
 
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
+	// admin_create_account tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "admin_create_account",
+		Description: "Create a new account without requiring a signed request (admin/bypass auth). Returns account ID and balance.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args AdminCreateAccountArgs) (*mcp.CallToolResult, any, error) {
+		resp, err := client.AdminCreateAccount(context.Background(), args.Balance)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Created account %s with balance %.2f\n", resp.Account.ID().String(), resp.Account.Balance())
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
+	// admin_mint tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "admin_mint",
+		Description: "Mint tokens to an account without requiring a signed request (admin/bypass auth).",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args AdminMintArgs) (*mcp.CallToolResult, any, error) {
+		toID, err := scalegraph.ScalegraphIdFromString(args.To)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid account ID: %v", err)
+		}
+
+		if err := client.AdminMint(context.Background(), toID, args.Amount); err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Minted %.2f tokens to account %s", args.Amount, args.To[:16]+"...")
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		}, nil, nil

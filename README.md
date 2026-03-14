@@ -1,286 +1,387 @@
 # SG Emulator
 
-A scalegraph emulator demonstrating a distributed architecture with pluggable transports, built in Go.
+A blockchain/distributed ledger emulator demonstrating a scalable architecture with pluggable transports, built in Go. It simulates account management, currency transfers, and NFT-style token operations over a channel-based event system, with Ed25519 cryptographic signing for all operations.
 
 ## Features
 
-- **Channel-based architecture** - Clean separation of concerns with Go channels for communication
-- **Multiple transport protocols** - REST, gRPC, TUI, and MCP (Model Context Protocol)
-- **Concurrent operation** - Run multiple interfaces simultaneously (TUI + MCP + REST + gRPC)
-- **Distributed node simulation** - Virtual apps with 160-bit identifiers for DHT routing
-- **LLM integration** - MCP server enables LLM interaction with blockchain operations
+- **Channel-based architecture** - Clean separation of concerns with Go channels for inter-component communication
+- **Multiple transport protocols** - REST, ConnectRPC (gRPC), TUI, and MCP (Model Context Protocol)
+- **Concurrent operation** - Run multiple transports simultaneously (TUI + MCP + REST + gRPC)
+- **Distributed node simulation** - Virtual apps with 160-bit ScalegraphIds for DHT-style routing
+- **Event streaming** - Server-streaming event subscriptions per account via `EventService/Subscribe`
+- **Token support** - Mint, transfer, authorize, burn, and clawback NFT-style tokens
+- **LLM integration** - MCP server enables LLM agents to interact with blockchain operations
 
 ## Prerequisites
 
-- Go 1.22 or higher
+- Go 1.25 or higher
+- `buf` CLI (for protobuf code generation)
 - Make (optional, for build convenience)
 
 ## Installation
-
-Clone the repository:
 
 ```bash
 git clone https://github.com/Hedlund01/sg-emulator.git
 cd sg-emulator
 ```
 
-## Building
+Install tools and generate protobuf code:
 
-### Using Make
+```bash
+make deps
+make proto
+```
+
+## Building
 
 ```bash
 make build
 ```
 
-The binary will be created at `bin/app`.
+This produces two binaries:
+- `bin/app` — the main server
+- `bin/testclient` — the integration test and benchmark client
 
-### Using Go Directly
+Or build directly with Go:
 
 ```bash
 go build -o bin/app ./cmd/app
+go build -o bin/testclient ./cmd/testclient
 ```
 
-## Running
+## Running the Server
 
 ### Headless Mode
-
-Run the server without any user interface:
 
 ```bash
 ./bin/app
 ```
 
-This starts the core server and displays basic statistics. Press `Ctrl+C` to exit.
+Starts the core server with no interface. Press `Ctrl+C` to exit.
 
 ### TUI Mode (Interactive Terminal UI)
-
-Run with an interactive terminal interface:
 
 ```bash
 ./bin/app -tui
 ```
 
+Launches an interactive terminal UI for managing accounts and transactions.
 
 ### REST Virtual Apps
-
-Create virtual app instances with REST API endpoints:
 
 ```bash
 ./bin/app -rest 3
 ```
 
-This creates 3 virtual apps with REST endpoints on ports 8080, 8081, 8082.
+Creates 3 virtual app instances with REST endpoints on ports 8080, 8081, 8082. Each virtual app gets a unique 160-bit ScalegraphId and shares the same blockchain state.
 
-### gRPC Virtual Apps
-
-Create virtual app instances with gRPC servers:
+### ConnectRPC (gRPC) Virtual Apps
 
 ```bash
-./bin/app -grpc 5
+./bin/app -grpc 1
 ```
 
-This creates 5 virtual apps with gRPC servers on ports 50051-50055.
+Starts 1 virtual app with a ConnectRPC server on port 50051. Use `-grpc N` to start N instances on consecutive ports.
 
 ### MCP Server (LLM Integration)
-
-Start an MCP (Model Context Protocol) server for LLM interaction:
 
 ```bash
 ./bin/app -mcp localhost:3000
 ```
 
-The MCP server provides these tools:
-- `create_account` - Create a new account with optional initial balance
-- `get_accounts` - List all accounts with their IDs and balances
-- `get_account` - Get details of a specific account by ID
-- `transfer` - Transfer funds from one account to another
-- `mint` - Mint new tokens to an account
-- `get_virtual_nodes` - List all virtual nodes/apps in the system
+Starts an MCP (Model Context Protocol) server over HTTP/SSE, exposing blockchain operations as tools for LLM agents:
 
-**Testing the MCP Server:**
-
-```bash
-# Initialize session
-curl -X POST http://localhost:3000/ \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":1,
-    "method":"initialize",
-    "params":{
-      "protocolVersion":"2024-11-05",
-      "capabilities":{},
-      "clientInfo":{"name":"test","version":"1.0"}
-    }
-  }'
-
-# Create an account (use session ID from initialize response)
-curl -X POST http://localhost:3000/ \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Mcp-Session-Id: <SESSION_ID>" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":2,
-    "method":"tools/call",
-    "params":{
-      "name":"create_account",
-      "arguments":{"balance":100}
-    }
-  }'
-```
+| Tool | Description |
+|------|-------------|
+| `create_account` | Create a new account (signed by CA); returns account ID, balance, certificate, and private key |
+| `get_accounts` | List all accounts with their IDs and balances |
+| `get_account` | Get details of a specific account by ID |
+| `transfer` | Transfer currency from one account to another (signed) |
+| `mint` | Mint currency to an account (signed by CA) |
+| `mint_token` | Mint a new NFT-style token for an account (signed) |
+| `authorize_token_transfer` | Authorize a token to be transferred from an account (signed) |
+| `unauthorize_token_transfer` | Revoke a previously authorized token transfer (signed) |
+| `transfer_token` | Transfer a token between accounts; requires prior authorization (signed) |
+| `burn_token` | Permanently destroy a token (signed by owner) |
+| `clawback_token` | Reclaim a token from a holder back to the clawback authority (signed) |
+| `lookup_token` | Look up a token held by a specific account (signed) |
+| `get_account_count` | Get the total number of accounts |
+| `get_virtual_nodes` | List all virtual nodes/apps with their transports |
+| `create_signed_request` | Generate a signed JSON envelope for use with the REST API |
+| `admin_create_account` | Create an account without signing (admin, no auth required) |
+| `admin_mint` | Mint tokens to an account without signing (admin, no auth required) |
 
 ### Combined Modes
 
-Run multiple transports simultaneously:
+All transports share the same application state in real-time:
 
 ```bash
-# MCP server + TUI (great for LLM + human interaction)
+# gRPC + TUI
+./bin/app -grpc 1 -tui
+
+# MCP server + TUI (LLM + human interaction)
 ./bin/app -mcp localhost:3000 -tui
 
-# Full setup: MCP + REST virtual apps + TUI
-./bin/app -mcp localhost:3000 -rest 2 -tui
-
-# Everything
+# Full setup
 ./bin/app -mcp localhost:3000 -rest 3 -grpc 2 -tui
 ```
 
-**Note:** The MCP server uses HTTP/SSE transport (not stdio), allowing it to run concurrently with TUI without conflicts. All interfaces share the same application state in real-time.
-
 ## Command-Line Flags
 
-| Flag | Type | Description | Example |
-|------|------|-------------|---------||
-| `-tui` | boolean | Run with terminal UI interface | `-tui` |
-| `-rest` | integer | Number of virtual apps with REST transport | `-rest 3` |
-| `-grpc` | integer | Number of virtual apps with gRPC transport | `-grpc 5` |
-| `-mcp` | string | MCP server HTTP address | `-mcp localhost:3000` |
-| `-log-level` | string | Log level: debug, info, warn, error | `-log-level debug` |
-| `-log-format` | string | Log format: text or json | `-log-format json` |
-| `-log-file` | string | Log file path (auto-set for TUI mode) | `-log-file ./app.log` |
-
-## Development
-
-### Run Tests
-
-```bash
-make test
-```
-
-Or using Go directly:
-
-```bash
-go test ./...
-```
-
-### Clean Build Artifacts
-
-```bash
-make clean
-```
-
-### Code Structure
-
-```
-sg-emulator/
-├── cmd/app/               # Application entry point
-├── internal/
-│   ├── scalegraph/       # Business logic (accounts, transactions, blockchain)
-│   ├── server/           # Infrastructure (server, client, registry)
-│   ├── transport/        # Transport implementations (REST, gRPC, MCP)
-│   └── tui/              # Terminal UI components
-├── Makefile              # Build commands
-└── README.md             # This file
-```
-
-See [claude.md](claude.md) for detailed architecture documentation.
+| Flag | Type | Description | Default |
+|------|------|-------------|---------|
+| `-tui` | bool | Run with terminal UI interface | false |
+| `-rest` | int | Number of virtual apps with REST transport | 0 |
+| `-grpc` | int | Number of virtual apps with ConnectRPC transport | 0 |
+| `-mcp` | string | MCP server HTTP address | — |
+| `-expose-admin` | bool | Expose unauthenticated `AdminService` gRPC endpoints (`CreateAccount`, `Mint`) — required for testclient and benchmarks | false |
+| `-log-level` | string | Log level: `debug`, `info`, `warn`, `error` | `info` |
+| `-log-format` | string | Log format: `text` or `json` | `text` |
+| `-log-file` | string | Log file path (auto-set to `/tmp/sg-emulator.log` in TUI mode) | — |
 
 ## Logging
 
-The application uses structured logging with Go's `slog` package.
-
-### Logging Modes
-
-**Headless Mode** - Logs to stdout:
+**Headless mode** — logs to stdout:
 ```bash
-# Text format at info level (default)
-./bin/app -rest 2
-
-# JSON format for log aggregation
-./bin/app -rest 2 -log-format json
-
-# Debug logging for troubleshooting
-./bin/app -rest 2 -log-level debug
-
-# Error-only logging
-./bin/app -rest 2 -log-level error
+./bin/app -grpc 1 -log-level debug
+./bin/app -grpc 1 -log-format json
 ```
 
-**TUI Mode** - Logs automatically written to file:
+**TUI mode** — logs automatically redirect to file (to avoid visual conflicts with the UI):
 ```bash
-# Logs go to /tmp/sg-emulator.log by default
 ./bin/app -tui -log-level debug
+# Logs go to /tmp/sg-emulator.log by default
 
-# Custom log file location
-./bin/app -tui -log-file ./my-app.log
-
-# Monitor logs in another terminal
-tail -f /tmp/sg-emulator.log
-
-# JSON logs for parsing
-./bin/app -tui -log-format json -log-level debug
-tail -f /tmp/sg-emulator.log | jq
+# Monitor in another terminal
+tail -f /tmp/sg-emulator.log | jq   # JSON format
 ```
 
-**Why separate logging for TUI?** When TUI is active, logs are automatically redirected to a file to prevent visual conflicts between log output and the terminal UI rendering. This allows you to monitor logs in a separate terminal while using the TUI.
+## Unit Tests
 
-## Examples
-
-### Example 1: Create Accounts via TUI
+Run the unit test suite (covers crypto, account logic, transactions, CA, tracing):
 
 ```bash
-./bin/app -tui
-# Press 'c' to create accounts
-# Press 't' to transfer between accounts
-# Press 'q' to quit
+make test
+# or
+go test ./...
 ```
 
-### Example 2: LLM + Human Interaction
+Run with race detector:
 
 ```bash
-# Terminal 1: Start server with MCP and TUI
-./bin/app -mcp localhost:3000 -tui
-
-# Terminal 2: LLM creates an account via MCP
-curl -X POST http://localhost:3000/ \
-  -H "Mcp-Session-Id: <SESSION_ID>" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_account","arguments":{"balance":1000}}}'
-
-# Terminal 1: See the account appear in TUI in real-time
+go test -race ./...
 ```
 
-### Example 3: Distributed Node Simulation
+Run with coverage report:
 
 ```bash
-# Create 10 virtual apps to simulate a distributed network
-./bin/app -rest 5 -grpc 5
+make test-coverage
+# Opens coverage.html
+```
 
-# Each virtual app gets a unique 160-bit ScalegraphId
-# All share the same blockchain state via the central server
+## Integration Tests and Benchmarks (testclient)
+
+The `testclient` connects to a running ConnectRPC server and supports four modes. Start the server first:
+
+```bash
+./bin/app -grpc 1 -expose-admin
+```
+
+> **`-expose-admin` is required.** The testclient and benchmarks use the unauthenticated `AdminService/CreateAccount` and `AdminService/Mint` gRPC endpoints to set up test accounts and fund them before running tests. Without this flag, the `AdminService` is not registered and account creation will fail, blocking all modes.
+
+### `endpoints` — Functional Endpoint Tests
+
+Validates every ConnectRPC endpoint with real signed requests. Each test is run in sequence, with dependent tests skipped if a prerequisite fails.
+
+```bash
+./bin/testclient -mode endpoints -addr localhost:50051
+# or
+make test-endpoints
+```
+
+**Tests performed:**
+
+| Test | What it does |
+|------|--------------|
+| CreateAccount | Creates two test accounts via `AdminService/CreateAccount` |
+| Mint | Mints currency into an account via `AdminService/Mint` |
+| Transfer | Transfers currency between accounts via `CurrencyService/Transfer` |
+| MintToken + Subscribe | Mints a token and verifies the `EVENT_TYPE_MINT_TOKEN` event is received on the account's event stream |
+| AuthorizeTokenTransfer | Receiver authorizes an incoming token transfer via `TokenService/AuthorizeTokenTransfer` |
+| TransferToken | Completes the authorized token transfer via `TokenService/TransferToken` |
+| UnauthorizeTokenTransfer | Revokes a pending transfer authorization via `TokenService/UnauthorizeTokenTransfer` |
+| BurnToken | Mints a fresh token then burns it via `TokenService/BurnToken` |
+| ClawbackToken | Mints a token with clawback authority, then claws it back via `TokenService/ClawbackToken` |
+| LookupToken | Looks up a token on its owner via `TokenService/LookupToken` |
+| Duplicate Subscribe | Verifies a second subscription from the same account is rejected with `AlreadyExists` |
+
+---
+
+### `streams` — Event Streaming Scalability Test
+
+Measures how many concurrent event streams the server can sustain and validates event delivery under load.
+
+```bash
+./bin/testclient -mode streams -addr localhost:50051 \
+  -max-streams 2000 \
+  -step 1000 \
+  -fanout=true \
+  -timeout 120s
+# or
+make test-streams
+```
+
+**Phase 1 — Incremental load ramp-up:**
+Creates subscriber accounts and opens `EventService/Subscribe` streams in steps (default: 1000 per step). Continues until reaching `-max-streams` or until a step fails. Reports the breaking point (the stream count at which the first failure occurs).
+
+**Phase 2 — Event delivery validation:**
+Creates a new account, mints a token on it, and measures whether the `EVENT_TYPE_MINT_TOKEN` event arrives on that account's stream. Reports delivery success and latency.
+
+**Phase 3 — Fanout test** (requires `-fanout=true`):
+Concurrently mints a token on every subscriber account and measures how many streams receive their own `EVENT_TYPE_MINT_TOKEN` event. Reports P50 and P95 event delivery latency across all subscribers.
+
+---
+
+### `bench` — Throughput Benchmark
+
+Measures sustained throughput and latency under concurrent load. Supports a warmup phase (results discarded) followed by a measurement phase.
+
+```bash
+./bin/testclient -mode bench -addr localhost:50051 \
+  -workload mixed \
+  -workers 10 \
+  -duration 10s \
+  -warmup 2s
+# or
+make bench-grpc
+```
+
+**Metrics reported:**
+
+| Metric | Description |
+|--------|-------------|
+| Ops attempted/s | High-level operation throughput |
+| Ops succeeded/s | Successful operation rate |
+| Ops failed | Count of failed operations |
+| Tx attempted/s | Individual RPC throughput |
+| Tx succeeded/s | Successful RPC rate |
+| Tx failed | Count of failed RPCs |
+| Op p50 / p95 (ms) | Operation latency percentiles |
+| Tx p50 / p95 (ms) | RPC latency percentiles |
+
+**Workloads:**
+
+**`currency`** — Pure currency transfer throughput
+- 1 op = 1 `CurrencyService/Transfer` RPC
+- N workers each repeatedly transfer between a pre-funded sender/receiver pair
+- Post-benchmark verification checks final account balances for consistency
+
+**`token`** — Token lifecycle throughput
+- 1 op = `MintToken` + `AuthorizeTokenTransfer` + `TransferToken` (3 RPCs)
+- N workers each repeatedly execute the full token mint-authorize-transfer cycle
+- Pre-allocates sender/receiver pairs with sufficient balance for MBR (minimum balance requirement)
+- Post-benchmark verification queries ownership of transferred tokens
+
+**`mixed`** — Combined currency and token workload
+- Runs currency and token workers concurrently
+- Reports separate results for each workload type, plus combined totals
+- Reflects realistic multi-operation load patterns
+
+---
+
+### `all` — Endpoints + Streams
+
+Runs `endpoints` followed by `streams`:
+
+```bash
+./bin/testclient -mode all -addr localhost:50051
+```
+
+---
+
+### testclient Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-mode` | — | `endpoints`, `streams`, `bench`, or `all` |
+| `-addr` | `localhost:50051` | ConnectRPC server address |
+| `-base-dir` | `.` | Base directory for cert/key files |
+| `-timeout` | `60s` | Timeout for endpoints/streams modes |
+| `-max-streams` | `2000` | Maximum streams to open in streams mode |
+| `-step` | `1000` | Stream count increment per step |
+| `-fanout` | `true` | Enable fanout test in streams mode |
+| `-workload` | `mixed` | Benchmark workload: `currency`, `token`, or `mixed` |
+| `-workers` | `10` | Number of concurrent benchmark workers |
+| `-duration` | `10s` | Benchmark measurement duration |
+| `-warmup` | `2s` | Benchmark warmup duration (results discarded) |
+
+## Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make build` | Build `bin/app` and `bin/testclient` |
+| `make run` | Build and run the server in headless mode |
+| `make run-grpc` | Build and run the server with 1 gRPC virtual app (no `-expose-admin`; use manually for testclient/bench) |
+| `make test` | Run unit tests |
+| `make test-coverage` | Run unit tests with HTML coverage report |
+| `make test-endpoints` | Run testclient endpoint tests (requires running server) |
+| `make test-streams` | Run testclient stream load test (requires running server) |
+| `make test-grpc` | Run both endpoint and stream tests |
+| `make bench-grpc` | Run testclient benchmark (requires running server) |
+| `make proto` | Generate protobuf code via `buf generate` |
+| `make swagger` | Generate Swagger/OpenAPI docs |
+| `make deps` | Download dependencies and install build tools |
+| `make fmt` | Format code |
+| `make lint` | Run golangci-lint |
+| `make clean` | Remove build artifacts and coverage files |
+
+## Code Structure
+
+```
+sg-emulator/
+├── cmd/
+│   ├── app/               # Server entry point
+│   └── testclient/        # Integration test and benchmark client
+│       ├── main.go        # Mode dispatcher and flags
+│       ├── endpoints.go   # Functional endpoint tests
+│       ├── streams.go     # Event streaming scalability test
+│       ├── bench.go       # Throughput benchmark
+│       └── helper.go      # Signing helpers and client setup
+├── internal/
+│   ├── scalegraph/        # Business logic (accounts, transactions, blockchain)
+│   ├── server/            # Core server, event builder, client registry
+│   ├── transport/
+│   │   ├── connect/       # ConnectRPC transport
+│   │   ├── rest/          # REST transport (chi router + Swagger)
+│   │   ├── tui/           # Terminal UI transport
+│   │   └── mcp/           # MCP transport (HTTP/SSE)
+│   ├── crypto/            # Ed25519 key generation and signing
+│   ├── ca/                # Certificate Authority for mTLS
+│   └── trace/             # Distributed tracing context
+├── proto/                 # Protobuf definitions
+│   ├── admin/v1/          # AdminService (CreateAccount, Mint)
+│   ├── account/v1/        # AccountService (GetAccount)
+│   ├── currency/v1/       # CurrencyService (Transfer)
+│   ├── token/v1/          # TokenService (Mint, Transfer, Burn, Clawback, ...)
+│   ├── event/v1/          # EventService (Subscribe)
+│   └── common/v1/         # Shared types (Signature)
+├── gen/                   # Generated protobuf code (gitignored, run `make proto`)
+├── buf.yaml               # Buf module config
+├── buf.gen.yaml           # Buf code generation config
+└── Makefile               # Build targets
 ```
 
 ## Architecture Highlights
 
-- **3-Layer Design**: Business logic → Infrastructure → Transport
-- **Channel-Based Communication**: All components communicate via Go channels
-- **Concurrent by Design**: Each virtual app runs in its own goroutine
-- **XOR Distance Routing**: Uses 160-bit identifiers for Kademlia-style DHT routing
-- **Multiple Transports per App**: Virtual apps can have multiple transports simultaneously
+- **3-Layer Design**: Business logic (`scalegraph`) → Infrastructure (`server`) → Transport (`connect`, `rest`, `tui`, `mcp`)
+- **Channel-Based Communication**: All inter-component messaging uses Go channels; no shared mutable state across layers
+- **Ed25519 Signing**: Every mutating RPC requires a cryptographic signature from the account owner
+- **Event Streaming**: Each account maintains a server-streaming subscription channel; events are routed per account
+- **Virtual Apps**: Multiple independent app instances share one blockchain state via the central server, each with a unique 160-bit ScalegraphId for DHT-style routing
 
 ## License
 
-See LICENSE file for details
+See LICENSE file for details.
 
 ## Contact
 
