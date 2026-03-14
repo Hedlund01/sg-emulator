@@ -3,6 +3,7 @@ package grpc
 import (
 	"encoding/base64"
 
+	accountv1 "sg-emulator/gen/account/v1"
 	commonv1 "sg-emulator/gen/common/v1"
 	currencyv1 "sg-emulator/gen/currency/v1"
 	eventv1 "sg-emulator/gen/event/v1"
@@ -169,6 +170,20 @@ func convertClawbackTokenEnvelope(req *tokenv1.ClawbackTokenRequest) (*crypto.Si
 			To:      env.GetPayload().GetTo(),
 			TokenID: env.GetPayload().GetTokenId(),
 		},
+		Signature:   sig,
+		Certificate: env.GetCertificate(),
+	}, nil
+}
+
+// convertGetAccountEnvelope converts a proto GetAccountRequest into a domain SignedEnvelope.
+func convertGetAccountEnvelope(req *accountv1.GetAccountRequest) (*crypto.SignedEnvelope[*crypto.GetAccountPayload], error) {
+	env := req.GetSignedEnvelope()
+	sig, err := convertSignature(env.GetSignature())
+	if err != nil {
+		return nil, err
+	}
+	return &crypto.SignedEnvelope[*crypto.GetAccountPayload]{
+		Payload:     &crypto.GetAccountPayload{AccountID: env.GetPayload().GetAccountId()},
 		Signature:   sig,
 		Certificate: env.GetCertificate(),
 	}, nil

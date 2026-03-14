@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package account.v1;
+
+import "buf/validate/validate.proto";
+import "common/v1/common.proto";
+
+option go_package = "sg-emulator/gen/account/v1;accountv1";
+
+message GetAccountPayload {
+  string account_id = 1 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SignedGetAccountEnvelope {
+  GetAccountPayload   payload     = 1 [(buf.validate.field).required = true];
+  common.v1.Signature signature   = 2 [(buf.validate.field).required = true];
+  string              certificate = 3 [(buf.validate.field).required = true];
+}
+
+message GetAccountRequest {
+  SignedGetAccountEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message GetAccountResponse {
+  bool   success           = 1;
+  string error_message     = 2;
+  double balance           = 3;
+  double mbr               = 4;
+  uint64 outgoing_tx_count = 5;
+}
+
+service AccountService {
+  rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
+}

@@ -47,17 +47,24 @@ type tokenTransferRecord struct {
 	receiver *accountCreds
 }
 
+// currencyTransferRecord records a successful currency transfer during the measured phase.
+type currencyTransferRecord struct {
+	receiver *accountCreds
+	amount   float64
+}
+
 // workerResult is returned by each benchmark worker goroutine.
 type workerResult struct {
-	opLats      []time.Duration
-	txLats      []time.Duration
-	opAttempted int64
-	opSucceeded int64
-	opFailed    int64
-	txAttempted int64
-	txSucceeded int64
-	txFailed    int64
-	transfers   []tokenTransferRecord
+	opLats           []time.Duration
+	txLats           []time.Duration
+	opAttempted      int64
+	opSucceeded      int64
+	opFailed         int64
+	txAttempted      int64
+	txSucceeded      int64
+	txFailed         int64
+	transfers        []tokenTransferRecord
+	currencyTransfers []currencyTransferRecord
 }
 
 func (r *workerResult) recordOpAttempt(measured bool) {
@@ -109,6 +116,7 @@ func mergeWorkerResult(dst *workerResult, src workerResult) {
 	dst.txSucceeded += src.txSucceeded
 	dst.txFailed += src.txFailed
 	dst.transfers = append(dst.transfers, src.transfers...)
+	dst.currencyTransfers = append(dst.currencyTransfers, src.currencyTransfers...)
 }
 
 // setupCurrencyAccounts pre-creates n sender/receiver pairs for the currency workload.
@@ -157,6 +165,10 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 	case "currency":
 		res := runWorkerPool(ctx, cfg, bcfg, "currency", bcfg.workers)
 		printBenchResults(bcfg, "currency", bcfg.workers, "1 op = Transfer", "1 tx = Transfer RPC", res)
+		if len(res.currencyTransfers) > 0 {
+			confirmed, failed := verifyCurrencyTransfers(ctx, cfg, res.currencyTransfers)
+			printCurrencyVerificationStats(confirmed, failed)
+		}
 	case "token":
 		res := runWorkerPool(ctx, cfg, bcfg, "token", bcfg.workers)
 		printBenchResults(bcfg, "token", bcfg.workers, "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", "1 tx = one token RPC (MintToken, AuthorizeTokenTransfer, or TransferToken)", res)
@@ -193,6 +205,10 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 		wg.Wait()
 
 		printBenchResults(bcfg, "mixed/currency", half, "1 op = Transfer", "1 tx = Transfer RPC", cRes)
+		if len(cRes.currencyTransfers) > 0 {
+			confirmed, failed := verifyCurrencyTransfers(ctx, cfg, cRes.currencyTransfers)
+			printCurrencyVerificationStats(confirmed, failed)
+		}
 		fmt.Println()
 		printBenchResults(bcfg, "mixed/token", rest, "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", "1 tx = one token RPC (MintToken, AuthorizeTokenTransfer, or TransferToken)", tRes)
 		if len(tRes.transfers) > 0 {
@@ -201,10 +217,19 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 		}
 		fmt.Println()
 
+		cCombined, tCombined := runMixedWorkerPool(ctx, cfg, bcfg, half, rest)
 		var combined workerResult
-		mergeWorkerResult(&combined, cRes)
-		mergeWorkerResult(&combined, tRes)
+		mergeWorkerResult(&combined, cCombined)
+		mergeWorkerResult(&combined, tCombined)
 		printBenchResults(bcfg, "mixed/combined", bcfg.workers, "1 op = one currency op or one token op", "1 tx = one underlying RPC from either workload", combined)
+		if len(cCombined.currencyTransfers) > 0 {
+			confirmed, failed := verifyCurrencyTransfers(ctx, cfg, cCombined.currencyTransfers)
+			printCurrencyVerificationStats(confirmed, failed)
+		}
+		if len(tCombined.transfers) > 0 {
+			confirmed, failed := verifyTokenTransfers(ctx, cfg, tCombined.transfers)
+			printVerificationStats(confirmed, failed)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown workload %q — use currency, token, or mixed\n", bcfg.workload)
 	}
@@ -253,6 +278,54 @@ func runWorkerPool(ctx context.Context, cfg *config, bcfg *benchConfig, workload
 	}
 
 	return total
+}
+
+// runMixedWorkerPool sets up fresh accounts for both workload types and launches
+// all workers simultaneously, returning separate results for currency and token.
+func runMixedWorkerPool(ctx context.Context, cfg *config, bcfg *benchConfig, numCurrency, numToken int) (cRes, tRes workerResult) {
+	setupC := newClients(cfg.addr)
+
+	currencyPairs, err := setupCurrencyAccounts(ctx, setupC, numCurrency)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mixed account setup (currency) failed: %v\n", err)
+		return
+	}
+	tokenPairs, err := setupTokenAccounts(ctx, setupC, numToken)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mixed account setup (token) failed: %v\n", err)
+		return
+	}
+
+	cResults := make([]workerResult, numCurrency)
+	tResults := make([]workerResult, numToken)
+	var wg sync.WaitGroup
+
+	for i := 0; i < numCurrency; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			c := newClients(cfg.addr)
+			cResults[idx] = runCurrencyWorker(ctx, c, bcfg, currencyPairs[idx])
+		}(i)
+	}
+	for i := 0; i < numToken; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			c := newClients(cfg.addr)
+			tResults[idx] = runTokenWorker(ctx, c, bcfg, tokenPairs[idx])
+		}(i)
+	}
+
+	wg.Wait()
+
+	for _, r := range cResults {
+		mergeWorkerResult(&cRes, r)
+	}
+	for _, r := range tResults {
+		mergeWorkerResult(&tRes, r)
+	}
+	return cRes, tRes
 }
 
 // runWorker executes a single benchmark worker and returns its latency samples.
@@ -310,6 +383,13 @@ func runCurrencyWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair 
 			continue
 		}
 		res.recordTxSuccess(measured, txElapsed)
+
+		if measured {
+			res.currencyTransfers = append(res.currencyTransfers, currencyTransferRecord{
+				receiver: receiver,
+				amount:   0.01,
+			})
+		}
 
 		res.recordOpSuccess(measured, time.Since(opStart))
 	}
@@ -428,6 +508,58 @@ func verifyTokenTransfers(ctx context.Context, cfg *config, transfers []tokenTra
 func printVerificationStats(confirmed, failed int) {
 	fmt.Println()
 	fmt.Println("=== Token Transfer Verification ===")
+	fmt.Printf("Confirmed transfers : %s\n", formatInt(confirmed))
+	fmt.Printf("Failed / missing    : %s\n", formatInt(failed))
+}
+
+// verifyCurrencyTransfers checks on-chain balances for each recorded currency transfer.
+func verifyCurrencyTransfers(ctx context.Context, cfg *config, transfers []currencyTransferRecord) (confirmed, failed int) {
+	c := newClients(cfg.addr)
+
+	type entry struct {
+		creds    *accountCreds
+		expected float64
+	}
+	byReceiver := map[string]*entry{}
+	for _, rec := range transfers {
+		if e, ok := byReceiver[rec.receiver.id]; ok {
+			e.expected += rec.amount
+		} else {
+			byReceiver[rec.receiver.id] = &entry{creds: rec.receiver, expected: rec.amount}
+		}
+	}
+
+	for _, e := range byReceiver {
+		req, err := signGetAccount(e.creds)
+		if err != nil {
+			failed += countTransfers(transfers, e.creds.id)
+			continue
+		}
+		resp, err := c.account.GetAccount(ctx, req)
+		n := countTransfers(transfers, e.creds.id)
+		if err != nil || !resp.GetSuccess() || resp.GetBalance() < e.expected {
+			failed += n
+		} else {
+			confirmed += n
+		}
+	}
+	return confirmed, failed
+}
+
+func countTransfers(transfers []currencyTransferRecord, receiverID string) int {
+	n := 0
+	for _, r := range transfers {
+		if r.receiver.id == receiverID {
+			n++
+		}
+	}
+	return n
+}
+
+// printCurrencyVerificationStats prints a summary of post-benchmark currency transfer verification.
+func printCurrencyVerificationStats(confirmed, failed int) {
+	fmt.Println()
+	fmt.Println("=== Currency Transfer Verification ===")
 	fmt.Printf("Confirmed transfers : %s\n", formatInt(confirmed))
 	fmt.Printf("Failed / missing    : %s\n", formatInt(failed))
 }

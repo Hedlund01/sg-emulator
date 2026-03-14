@@ -16,6 +16,8 @@ import (
 
 	adminv1 "sg-emulator/gen/admin/v1"
 	"sg-emulator/gen/admin/v1/adminv1connect"
+	accountv1 "sg-emulator/gen/account/v1"
+	"sg-emulator/gen/account/v1/accountv1connect"
 	commonv1 "sg-emulator/gen/common/v1"
 	currencyv1 "sg-emulator/gen/currency/v1"
 	"sg-emulator/gen/currency/v1/currencyv1connect"
@@ -59,6 +61,7 @@ type clients struct {
 	token    tokenv1connect.TokenServiceClient
 	event    eventv1connect.EventServiceClient
 	admin    adminv1connect.AdminServiceClient
+	account  accountv1connect.AccountServiceClient
 }
 
 // newClients constructs all ConnectRPC clients pointing at addr (host:port).
@@ -71,6 +74,7 @@ func newClients(addr string) *clients {
 		token:    tokenv1connect.NewTokenServiceClient(plain, base),
 		event:    eventv1connect.NewEventServiceClient(h2c, base),
 		admin:    adminv1connect.NewAdminServiceClient(plain, base),
+		account:  accountv1connect.NewAccountServiceClient(plain, base),
 	}
 }
 
@@ -196,6 +200,22 @@ func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string, 
 			Certificate: owner.certPEM,
 		},
 	}, sig.Value, nil
+}
+
+// signGetAccount builds a signed GetAccountRequest.
+func signGetAccount(account *accountCreds) (*accountv1.GetAccountRequest, error) {
+	payload := &crypto.GetAccountPayload{AccountID: account.id}
+	sig, err := crypto.Sign(payload, account.privKey, account.id)
+	if err != nil {
+		return nil, err
+	}
+	return &accountv1.GetAccountRequest{
+		SignedEnvelope: &accountv1.SignedGetAccountEnvelope{
+			Payload:     &accountv1.GetAccountPayload{AccountId: account.id},
+			Signature:   toProtoSig(sig),
+			Certificate: account.certPEM,
+		},
+	}, nil
 }
 
 // signLookupToken builds a signed LookupTokenRequest.

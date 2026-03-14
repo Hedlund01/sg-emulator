@@ -13,6 +13,8 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
+	accountv1 "sg-emulator/gen/account/v1"
+	"sg-emulator/gen/account/v1/accountv1connect"
 	adminv1 "sg-emulator/gen/admin/v1"
 	"sg-emulator/gen/admin/v1/adminv1connect"
 	currencyv1 "sg-emulator/gen/currency/v1"
@@ -209,6 +211,38 @@ func (h *tokenHandler) ClawbackToken(ctx context.Context, req *tokenv1.ClawbackT
 		return &tokenv1.ClawbackTokenResponse{Success: false, ErrorMessage: err.Error()}, nil
 	}
 	return &tokenv1.ClawbackTokenResponse{Success: true}, nil
+}
+
+// accountHandler implements accountv1connect.AccountServiceHandler.
+type accountHandler struct {
+	accountv1connect.UnimplementedAccountServiceHandler
+	client *server.Client
+	logger *slog.Logger
+}
+
+func (h *accountHandler) GetAccount(ctx context.Context, req *accountv1.GetAccountRequest) (*accountv1.GetAccountResponse, error) {
+	envelope, err := convertGetAccountEnvelope(req)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	accountID, err := scalegraph.ScalegraphIdFromString(envelope.Payload.AccountID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	acc, err := h.client.GetAccount(ctx, accountID, envelope)
+	if err != nil {
+		h.logger.Error("GetAccount failed", "account_id", envelope.Payload.AccountID, "error", err)
+		return &accountv1.GetAccountResponse{Success: false, ErrorMessage: err.Error()}, nil
+	}
+
+	return &accountv1.GetAccountResponse{
+		Success:         true,
+		Balance:         acc.Balance(),
+		Mbr:             acc.MBR(),
+		OutgoingTxCount: acc.GetNonce(),
+	}, nil
 }
 
 // adminHandler implements adminv1connect.AdminServiceHandler.
@@ -423,6 +457,12 @@ func (t *Transport) Start(ctx context.Context) error {
 		},
 	)
 	mux.Handle(eventPath, eventHandler)
+
+	accountPath, accountH := accountv1connect.NewAccountServiceHandler(
+		&accountHandler{client: t.client, logger: t.logger},
+		connect.WithInterceptors(validationInterceptor(validator)),
+	)
+	mux.Handle(accountPath, accountH)
 
 	if t.exposeAdmin {
 		adminPath, adminH := adminv1connect.NewAdminServiceHandler(
