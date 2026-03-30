@@ -1,8 +1,9 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#dbeafe', 'primaryBorderColor': '#3b82f6', 'primaryTextColor': '#1e3a5f', 'lineColor': '#374151', 'textColor': '#111827', 'background': '#ffffff'}}}%%
 graph TB
     subgraph "Transport Layer"
         REST[REST Transport<br/>Port 8080+<br/>HTTP/Swagger]
-        GRPC[gRPC Transport<br/>Port 50051+<br/>Future]
-        MCP[MCP Transport<br/>Port 3000<br/>HTTP/SSE for LLMs]
+        CONNECTRPC[ConnectRPC Transport<br/>Configurable port<br/>HTTP/1.1 + HTTP/2]
+        MCP[MCP Transport<br/>Configurable port<br/>HTTP/SSE for LLMs]
         TUI[TUI Transport<br/>Terminal UI<br/>Bubble Tea]
     end
 
@@ -10,14 +11,17 @@ graph TB
         direction LR
         VA[VirtualApp ×N<br/>ID: ScalegraphId<br/>Multiple Transports]
         CLIENT[Client<br/>Request/Response<br/>Channels]
+        GOCHANNEL[GoChannel<br/>Watermill pub/sub<br/>Events per Account]
         VA -.->|uses| CLIENT
+        VA -->|owns| GOCHANNEL
     end
 
     subgraph "Server Layer"
         REGISTRY[Registry<br/>VirtualApp Management<br/>DHT Routing]
         REQCHAN[requestChan<br/>Buffered Channel<br/>Size: 1000]
         SERVER[Server<br/>Event Loop<br/>Request Processing]
-        CA[Certificate Authority<br/>Signature Verification]
+        CA[Certificate Authority<br/>ed25519 Keys<br/>Account Credentials]
+        VERIFIER[Verifier<br/>Cert Chain + Sig<br/>Timestamp Checks]
     end
 
     subgraph "App Layer - Business Logic"
@@ -26,33 +30,33 @@ graph TB
     end
 
     subgraph "Scalegraph Layer - Data Model"
-        ACC1[Account #1<br/>ID: ScalegraphId<br/>Balance<br/>PublicKey<br/>Certificate]
-        ACC2[Account #2<br/>ID: ScalegraphId<br/>Balance<br/>PublicKey<br/>Certificate]
-        ACC3[Account #N<br/>ID: ScalegraphId<br/>Balance<br/>PublicKey<br/>Certificate]
+        ACC1[Account #1<br/>ID / Balance / MBR<br/>outgoingTxCount / tokenStore]
+        ACC2[Account #2<br/>ID / Balance / MBR<br/>outgoingTxCount / tokenStore]
+        ACC3[Account #N<br/>ID / Balance / MBR<br/>outgoingTxCount / tokenStore]
 
-        BC1[Blockchain #1<br/>Linked List<br/>Transactions]
-        BC2[Blockchain #2<br/>Linked List<br/>Transactions]
-        BC3[Blockchain #N<br/>Linked List<br/>Transactions]
+        TOKEN[Token<br/>value / nonce<br/>signature / clawbackAddress]
 
-        TX1[Transactions<br/>From/To/Amount<br/>Immutable]
-        TX2[Transactions<br/>From/To/Amount<br/>Immutable]
-        TX3[Transactions<br/>From/To/Amount<br/>Immutable]
+        BC1[Blockchain #1<br/>Linked List of Blocks]
+        BC2[Blockchain #2<br/>Linked List of Blocks]
+        BC3[Blockchain #N<br/>Linked List of Blocks]
+
+        TX[ITransaction<br/>Transfer · Mint · Burn<br/>MintToken · TransferToken<br/>BurnToken · Clawback]
     end
 
     REST -->|attached to| VA
-    GRPC -->|attached to| VA
+    CONNECTRPC -->|attached to| VA
     MCP -->|attached to| VA
     TUI -->|attached to| VA
 
     CLIENT -->|sends Request| REQCHAN
-
     REQCHAN -->|processes| SERVER
     SERVER -->|manages| REGISTRY
-    SERVER -->|verifies with| CA
+    SERVER -->|uses| CA
+    CA -->|creates| VERIFIER
+    SERVER -.->|auto-verifies via| VERIFIER
     SERVER -.->|sends Response| CLIENT
-
+    SERVER -->|publishes events to| GOCHANNEL
     REGISTRY -->|tracks| VA
-
     SERVER -->|delegates to| APP
     APP -->|manages| ACCOUNTS
 
@@ -64,18 +68,33 @@ graph TB
     ACC2 -->|has| BC2
     ACC3 -->|has| BC3
 
-    BC1 -->|stores| TX1
-    BC2 -->|stores| TX2
-    BC3 -->|stores| TX3
+    ACC1 -.->|tokenStore| TOKEN
+    ACC2 -.->|tokenStore| TOKEN
+    ACC3 -.->|tokenStore| TOKEN
 
-    style REST fill:#e1f5ff
-    style GRPC fill:#e1f5ff
-    style MCP fill:#e1f5ff
-    style TUI fill:#e1f5ff
-    style VA fill:#fff4e1
-    style CLIENT fill:#fff4e1
-    style SERVER fill:#ffe1e1
-    style APP fill:#e1ffe1
-    style ACC1 fill:#f0e1ff
-    style ACC2 fill:#f0e1ff
-    style ACC3 fill:#f0e1ff
+    BC1 -->|stores| TX
+    BC2 -->|stores| TX
+    BC3 -->|stores| TX
+
+    style REST fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    style CONNECTRPC fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    style MCP fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    style TUI fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    style VA fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    style CLIENT fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    style GOCHANNEL fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    style SERVER fill:#fef3c7,stroke:#d97706,color:#78350f
+    style REGISTRY fill:#fef3c7,stroke:#d97706,color:#78350f
+    style REQCHAN fill:#fef3c7,stroke:#d97706,color:#78350f
+    style CA fill:#fef3c7,stroke:#d97706,color:#78350f
+    style VERIFIER fill:#fef3c7,stroke:#d97706,color:#78350f
+    style APP fill:#dcfce7,stroke:#16a34a,color:#14532d
+    style ACCOUNTS fill:#dcfce7,stroke:#16a34a,color:#14532d
+    style ACC1 fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    style ACC2 fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    style ACC3 fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    style TOKEN fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    style BC1 fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    style BC2 fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    style BC3 fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    style TX fill:#f3e8ff,stroke:#9333ea,color:#3b0764
