@@ -29,10 +29,23 @@ import (
 
 // benchConfig holds benchmark-specific configuration.
 type benchConfig struct {
-	workload string
-	workers  int
-	duration time.Duration
-	warmup   time.Duration
+	workload   string
+	workers    int
+	duration   time.Duration
+	warmup     time.Duration
+	iterations int
+}
+
+// benchSample holds the computed metrics from a single benchmark run for averaging.
+type benchSample struct {
+	opAttemptRate float64
+	opSuccessRate float64
+	txAttemptRate float64
+	txSuccessRate float64
+	opP50         time.Duration
+	opP95         time.Duration
+	txP50         time.Duration
+	txP95         time.Duration
 }
 
 // currencyAccountPair holds a pre-created sender/receiver pair for currency workloads.
@@ -177,51 +190,32 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 			printVerificationStats(confirmed, failed)
 		}
 	case "mixed":
-		half := bcfg.workers / 2
-		rest := bcfg.workers - half
-
-		var mu sync.Mutex
-		var cRes, tRes workerResult
-
-		var wg sync.WaitGroup
-		wg.Add(2)
-
-		go func() {
-			defer wg.Done()
-			res := runWorkerPool(ctx, cfg, bcfg, "currency", half)
-			mu.Lock()
-			cRes = res
-			mu.Unlock()
-		}()
-
-		go func() {
-			defer wg.Done()
-			res := runWorkerPool(ctx, cfg, bcfg, "token", rest)
-			mu.Lock()
-			tRes = res
-			mu.Unlock()
-		}()
-
-		wg.Wait()
-
-		printBenchResults(bcfg, "mixed/currency", half, "1 op = Transfer", "1 tx = Transfer RPC", cRes)
+		// 1. Independent currency baseline
+		cRes := runWorkerPool(ctx, cfg, bcfg, "currency", bcfg.workers)
+		printBenchResults(bcfg, "currency", bcfg.workers, "1 op = Transfer", "1 tx = Transfer RPC", cRes)
 		if len(cRes.currencyTransfers) > 0 {
 			confirmed, failed := verifyCurrencyTransfers(ctx, cfg, cRes.currencyTransfers)
 			printCurrencyVerificationStats(confirmed, failed)
 		}
 		fmt.Println()
-		printBenchResults(bcfg, "mixed/token", rest, "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", "1 tx = one token RPC (MintToken, AuthorizeTokenTransfer, or TransferToken)", tRes)
+
+		// 2. Independent token baseline
+		tRes := runWorkerPool(ctx, cfg, bcfg, "token", bcfg.workers)
+		printBenchResults(bcfg, "token", bcfg.workers, "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", "1 tx = one token RPC (MintToken, AuthorizeTokenTransfer, or TransferToken)", tRes)
 		if len(tRes.transfers) > 0 {
 			confirmed, failed := verifyTokenTransfers(ctx, cfg, tRes.transfers)
 			printVerificationStats(confirmed, failed)
 		}
 		fmt.Println()
 
+		// 3. Mixed parallel — both types simultaneously
+		half := bcfg.workers / 2
+		rest := bcfg.workers - half
 		cCombined, tCombined := runMixedWorkerPool(ctx, cfg, bcfg, half, rest)
 		var combined workerResult
 		mergeWorkerResult(&combined, cCombined)
 		mergeWorkerResult(&combined, tCombined)
-		printBenchResults(bcfg, "mixed/combined", bcfg.workers, "1 op = one currency op or one token op", "1 tx = one underlying RPC from either workload", combined)
+		printBenchResults(bcfg, "mixed", bcfg.workers, "1 op = one currency op or one token op", "1 tx = one underlying RPC from either workload", combined)
 		if len(cCombined.currencyTransfers) > 0 {
 			confirmed, failed := verifyCurrencyTransfers(ctx, cfg, cCombined.currencyTransfers)
 			printCurrencyVerificationStats(confirmed, failed)
@@ -230,6 +224,134 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 			confirmed, failed := verifyTokenTransfers(ctx, cfg, tCombined.transfers)
 			printVerificationStats(confirmed, failed)
 		}
+	default:
+		fmt.Fprintf(os.Stderr, "unknown workload %q — use currency, token, or mixed\n", bcfg.workload)
+	}
+}
+
+// sampleFromResult computes a benchSample from a workerResult.
+func sampleFromResult(bcfg *benchConfig, res workerResult) benchSample {
+	return benchSample{
+		opAttemptRate: float64(res.opAttempted) / bcfg.duration.Seconds(),
+		opSuccessRate: float64(res.opSucceeded) / bcfg.duration.Seconds(),
+		txAttemptRate: float64(res.txAttempted) / bcfg.duration.Seconds(),
+		txSuccessRate: float64(res.txSucceeded) / bcfg.duration.Seconds(),
+		opP50:         latPercentile(res.opLats, 0.50),
+		opP95:         latPercentile(res.opLats, 0.95),
+		txP50:         latPercentile(res.txLats, 0.50),
+		txP95:         latPercentile(res.txLats, 0.95),
+	}
+}
+
+// avgSamples computes the element-wise average of a slice of benchSamples.
+func avgSamples(samples []benchSample) benchSample {
+	n := float64(len(samples))
+	if n == 0 {
+		return benchSample{}
+	}
+	var sum benchSample
+	for _, s := range samples {
+		sum.opAttemptRate += s.opAttemptRate
+		sum.opSuccessRate += s.opSuccessRate
+		sum.txAttemptRate += s.txAttemptRate
+		sum.txSuccessRate += s.txSuccessRate
+		sum.opP50 += s.opP50
+		sum.opP95 += s.opP95
+		sum.txP50 += s.txP50
+		sum.txP95 += s.txP95
+	}
+	return benchSample{
+		opAttemptRate: sum.opAttemptRate / n,
+		opSuccessRate: sum.opSuccessRate / n,
+		txAttemptRate: sum.txAttemptRate / n,
+		txSuccessRate: sum.txSuccessRate / n,
+		opP50:         time.Duration(float64(sum.opP50) / n),
+		opP95:         time.Duration(float64(sum.opP95) / n),
+		txP50:         time.Duration(float64(sum.txP50) / n),
+		txP95:         time.Duration(float64(sum.txP95) / n),
+	}
+}
+
+// printAvgResults prints the averaged benchmark summary for a single workload phase.
+func printAvgResults(label string, avg benchSample) {
+	fmt.Printf("--- %s ---\n", label)
+	fmt.Printf("Avg Ops attempted/s : %.1f\n", avg.opAttemptRate)
+	fmt.Printf("Avg Ops succeeded/s : %.1f\n", avg.opSuccessRate)
+	fmt.Printf("Avg Tx attempted/s  : %.1f\n", avg.txAttemptRate)
+	fmt.Printf("Avg Tx succeeded/s  : %.1f\n", avg.txSuccessRate)
+	fmt.Printf("Avg Op p50 latency  : %.1f ms\n", durMs(avg.opP50))
+	fmt.Printf("Avg Op p95 latency  : %.1f ms\n", durMs(avg.opP95))
+	fmt.Printf("Avg Tx p50 latency  : %.1f ms\n", durMs(avg.txP50))
+	fmt.Printf("Avg Tx p95 latency  : %.1f ms\n", durMs(avg.txP95))
+}
+
+// RunBenchmarkAvg runs the benchmark multiple times and reports averaged metrics.
+func RunBenchmarkAvg(ctx context.Context, cfg *config, bcfg *benchConfig) {
+	n := bcfg.iterations
+
+	switch bcfg.workload {
+	case "currency":
+		samples := make([]benchSample, 0, n)
+		for i := 1; i <= n; i++ {
+			res := runWorkerPool(ctx, cfg, bcfg, "currency", bcfg.workers)
+			s := sampleFromResult(bcfg, res)
+			samples = append(samples, s)
+			fmt.Printf("[%d/%d] currency: %.1f ops/s, %.1f tx/s\n", i, n, s.opSuccessRate, s.txSuccessRate)
+		}
+		fmt.Printf("\n=== Average Benchmark Results (%d iterations, workload=currency, workers=%d, duration=%s) ===\n\n",
+			n, bcfg.workers, bcfg.duration)
+		printAvgResults("Currency", avgSamples(samples))
+
+	case "token":
+		samples := make([]benchSample, 0, n)
+		for i := 1; i <= n; i++ {
+			res := runWorkerPool(ctx, cfg, bcfg, "token", bcfg.workers)
+			s := sampleFromResult(bcfg, res)
+			samples = append(samples, s)
+			fmt.Printf("[%d/%d] token: %.1f ops/s, %.1f tx/s\n", i, n, s.opSuccessRate, s.txSuccessRate)
+		}
+		fmt.Printf("\n=== Average Benchmark Results (%d iterations, workload=token, workers=%d, duration=%s) ===\n\n",
+			n, bcfg.workers, bcfg.duration)
+		printAvgResults("Token", avgSamples(samples))
+
+	case "mixed":
+		currencySamples := make([]benchSample, 0, n)
+		tokenSamples := make([]benchSample, 0, n)
+		mixedSamples := make([]benchSample, 0, n)
+
+		for i := 1; i <= n; i++ {
+			// 1. Independent currency baseline
+			cRes := runWorkerPool(ctx, cfg, bcfg, "currency", bcfg.workers)
+			cs := sampleFromResult(bcfg, cRes)
+			currencySamples = append(currencySamples, cs)
+
+			// 2. Independent token baseline
+			tRes := runWorkerPool(ctx, cfg, bcfg, "token", bcfg.workers)
+			ts := sampleFromResult(bcfg, tRes)
+			tokenSamples = append(tokenSamples, ts)
+
+			// 3. Mixed parallel
+			half := bcfg.workers / 2
+			rest := bcfg.workers - half
+			cCombined, tCombined := runMixedWorkerPool(ctx, cfg, bcfg, half, rest)
+			var combined workerResult
+			mergeWorkerResult(&combined, cCombined)
+			mergeWorkerResult(&combined, tCombined)
+			ms := sampleFromResult(bcfg, combined)
+			mixedSamples = append(mixedSamples, ms)
+
+			fmt.Printf("[%d/%d] currency: %.1f ops/s | token: %.1f ops/s | mixed: %.1f ops/s\n",
+				i, n, cs.opSuccessRate, ts.opSuccessRate, ms.opSuccessRate)
+		}
+
+		fmt.Printf("\n=== Average Benchmark Results (%d iterations, workload=mixed, workers=%d, duration=%s) ===\n\n",
+			n, bcfg.workers, bcfg.duration)
+		printAvgResults("Currency Baseline", avgSamples(currencySamples))
+		fmt.Println()
+		printAvgResults("Token Baseline", avgSamples(tokenSamples))
+		fmt.Println()
+		printAvgResults("Mixed (parallel)", avgSamples(mixedSamples))
+
 	default:
 		fmt.Fprintf(os.Stderr, "unknown workload %q — use currency, token, or mixed\n", bcfg.workload)
 	}

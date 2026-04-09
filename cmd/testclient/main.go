@@ -32,10 +32,11 @@ type config struct {
 	fanout     bool
 	timeout    time.Duration
 	// bench flags
-	benchWorkload string
-	benchWorkers  int
-	benchDuration time.Duration
-	benchWarmup   time.Duration
+	benchWorkload   string
+	benchWorkers    int
+	benchDuration   time.Duration
+	benchWarmup     time.Duration
+	benchIterations int
 }
 
 func main() {
@@ -49,18 +50,28 @@ func main() {
 	flag.BoolVar(&cfg.fanout, "fanout", false, "After connecting all streams, mint a token on every subscriber and measure delivery")
 	flag.DurationVar(&cfg.timeout, "timeout", 120*time.Second, "Overall test timeout (0 = no timeout)")
 	flag.StringVar(&cfg.benchWorkload, "workload", "currency", `Benchmark workload: "currency", "token", or "mixed"`)
-	flag.IntVar(&cfg.benchWorkers, "workers", 10, "Number of concurrent benchmark workers")
+	flag.IntVar(&cfg.benchWorkers, "workers", 10, "Number of concurrent workers per workload (mixed mode runs this count for each workload independently)")
 	flag.DurationVar(&cfg.benchDuration, "duration", 10*time.Second, "Benchmark measurement window")
 	flag.DurationVar(&cfg.benchWarmup, "warmup", 2*time.Second, "Benchmark warmup duration (results discarded)")
+	flag.IntVar(&cfg.benchIterations, "iterations", 1, "Number of benchmark iterations (>1 reports averages)")
 	flag.Parse()
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	ctx := sigCtx
-	if cfg.timeout > 0 {
+	timeout := cfg.timeout
+	// For multi-iteration benchmarks, compute a sufficient timeout:
+	// each iteration runs up to 3 phases of (warmup + duration) plus setup overhead.
+	if cfg.mode == "bench" && cfg.benchIterations > 1 {
+		phases := 3 // mixed runs currency, token, and mixed phases
+		perIteration := time.Duration(phases) * (cfg.benchWarmup + cfg.benchDuration)
+		setupOverhead := 10 * time.Second // account creation per iteration
+		timeout = time.Duration(cfg.benchIterations) * (perIteration + setupOverhead)
+	}
+	if timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(sigCtx, cfg.timeout)
+		ctx, cancel = context.WithTimeout(sigCtx, timeout)
 		defer cancel()
 	}
 
@@ -108,12 +119,17 @@ func runEndpoints(ctx context.Context, cfg *config) int {
 
 func runBench(ctx context.Context, cfg *config) {
 	bcfg := &benchConfig{
-		workload: cfg.benchWorkload,
-		workers:  cfg.benchWorkers,
-		duration: cfg.benchDuration,
-		warmup:   cfg.benchWarmup,
+		workload:   cfg.benchWorkload,
+		workers:    cfg.benchWorkers,
+		duration:   cfg.benchDuration,
+		warmup:     cfg.benchWarmup,
+		iterations: cfg.benchIterations,
 	}
-	RunBenchmark(ctx, cfg, bcfg)
+	if bcfg.iterations > 1 {
+		RunBenchmarkAvg(ctx, cfg, bcfg)
+	} else {
+		RunBenchmark(ctx, cfg, bcfg)
+	}
 }
 
 func runStreams(ctx context.Context, cfg *config) {

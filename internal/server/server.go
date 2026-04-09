@@ -302,12 +302,15 @@ func (s *Server) run() {
 				return
 			}
 			resp := s.handleRequest(req)
-			// Send response back to client (non-blocking to avoid deadlock)
-			select {
-			case req.ResponseChan <- resp:
-			default:
-				// Response channel full or closed, skip
-			}
+			// Send response back to client. The client may have timed out
+			// and closed ResponseChan, so we recover from the panic.
+			func() {
+				defer func() { recover() }()
+				select {
+				case req.ResponseChan <- resp:
+				default:
+				}
+			}()
 		case <-s.ctx.Done():
 			// Drain remaining requests so clients don't hang
 			s.drainRequests()
@@ -329,10 +332,13 @@ func (s *Server) drainRequests() {
 				ID:    req.ID,
 				Error: fmt.Errorf("server shutting down"),
 			}
-			select {
-			case req.ResponseChan <- resp:
-			default:
-			}
+			func() {
+				defer func() { recover() }()
+				select {
+				case req.ResponseChan <- resp:
+				default:
+				}
+			}()
 		default:
 			return
 		}

@@ -18,7 +18,7 @@ BINARY_DIR=bin
 MAIN_PACKAGE=./cmd/app
 TESTCLIENT_PACKAGE=./cmd/testclient
 
-.PHONY: all build run test test-coverage clean deps fmt lint proto swagger rename-module help test-endpoints test-streams test-grpc bench-grpc run-grpc
+.PHONY: all build run test test-coverage clean deps fmt lint proto swagger rename-module help test-endpoints test-streams test-grpc bench-grpc bench-grpc-avg run-grpc
 
 # Default target
 all: clean deps fmt swagger test build
@@ -47,6 +47,14 @@ bench-grpc:
 		-workload $(BENCH_WORKLOAD) -workers $(BENCH_WORKERS) \
 		-duration $(BENCH_DURATION) -warmup $(BENCH_WARMUP)
 
+# Run throughput benchmark N times and report averages (requires a running server)
+bench-grpc-avg:
+	@echo "Running $(BENCH_ITERATIONS) benchmark iterations against $(GRPC_ADDR)..."
+	$(BINARY_DIR)/$(TESTCLIENT_NAME) -mode bench -addr $(GRPC_ADDR) -base-dir . \
+		-workload $(BENCH_WORKLOAD) -workers $(BENCH_WORKERS) \
+		-duration $(BENCH_DURATION) -warmup $(BENCH_WARMUP) \
+		-iterations $(BENCH_ITERATIONS)
+
 # Run both endpoint tests and stream load test
 test-grpc: test-endpoints test-streams
 
@@ -60,9 +68,10 @@ BENCH_WORKLOAD ?= mixed
 BENCH_WORKERS  ?= 10
 BENCH_DURATION ?= 10s
 BENCH_WARMUP   ?= 2s
+BENCH_ITERATIONS ?= 10
 
 # Build the application
-build:
+build: proto
 	@echo "Building..."
 	@mkdir -p $(BINARY_DIR)
 	$(GOBUILD) -o $(BINARY_DIR)/$(BINARY_NAME) $(MAIN_PACKAGE)
@@ -108,7 +117,7 @@ deps:
 	$(GOCMD) install github.com/vektra/mockery/v3@v3.6.3
 	$(GOCMD) install github.com/swaggo/swag/cmd/swag@latest
 	$(GOCMD) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	$(GOCMD) install buf.build/cmd/buf@latest
+	$(GOCMD) install github.com/bufbuild/buf/cmd/buf@latest
 	@echo "Dependencies ready"
 
 # Format code
