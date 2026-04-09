@@ -37,6 +37,7 @@ type config struct {
 	benchDuration   time.Duration
 	benchWarmup     time.Duration
 	benchIterations int
+	benchExport     string
 }
 
 func main() {
@@ -54,6 +55,7 @@ func main() {
 	flag.DurationVar(&cfg.benchDuration, "duration", 10*time.Second, "Benchmark measurement window")
 	flag.DurationVar(&cfg.benchWarmup, "warmup", 2*time.Second, "Benchmark warmup duration (results discarded)")
 	flag.IntVar(&cfg.benchIterations, "iterations", 1, "Number of benchmark iterations (>1 reports averages)")
+	flag.StringVar(&cfg.benchExport, "export", "", `Path to append benchmark results as CSV rows (format: index, "Label", tx/s, p50ms, p95ms)`)
 	flag.Parse()
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -124,6 +126,7 @@ func runBench(ctx context.Context, cfg *config) {
 		duration:   cfg.benchDuration,
 		warmup:     cfg.benchWarmup,
 		iterations: cfg.benchIterations,
+		export:     cfg.benchExport,
 	}
 	if bcfg.iterations > 1 {
 		RunBenchmarkAvg(ctx, cfg, bcfg)

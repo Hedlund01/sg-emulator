@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -34,6 +36,7 @@ type benchConfig struct {
 	duration   time.Duration
 	warmup     time.Duration
 	iterations int
+	export     string
 }
 
 // benchSample holds the computed metrics from a single benchmark run for averaging.
@@ -174,10 +177,13 @@ func setupTokenAccounts(ctx context.Context, c *clients, n int) ([]tokenAccountP
 
 // RunBenchmark runs the throughput benchmark for the configured workload.
 func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
+	runIdx := nextRunIndex(bcfg.export)
+
 	switch bcfg.workload {
 	case "currency":
 		res := runWorkerPool(ctx, cfg, bcfg, "currency", bcfg.workers)
 		printBenchResults(bcfg, "currency", bcfg.workers, "1 op = Transfer", "1 tx = Transfer RPC", res)
+		appendBenchCSV(bcfg.export, runIdx, "Currency", sampleFromResult(bcfg, res))
 		if len(res.currencyTransfers) > 0 {
 			confirmed, failed := verifyCurrencyTransfers(ctx, cfg, res.currencyTransfers)
 			printCurrencyVerificationStats(confirmed, failed)
@@ -185,6 +191,7 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 	case "token":
 		res := runWorkerPool(ctx, cfg, bcfg, "token", bcfg.workers)
 		printBenchResults(bcfg, "token", bcfg.workers, "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", "1 tx = one token RPC (MintToken, AuthorizeTokenTransfer, or TransferToken)", res)
+		appendBenchCSV(bcfg.export, runIdx, "Token", sampleFromResult(bcfg, res))
 		if len(res.transfers) > 0 {
 			confirmed, failed := verifyTokenTransfers(ctx, cfg, res.transfers)
 			printVerificationStats(confirmed, failed)
@@ -193,6 +200,7 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 		// 1. Independent currency baseline
 		cRes := runWorkerPool(ctx, cfg, bcfg, "currency", bcfg.workers)
 		printBenchResults(bcfg, "currency", bcfg.workers, "1 op = Transfer", "1 tx = Transfer RPC", cRes)
+		appendBenchCSV(bcfg.export, runIdx, "Currency", sampleFromResult(bcfg, cRes))
 		if len(cRes.currencyTransfers) > 0 {
 			confirmed, failed := verifyCurrencyTransfers(ctx, cfg, cRes.currencyTransfers)
 			printCurrencyVerificationStats(confirmed, failed)
@@ -202,6 +210,7 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 		// 2. Independent token baseline
 		tRes := runWorkerPool(ctx, cfg, bcfg, "token", bcfg.workers)
 		printBenchResults(bcfg, "token", bcfg.workers, "1 op = MintToken + AuthorizeTokenTransfer + TransferToken", "1 tx = one token RPC (MintToken, AuthorizeTokenTransfer, or TransferToken)", tRes)
+		appendBenchCSV(bcfg.export, runIdx, "Token", sampleFromResult(bcfg, tRes))
 		if len(tRes.transfers) > 0 {
 			confirmed, failed := verifyTokenTransfers(ctx, cfg, tRes.transfers)
 			printVerificationStats(confirmed, failed)
@@ -216,6 +225,7 @@ func RunBenchmark(ctx context.Context, cfg *config, bcfg *benchConfig) {
 		mergeWorkerResult(&combined, cCombined)
 		mergeWorkerResult(&combined, tCombined)
 		printBenchResults(bcfg, "mixed", bcfg.workers, "1 op = one currency op or one token op", "1 tx = one underlying RPC from either workload", combined)
+		appendBenchCSV(bcfg.export, runIdx, "Mixed", sampleFromResult(bcfg, combined))
 		if len(cCombined.currencyTransfers) > 0 {
 			confirmed, failed := verifyCurrencyTransfers(ctx, cfg, cCombined.currencyTransfers)
 			printCurrencyVerificationStats(confirmed, failed)
@@ -288,6 +298,7 @@ func printAvgResults(label string, avg benchSample) {
 // RunBenchmarkAvg runs the benchmark multiple times and reports averaged metrics.
 func RunBenchmarkAvg(ctx context.Context, cfg *config, bcfg *benchConfig) {
 	n := bcfg.iterations
+	runIdx := nextRunIndex(bcfg.export)
 
 	switch bcfg.workload {
 	case "currency":
@@ -300,7 +311,9 @@ func RunBenchmarkAvg(ctx context.Context, cfg *config, bcfg *benchConfig) {
 		}
 		fmt.Printf("\n=== Average Benchmark Results (%d iterations, workload=currency, workers=%d, duration=%s) ===\n\n",
 			n, bcfg.workers, bcfg.duration)
-		printAvgResults("Currency", avgSamples(samples))
+		avg := avgSamples(samples)
+		printAvgResults("Currency", avg)
+		appendBenchCSV(bcfg.export, runIdx, "Currency", avg)
 
 	case "token":
 		samples := make([]benchSample, 0, n)
@@ -312,7 +325,9 @@ func RunBenchmarkAvg(ctx context.Context, cfg *config, bcfg *benchConfig) {
 		}
 		fmt.Printf("\n=== Average Benchmark Results (%d iterations, workload=token, workers=%d, duration=%s) ===\n\n",
 			n, bcfg.workers, bcfg.duration)
-		printAvgResults("Token", avgSamples(samples))
+		avg := avgSamples(samples)
+		printAvgResults("Token", avg)
+		appendBenchCSV(bcfg.export, runIdx, "Token", avg)
 
 	case "mixed":
 		currencySamples := make([]benchSample, 0, n)
@@ -346,11 +361,17 @@ func RunBenchmarkAvg(ctx context.Context, cfg *config, bcfg *benchConfig) {
 
 		fmt.Printf("\n=== Average Benchmark Results (%d iterations, workload=mixed, workers=%d, duration=%s) ===\n\n",
 			n, bcfg.workers, bcfg.duration)
-		printAvgResults("Currency Baseline", avgSamples(currencySamples))
+		cAvg := avgSamples(currencySamples)
+		tAvg := avgSamples(tokenSamples)
+		mAvg := avgSamples(mixedSamples)
+		printAvgResults("Currency Baseline", cAvg)
 		fmt.Println()
-		printAvgResults("Token Baseline", avgSamples(tokenSamples))
+		printAvgResults("Token Baseline", tAvg)
 		fmt.Println()
-		printAvgResults("Mixed (parallel)", avgSamples(mixedSamples))
+		printAvgResults("Mixed (parallel)", mAvg)
+		appendBenchCSV(bcfg.export, runIdx, "Currency", cAvg)
+		appendBenchCSV(bcfg.export, runIdx, "Token", tAvg)
+		appendBenchCSV(bcfg.export, runIdx, "Mixed", mAvg)
 
 	default:
 		fmt.Fprintf(os.Stderr, "unknown workload %q — use currency, token, or mixed\n", bcfg.workload)
@@ -482,8 +503,8 @@ func runCurrencyWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair 
 			return res
 		}
 
-		opStart := time.Now()
-		measured := !opStart.Before(warmupEnd)
+		now := time.Now()
+		measured := !now.Before(warmupEnd)
 		res.recordOpAttempt(measured)
 
 		req, err := signTransfer(sender, receiver.id, 0.01, nonce)
@@ -513,7 +534,7 @@ func runCurrencyWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair 
 			})
 		}
 
-		res.recordOpSuccess(measured, time.Since(opStart))
+		res.recordOpSuccess(measured, txElapsed)
 	}
 
 	return res
@@ -535,8 +556,8 @@ func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair tok
 			return res
 		}
 
-		opStart := time.Now()
-		measured := !opStart.Before(warmupEnd)
+		now := time.Now()
+		measured := !now.Before(warmupEnd)
 		res.recordOpAttempt(measured)
 
 		mintSeq++
@@ -601,7 +622,7 @@ func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair tok
 			res.transfers = append(res.transfers, tokenTransferRecord{tokenID: tokenID, receiver: receiver})
 		}
 
-		res.recordOpSuccess(measured, time.Since(opStart))
+		res.recordOpSuccess(measured, mintElapsed+authElapsed+xferElapsed)
 	}
 
 	return res
@@ -736,6 +757,45 @@ func latPercentile(lats []time.Duration, p float64) time.Duration {
 // durMs converts a duration to milliseconds as a float64.
 func durMs(d time.Duration) float64 {
 	return float64(d) / float64(time.Millisecond)
+}
+
+// nextRunIndex returns the next 1-based run index for the export file.
+// It reads the last line of path, parses its leading integer, and returns that + 1.
+// Returns 1 if the file does not exist or is empty.
+func nextRunIndex(path string) int {
+	if path == "" {
+		return 1
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return 1
+	}
+	lines := bytes.Split(bytes.TrimRight(data, "\n"), []byte("\n"))
+	last := lines[len(lines)-1]
+	before, _, _ := bytes.Cut(last, []byte(","))
+	n, err := strconv.Atoi(string(bytes.TrimSpace(before)))
+	if err != nil {
+		return 1
+	}
+	return n + 1
+}
+
+// appendBenchCSV appends one CSV row to path in the format:
+//
+//	runIdx, "Label", txSucceededPerSec, txP50ms, txP95ms
+//
+// The file is created if it does not exist. No-ops when path is empty.
+func appendBenchCSV(path string, runIdx int, label string, s benchSample) {
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "export: failed to open %s: %v\n", path, err)
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%d, %q, %.1f, %.1f, %.1f\n", runIdx, label, s.txSuccessRate, durMs(s.txP50), durMs(s.txP95))
 }
 
 // formatInt formats an integer with space as thousands separator (e.g. 42381 → "42 381").

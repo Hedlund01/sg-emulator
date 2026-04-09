@@ -45,7 +45,7 @@ bench-grpc:
 	@echo "Running benchmark against $(GRPC_ADDR) (ops/s, tx/s, tx latency)..."
 	$(BINARY_DIR)/$(TESTCLIENT_NAME) -mode bench -addr $(GRPC_ADDR) -base-dir . \
 		-workload $(BENCH_WORKLOAD) -workers $(BENCH_WORKERS) \
-		-duration $(BENCH_DURATION) -warmup $(BENCH_WARMUP)
+		-duration $(BENCH_DURATION) -warmup $(BENCH_WARMUP) -export "./bench_results.csv"
 
 # Run throughput benchmark N times and report averages (requires a running server)
 bench-grpc-avg:
