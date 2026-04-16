@@ -24,7 +24,7 @@ type CreateAccountResponse struct {
 
 func (r *CreateAccountRequest) RequiresSignature() bool { return true }
 
-func (r *CreateAccountRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *CreateAccountRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, "",
 		func(signed *crypto.CreateAccountPayload) error {
 			if signed.InitialBalance != r.InitialBalance {
@@ -48,7 +48,7 @@ type GetAccountResponse struct {
 
 func (r *GetAccountRequest) RequiresSignature() bool { return true }
 
-func (r *GetAccountRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *GetAccountRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
 		func(signed *crypto.GetAccountPayload) error {
 			if signed.AccountID != r.AccountID.String() {
@@ -82,7 +82,7 @@ type TransferResponse struct{}
 
 func (r *TransferRequest) RequiresSignature() bool { return true }
 
-func (r *TransferRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *TransferRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.From.String(),
 		func(signed *crypto.TransferPayload) error {
 			if signed.From != r.From.String() {
@@ -128,7 +128,7 @@ type MintTokenResponse struct {
 
 func (r *MintTokenRequest) RequiresSignature() bool { return true }
 
-func (r *MintTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *MintTokenRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	// Signer ID comes from the signed envelope
 	signerID := r.SignedEnvelope.Signature.SignerID
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, signerID,
@@ -170,7 +170,7 @@ type TransferTokenRequest struct {
 
 func (r *TransferTokenRequest) RequiresSignature() bool { return true }
 
-func (r *TransferTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *TransferTokenRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.From.String(),
 		func(signed *crypto.TransferTokenPayload) error {
 			if signed.TokenID != r.TokenId {
@@ -190,20 +190,24 @@ type TransferTokenResponse struct{}
 
 type AuthorizeTokenTransferRequest struct {
 	AccountID      ScalegraphId
+	TokenOwnerID   ScalegraphId
 	TokenId        string
 	SignedEnvelope *crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload]
 }
 
 func (r *AuthorizeTokenTransferRequest) RequiresSignature() bool { return true }
 
-func (r *AuthorizeTokenTransferRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *AuthorizeTokenTransferRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
 		func(signed *crypto.AuthorizeTokenTransferPayload) error {
 			if signed.TokenID != r.TokenId {
 				return fmt.Errorf("TokenId mismatch")
 			}
 			if signed.AccountID != r.AccountID.String() {
-				return fmt.Errorf("From mismatch")
+				return fmt.Errorf("AccountID mismatch")
+			}
+			if signed.TokenOwnerID != r.TokenOwnerID.String() {
+				return fmt.Errorf("TokenOwnerID mismatch")
 			}
 			return nil
 		})
@@ -213,20 +217,24 @@ type AuthorizeTokenTransferResponse struct{}
 
 type UnauthorizeTokenTransferRequest struct {
 	AccountID      ScalegraphId
+	TokenOwnerID   ScalegraphId
 	TokenId        string
 	SignedEnvelope *crypto.SignedEnvelope[*crypto.UnauthorizeTokenTransferPayload]
 }
 
 func (r *UnauthorizeTokenTransferRequest) RequiresSignature() bool { return true }
 
-func (r *UnauthorizeTokenTransferRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *UnauthorizeTokenTransferRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
 		func(signed *crypto.UnauthorizeTokenTransferPayload) error {
 			if signed.TokenID != r.TokenId {
 				return fmt.Errorf("TokenId mismatch")
 			}
 			if signed.AccountID != r.AccountID.String() {
-				return fmt.Errorf("From mismatch")
+				return fmt.Errorf("AccountID mismatch")
+			}
+			if signed.TokenOwnerID != r.TokenOwnerID.String() {
+				return fmt.Errorf("TokenOwnerID mismatch")
 			}
 			return nil
 		})
@@ -251,7 +259,7 @@ type BurnTokenRequest struct {
 
 func (r *BurnTokenRequest) RequiresSignature() bool { return true }
 
-func (r *BurnTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *BurnTokenRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
 		func(signed *crypto.BurnTokenPayload) error {
 			if signed.TokenID != r.TokenId {
@@ -275,7 +283,7 @@ type ClawbackTokenRequest struct {
 
 func (r *ClawbackTokenRequest) RequiresSignature() bool { return true }
 
-func (r *ClawbackTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *ClawbackTokenRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.To.String(),
 		func(signed *crypto.ClawbackTokenPayload) error {
 			if signed.TokenID != r.TokenId {
@@ -318,7 +326,7 @@ type SubscribeEventsRequest struct {
 
 func (r *SubscribeEventsRequest) RequiresSignature() bool { return true }
 
-func (r *SubscribeEventsRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *SubscribeEventsRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.AccountID.String(),
 		func(signed *crypto.SubscribePayload) error {
 			if signed.AccountID != r.AccountID.String() {
@@ -340,7 +348,7 @@ type LookupTokenResponse struct {
 
 func (r *LookupTokenRequest) RequiresSignature() bool { return true }
 
-func (r *LookupTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519.PublicKey) error {
+func (r *LookupTokenRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
 	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.SignedEnvelope.Signature.SignerID,
 		func(signed *crypto.LookupTokenPayload) error {
 			if signed.TokenID != r.TokenID {

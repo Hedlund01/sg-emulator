@@ -271,7 +271,7 @@ func (c *Client) MintTokenSigned(ctx context.Context, signedReq *crypto.SignedEn
 
 func (c *Client) AuthorizeTokenTransferSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload]) (*scalegraph.AuthorizeTokenTransferResponse, error) {
 	traceID := trace.GetTraceID(ctx)
-	logAttrs := []any{"account_id", signedReq.Payload.AccountID, "token_id", signedReq.Payload.TokenID, "signed", true}
+	logAttrs := []any{"account_id", signedReq.Payload.AccountID, "token_id", signedReq.Payload.TokenID, "token_owner_id", signedReq.Payload.TokenOwnerID, "signed", true}
 	if traceID != "" {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
@@ -283,8 +283,15 @@ func (c *Client) AuthorizeTokenTransferSigned(ctx context.Context, signedReq *cr
 		return nil, err
 	}
 
+	tokenOwnerID, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.TokenOwnerID)
+	if err != nil {
+		c.logger.Error("Invalid token owner ID in signed request", "error", err, "token_owner_id", signedReq.Payload.TokenOwnerID)
+		return nil, err
+	}
+
 	return Send[scalegraph.AuthorizeTokenTransferRequest, scalegraph.AuthorizeTokenTransferResponse](c, ctx, &scalegraph.AuthorizeTokenTransferRequest{
 		AccountID:      acc,
+		TokenOwnerID:   tokenOwnerID,
 		TokenId:        signedReq.Payload.TokenID,
 		SignedEnvelope: signedReq,
 	})
@@ -292,7 +299,7 @@ func (c *Client) AuthorizeTokenTransferSigned(ctx context.Context, signedReq *cr
 
 func (c *Client) UnauthorizeTokenTransferSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.UnauthorizeTokenTransferPayload]) (*scalegraph.UnauthorizeTokenTransferResponse, error) {
 	traceID := trace.GetTraceID(ctx)
-	logAttrs := []any{"account_id", signedReq.Payload.AccountID, "token_id", signedReq.Payload.TokenID, "signed", true}
+	logAttrs := []any{"account_id", signedReq.Payload.AccountID, "token_id", signedReq.Payload.TokenID, "token_owner_id", signedReq.Payload.TokenOwnerID, "signed", true}
 	if traceID != "" {
 		logAttrs = append(logAttrs, "trace_id", traceID)
 	}
@@ -304,8 +311,15 @@ func (c *Client) UnauthorizeTokenTransferSigned(ctx context.Context, signedReq *
 		return nil, err
 	}
 
+	tokenOwnerID, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.TokenOwnerID)
+	if err != nil {
+		c.logger.Error("Invalid token owner ID in signed request", "error", err, "token_owner_id", signedReq.Payload.TokenOwnerID)
+		return nil, err
+	}
+
 	return Send[scalegraph.UnauthorizeTokenTransferRequest, scalegraph.UnauthorizeTokenTransferResponse](c, ctx, &scalegraph.UnauthorizeTokenTransferRequest{
 		AccountID:      acc,
+		TokenOwnerID:   tokenOwnerID,
 		TokenId:        signedReq.Payload.TokenID,
 		SignedEnvelope: signedReq,
 	})

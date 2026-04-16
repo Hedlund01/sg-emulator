@@ -44,8 +44,7 @@ func convertTransferEnvelope(req *currencyv1.TransferRequest) (*crypto.SignedEnv
 			Nonce:     uint64(env.GetPayload().GetNonce()),
 			Timestamp: env.GetPayload().GetTimestamp(),
 		},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }
 
@@ -71,8 +70,7 @@ func convertMintTokenEnvelope(req *tokenv1.MintTokenRequest) (*crypto.SignedEnve
 			FreezeAddress:   freezeAddr,
 			Nonce:           env.GetPayload().GetNonce(),
 		},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }
 
@@ -88,8 +86,7 @@ func convertLookupTokenEnvelope(req *tokenv1.LookupTokenRequest) (*crypto.Signed
 			TokenID:   env.GetPayload().GetTokenId(),
 			AccountID: env.GetPayload().GetAccountId(),
 		},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }
 
@@ -106,8 +103,7 @@ func convertTransferTokenEnvelope(req *tokenv1.TransferTokenRequest) (*crypto.Si
 			To:      env.GetPayload().GetTo(),
 			TokenID: env.GetPayload().GetTokenId(),
 		},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }
 
@@ -120,11 +116,11 @@ func convertAuthorizeTokenTransferEnvelope(req *tokenv1.AuthorizeTokenTransferRe
 	}
 	return &crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload]{
 		Payload: &crypto.AuthorizeTokenTransferPayload{
-			AccountID: env.GetPayload().GetAccountId(),
-			TokenID:   env.GetPayload().GetTokenId(),
+			AccountID:    env.GetPayload().GetAccountId(),
+			TokenID:      env.GetPayload().GetTokenId(),
+			TokenOwnerID: env.GetPayload().GetTokenOwnerId(),
 		},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }
 
@@ -137,11 +133,11 @@ func convertUnauthorizeTokenTransferEnvelope(req *tokenv1.UnauthorizeTokenTransf
 	}
 	return &crypto.SignedEnvelope[*crypto.UnauthorizeTokenTransferPayload]{
 		Payload: &crypto.UnauthorizeTokenTransferPayload{
-			AccountID: env.GetPayload().GetAccountId(),
-			TokenID:   env.GetPayload().GetTokenId(),
+			AccountID:    env.GetPayload().GetAccountId(),
+			TokenID:      env.GetPayload().GetTokenId(),
+			TokenOwnerID: env.GetPayload().GetTokenOwnerId(),
 		},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }
 
@@ -157,8 +153,7 @@ func convertBurnTokenEnvelope(req *tokenv1.BurnTokenRequest) (*crypto.SignedEnve
 			AccountID: env.GetPayload().GetAccountId(),
 			TokenID:   env.GetPayload().GetTokenId(),
 		},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }
 
@@ -175,8 +170,7 @@ func convertClawbackTokenEnvelope(req *tokenv1.ClawbackTokenRequest) (*crypto.Si
 			To:      env.GetPayload().GetTo(),
 			TokenID: env.GetPayload().GetTokenId(),
 		},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }
 
@@ -189,8 +183,7 @@ func convertGetAccountEnvelope(req *accountv1.GetAccountRequest) (*crypto.Signed
 	}
 	return &crypto.SignedEnvelope[*crypto.GetAccountPayload]{
 		Payload:     &crypto.GetAccountPayload{AccountID: env.GetPayload().GetAccountId()},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }
 
@@ -213,7 +206,6 @@ func convertSubscribeEnvelope(req *eventv1.SubscribeRequest) (*crypto.SignedEnve
 			AccountID:  env.GetPayload().GetAccountId(),
 			EventTypes: eventTypeStrs,
 		},
-		Signature:   sig,
-		Certificate: env.GetCertificate(),
+		Signature: sig,
 	}, nil
 }

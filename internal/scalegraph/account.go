@@ -379,39 +379,54 @@ func (a *Account) handleTransferTokenTx(trx *TransferTokenTransaction) error {
 }
 
 func (a *Account) handleAuthorizeTokenTransferTx(trx *AuthorizeTokenTransferTransaction) error {
-	if trx.Sender() == nil || trx.Receiver() == nil || trx.Sender().ID() != a.ID() || trx.Receiver().ID() != a.ID() {
-		return fmt.Errorf("both sender and receiver must be this account for authorize token transfer transaction")
-	}
-
-	tokenId := *trx.TokenId()
-	if a.tokenStore[tokenId] == nil {
-		if (a.balance - a.mbr) < MBR_SLOT_COST {
-			return fmt.Errorf("insufficient balance to authorize token transfer: current balance %.2f, mbr %.2f, required mbr for authorizing token transfer %.2f", a.balance, a.mbr, MBR_SLOT_COST)
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		// Authorizer side: create placeholder slot and freeze MBR
+		tokenId := *trx.TokenId()
+		if a.tokenStore[tokenId] == nil {
+			if (a.balance - a.mbr) < MBR_SLOT_COST {
+				return fmt.Errorf("insufficient balance to authorize token transfer: current balance %.2f, mbr %.2f, required mbr for authorizing token transfer %.2f", a.balance, a.mbr, MBR_SLOT_COST)
+			}
+			a.mbr += MBR_SLOT_COST
+			a.tokenStore[tokenId] = &Token{}
+		} else if !a.tokenStore[tokenId].Equal(&Token{}) {
+			return fmt.Errorf("token with ID %s is already owned by account %s, cannot authorize transfer", tokenId, a.ID())
 		}
-		a.mbr += MBR_SLOT_COST
-		a.tokenStore[tokenId] = &Token{}
-	} else if !a.tokenStore[tokenId].Equal(&Token{}) {
-		return fmt.Errorf("token with ID %s is already owned by account %s, cannot authorize transfer", tokenId, a.ID())
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		// Token owner side: validate the token exists and is real (not a placeholder)
+		tokenId := *trx.TokenId()
+		slot, ok := a.tokenStore[tokenId]
+		if !ok || slot == nil || slot.Equal(&Token{}) {
+			return fmt.Errorf("token with ID %s does not exist in account %s", tokenId, a.ID())
+		}
+	} else {
+		return fmt.Errorf("either sender or receiver must be this account for authorize token transfer transaction")
 	}
 	return nil
 }
 
 func (a *Account) handleUnauthorizeTokenTransferTx(trx *UnauthorizeTokenTransferTransaction) error {
-	if trx.Sender() == nil || trx.Receiver() == nil || trx.Sender().ID() != a.ID() || trx.Receiver().ID() != a.ID() {
-		return fmt.Errorf("both sender and receiver must be this account for unauthorize token transfer transaction")
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		// Authorizer side: remove placeholder and unfreeze MBR
+		tokenId := *trx.TokenId()
+		slot, ok := a.tokenStore[tokenId]
+		if !ok {
+			return fmt.Errorf("token with ID %s is not authorized for transfer to account %s, cannot unauthorize", tokenId, a.ID())
+		}
+		if !slot.Equal(&Token{}) {
+			return fmt.Errorf("token with ID %s is already owned by account %s, cannot unauthorize transfer", tokenId, a.ID())
+		}
+		delete(a.tokenStore, tokenId)
+		a.mbr -= MBR_SLOT_COST
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		// Token owner side: validate the token still exists and is real
+		tokenId := *trx.TokenId()
+		slot, ok := a.tokenStore[tokenId]
+		if !ok || slot == nil || slot.Equal(&Token{}) {
+			return fmt.Errorf("token with ID %s does not exist in account %s", tokenId, a.ID())
+		}
+	} else {
+		return fmt.Errorf("either sender or receiver must be this account for unauthorize token transfer transaction")
 	}
-
-	tokenId := *trx.TokenId()
-	slot, ok := a.tokenStore[tokenId]
-	if !ok {
-		return fmt.Errorf("token with ID %s is not authorized for transfer to account %s, cannot unauthorize", tokenId, a.ID())
-	}
-	if !slot.Equal(&Token{}) {
-		return fmt.Errorf("token with ID %s is already owned by account %s, cannot unauthorize transfer", tokenId, a.ID())
-	}
-
-	delete(a.tokenStore, tokenId)
-	a.mbr -= MBR_SLOT_COST
 	return nil
 }
 
@@ -505,19 +520,29 @@ func (a *Account) rollbackTransferTokenTx(trx *TransferTokenTransaction) error {
 	return nil
 }
 
-// rollbackAuthorizeTokenTransferTx reverses an AuthorizeTokenTransfer:
-// removes the &Token{} placeholder and decrements mbr by MBR_SLOT_COST.
+// rollbackAuthorizeTokenTransferTx reverses an AuthorizeTokenTransfer.
+// Authorizer side: removes the placeholder and decrements MBR.
+// Token owner side: no-op (no state was changed).
 func (a *Account) rollbackAuthorizeTokenTransferTx(trx *AuthorizeTokenTransferTransaction) error {
-	tokenId := *trx.TokenId()
-	delete(a.tokenStore, tokenId)
-	a.mbr -= MBR_SLOT_COST
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		tokenId := *trx.TokenId()
+		delete(a.tokenStore, tokenId)
+		a.mbr -= MBR_SLOT_COST
+	}
+	// Token owner side: no state was mutated, nothing to rollback
 	return nil
 }
 
+// rollbackUnauthorizeTokenTransferTx reverses an UnauthorizeTokenTransfer.
+// Authorizer side: restores the placeholder and increments MBR.
+// Token owner side: no-op.
 func (a *Account) rollbackUnauthorizeTokenTransferTx(trx *UnauthorizeTokenTransferTransaction) error {
-	tokenId := *trx.TokenId()
-	a.tokenStore[tokenId] = &Token{}
-	a.mbr += MBR_SLOT_COST
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		tokenId := *trx.TokenId()
+		a.tokenStore[tokenId] = &Token{}
+		a.mbr += MBR_SLOT_COST
+	}
+	// Token owner side: no state was mutated, nothing to rollback
 	return nil
 }
 

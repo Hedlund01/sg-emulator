@@ -78,6 +78,18 @@ func (a *App) CreateAccountWithKeys(ctx context.Context, pubKey ed25519.PublicKe
 	return acc, nil
 }
 
+func (a *App) GetAccountCertAndPublicKey(accountID ScalegraphId) (*x509.Certificate, ed25519.PublicKey, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	acc, exists := a.accounts[accountID]
+	if !exists {
+		return nil, nil, fmt.Errorf("account not found: %s", accountID)
+	}
+
+	return acc.Certificate(), acc.PublicKey(), nil
+}
+
 // GetAccounts returns all accounts
 func (a *App) GetAccounts(ctx context.Context, req *GetAccountsRequest) (*GetAccountsResponse, error) {
 	a.mu.RLock()
@@ -242,23 +254,35 @@ func (a *App) AuthorizeTokenTransfer(ctx context.Context, req *AuthorizeTokenTra
 	if traceID := trace.GetTraceID(ctx); traceID != "" {
 		logger = logger.With("trace_id", traceID)
 	}
-	logger.Debug("Authorize token transfer operation initiated", "account_id", req.AccountID, "token_id", req.TokenId)
+	logger.Debug("Authorize token transfer operation initiated", "account_id", req.AccountID, "token_owner_id", req.TokenOwnerID, "token_id", req.TokenId)
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	acc, exists := a.accounts[req.AccountID]
+	authorizerAcc, exists := a.accounts[req.AccountID]
 	if !exists {
-		logger.Warn("Account not found for authorize token transfer", "account_id", req.AccountID)
+		logger.Warn("Authorizer account not found", "account_id", req.AccountID)
 		return fmt.Errorf("account not found: %s", req.AccountID)
 	}
 
-	authorizeTx := newAuthorizeTokenTransferTransaction(acc, &req.TokenId)
-	if err := acc.appendTransaction(authorizeTx); err != nil {
-		logger.Error("Failed to append authorize token transfer transaction", "error", err)
+	tokenOwnerAcc, exists := a.accounts[req.TokenOwnerID]
+	if !exists {
+		logger.Warn("Token owner account not found", "token_owner_id", req.TokenOwnerID)
+		return fmt.Errorf("token owner account not found: %s", req.TokenOwnerID)
+	}
+
+	authorizeTx := newAuthorizeTokenTransferTransaction(authorizerAcc, tokenOwnerAcc, &req.TokenId)
+	if err := authorizerAcc.appendTransaction(authorizeTx); err != nil {
+		logger.Error("Failed to append authorize token transfer transaction (authorizer)", "error", err)
 		return err
 	}
 
-	logger.Info("Authorize token transfer completed", "account_id", req.AccountID, "token_id", req.TokenId)
+	if err := tokenOwnerAcc.appendTransaction(authorizeTx); err != nil {
+		logger.Error("Failed to append authorize token transfer transaction (token owner)", "error", err)
+		authorizerAcc.rollbacklatestTransaction(authorizeTx)
+		return err
+	}
+
+	logger.Info("Authorize token transfer completed", "account_id", req.AccountID, "token_owner_id", req.TokenOwnerID, "token_id", req.TokenId)
 	return nil
 }
 
@@ -267,23 +291,35 @@ func (a *App) UnauthorizeTokenTransfer(ctx context.Context, req *UnauthorizeToke
 	if traceID := trace.GetTraceID(ctx); traceID != "" {
 		logger = logger.With("trace_id", traceID)
 	}
-	logger.Debug("Unauthorize token transfer operation initiated", "account_id", req.AccountID, "token_id", req.TokenId)
+	logger.Debug("Unauthorize token transfer operation initiated", "account_id", req.AccountID, "token_owner_id", req.TokenOwnerID, "token_id", req.TokenId)
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	acc, exists := a.accounts[req.AccountID]
+	authorizerAcc, exists := a.accounts[req.AccountID]
 	if !exists {
-		logger.Warn("Account not found for unauthorize token transfer", "account_id", req.AccountID)
+		logger.Warn("Authorizer account not found", "account_id", req.AccountID)
 		return fmt.Errorf("account not found: %s", req.AccountID)
 	}
 
-	unauthorizeTx := newUnauthorizeTokenTransferTransaction(acc, &req.TokenId)
-	if err := acc.appendTransaction(unauthorizeTx); err != nil {
-		logger.Error("Failed to append unauthorize token transfer transaction", "error", err)
+	tokenOwnerAcc, exists := a.accounts[req.TokenOwnerID]
+	if !exists {
+		logger.Warn("Token owner account not found", "token_owner_id", req.TokenOwnerID)
+		return fmt.Errorf("token owner account not found: %s", req.TokenOwnerID)
+	}
+
+	unauthorizeTx := newUnauthorizeTokenTransferTransaction(authorizerAcc, tokenOwnerAcc, &req.TokenId)
+	if err := authorizerAcc.appendTransaction(unauthorizeTx); err != nil {
+		logger.Error("Failed to append unauthorize token transfer transaction (authorizer)", "error", err)
 		return err
 	}
 
-	logger.Info("Unauthorize token transfer completed", "account_id", req.AccountID, "token_id", req.TokenId)
+	if err := tokenOwnerAcc.appendTransaction(unauthorizeTx); err != nil {
+		logger.Error("Failed to append unauthorize token transfer transaction (token owner)", "error", err)
+		authorizerAcc.rollbacklatestTransaction(unauthorizeTx)
+		return err
+	}
+
+	logger.Info("Unauthorize token transfer completed", "account_id", req.AccountID, "token_owner_id", req.TokenOwnerID, "token_id", req.TokenId)
 	return nil
 }
 

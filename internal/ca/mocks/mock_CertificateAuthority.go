@@ -386,51 +386,6 @@ func (_c *MockCertificateAuthority_IssueCertificate_Call) RunAndReturn(run func(
 	return _c
 }
 
-// NewVerifier provides a mock function for the type MockCertificateAuthority
-func (_mock *MockCertificateAuthority) NewVerifier() *crypto.Verifier {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for NewVerifier")
-	}
-
-	var r0 *crypto.Verifier
-	if returnFunc, ok := ret.Get(0).(func() *crypto.Verifier); ok {
-		r0 = returnFunc()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*crypto.Verifier)
-		}
-	}
-	return r0
-}
-
-// MockCertificateAuthority_NewVerifier_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NewVerifier'
-type MockCertificateAuthority_NewVerifier_Call struct {
-	*mock.Call
-}
-
-// NewVerifier is a helper method to define mock.On call
-func (_e *MockCertificateAuthority_Expecter) NewVerifier() *MockCertificateAuthority_NewVerifier_Call {
-	return &MockCertificateAuthority_NewVerifier_Call{Call: _e.mock.On("NewVerifier")}
-}
-
-func (_c *MockCertificateAuthority_NewVerifier_Call) Run(run func()) *MockCertificateAuthority_NewVerifier_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockCertificateAuthority_NewVerifier_Call) Return(verifier *crypto.Verifier) *MockCertificateAuthority_NewVerifier_Call {
-	_c.Call.Return(verifier)
-	return _c
-}
-
-func (_c *MockCertificateAuthority_NewVerifier_Call) RunAndReturn(run func() *crypto.Verifier) *MockCertificateAuthority_NewVerifier_Call {
-	_c.Call.Return(run)
-	return _c
-}
 
 // PrivateKey provides a mock function for the type MockCertificateAuthority
 func (_mock *MockCertificateAuthority) PrivateKey() ed25519.PrivateKey {

@@ -29,7 +29,6 @@ func (s Signature) String() string {
 type SignedEnvelope[T SignableData] struct {
 	Payload     T         `json:"payload"`
 	Signature   Signature `json:"signature"`
-	Certificate string    `json:"certificate"` // PEM-encoded X.509 certificate
 }
 
 // Sign creates a signature for the given data using the private key
@@ -77,7 +76,6 @@ func CreateSignedEnvelope[T SignableData](payload T, privKey ed25519.PrivateKey,
 	return &SignedEnvelope[T]{
 		Payload:     payload,
 		Signature:   *sig,
-		Certificate: certPEM,
 	}, nil
 }
 
@@ -180,29 +178,33 @@ func (r *TransferTokenPayload) Bytes() []byte {
 
 // AuthorizeTokenTransferPayload is the signed payload for an authorize token transfer request.
 type AuthorizeTokenTransferPayload struct {
-	AccountID string `json:"account_id"`
-	TokenID   string `json:"token_id"`
+	AccountID    string `json:"account_id"`
+	TokenID      string `json:"token_id"`
+	TokenOwnerID string `json:"token_owner_id"`
 }
 
 // Bytes returns the canonical byte representation for signing
 func (r *AuthorizeTokenTransferPayload) Bytes() []byte {
 	data, _ := json.Marshal(AuthorizeTokenTransferPayload{
-		AccountID: r.AccountID,
-		TokenID:   r.TokenID,
+		AccountID:    r.AccountID,
+		TokenID:      r.TokenID,
+		TokenOwnerID: r.TokenOwnerID,
 	})
 	return data
 }
 
 type UnauthorizeTokenTransferPayload struct {
-	AccountID string `json:"account_id"`
-	TokenID   string `json:"token_id"`
+	AccountID    string `json:"account_id"`
+	TokenID      string `json:"token_id"`
+	TokenOwnerID string `json:"token_owner_id"`
 }
 
 // Bytes returns the canonical byte representation for signing
 func (r *UnauthorizeTokenTransferPayload) Bytes() []byte {
 	data, _ := json.Marshal(UnauthorizeTokenTransferPayload{
-		AccountID: r.AccountID,
-		TokenID:   r.TokenID,
+		AccountID:    r.AccountID,
+		TokenID:      r.TokenID,
+		TokenOwnerID: r.TokenOwnerID,
 	})
 	return data
 }

@@ -16,6 +16,7 @@ import (
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server/messages"
 	"sg-emulator/internal/trace"
+	sgverifier "sg-emulator/internal/verifier"
 )
 
 type handlerFunc func(ctx context.Context, payload any) (any, error)
@@ -31,7 +32,7 @@ type Server struct {
 	wg          sync.WaitGroup
 	logger      *slog.Logger
 	ca          *ca.CA
-	verifier    *crypto.Verifier
+	verifier    *sgverifier.Verifier
 	handlers    map[reflect.Type]handlerFunc
 }
 
@@ -50,19 +51,25 @@ func RegisterHandler[Req, Resp any](s *Server, handler func(ctx context.Context,
 // NewWithCA creates a new Server with a Certificate Authority
 func NewWithCA(logger *slog.Logger, certAuth *ca.CA) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
+	app := scalegraph.NewApp(logger.With("component", "app"))
 	s := &Server{
-		app:         scalegraph.NewApp(logger.With("component", "app")),
+		app:         app,
 		registry:    NewRegistry(logger.With("component", "registry")),
 		requestChan: make(chan messages.Request, 1000),
 		ctx:         ctx,
 		cancel:      cancel,
 		logger:      logger,
 		ca:          certAuth,
-		verifier:    certAuth.NewVerifier(),
+		verifier:    sgverifier.NewVerifier(certAuth.Certificate(), app),
 		handlers:    make(map[reflect.Type]handlerFunc),
 	}
 	s.registerHandlers()
 	return s
+}
+
+// App returns the underlying scalegraph.App.
+func (s *Server) App() *scalegraph.App {
+	return s.app
 }
 
 func (s *Server) registerHandlers() {
@@ -92,15 +99,6 @@ func (s *Server) registerHandlers() {
 }
 
 func (s *Server) handleCreateAccount(ctx context.Context, req *scalegraph.CreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {
-	// Verify the certificate in the envelope matches the server CA
-	payloadCert, err := crypto.ParseCertificatePEM(req.SignedEnvelope.Certificate)
-	if err != nil {
-		return nil, fmt.Errorf("invalid certificate in request: %w", err)
-	}
-	if !s.ca.Certificate().Equal(payloadCert) {
-		return nil, fmt.Errorf("certificate in request does not match server CA certificate")
-	}
-
 	// Create account credentials via CA
 	keyPair, cert, _, err := s.ca.CreateAccountCredentials()
 	if err != nil {

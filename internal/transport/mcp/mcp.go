@@ -49,14 +49,16 @@ type MintTokenArgs struct {
 
 // AuthorizeTokenTransferArgs represents arguments for authorize_token_transfer tool
 type AuthorizeTokenTransferArgs struct {
-	AccountID string `json:"account_id" jsonschema:"Account ID that owns the token (hex string)"`
-	TokenID   string `json:"token_id" jsonschema:"The token ID to authorize for transfer"`
+	AccountID    string `json:"account_id" jsonschema:"Account ID of the future token receiver that is authorizing the transfer (hex string)"`
+	TokenOwnerID string `json:"token_owner_id" jsonschema:"Account ID of the current token owner (hex string)"`
+	TokenID      string `json:"token_id" jsonschema:"The token ID to authorize for transfer"`
 }
 
 // UnauthorizeTokenTransferArgs represents arguments for unauthorize_token_transfer tool
 type UnauthorizeTokenTransferArgs struct {
-	AccountID string `json:"account_id" jsonschema:"Account ID that owns the token authorization to revoke (hex string)"`
-	TokenID   string `json:"token_id" jsonschema:"The token ID to unauthorize for transfer"`
+	AccountID    string `json:"account_id" jsonschema:"Account ID of the account revoking the authorization (hex string)"`
+	TokenOwnerID string `json:"token_owner_id" jsonschema:"Account ID of the current token owner (hex string)"`
+	TokenID      string `json:"token_id" jsonschema:"The token ID to unauthorize for transfer"`
 }
 
 // TransferTokenArgs represents arguments for transfer_token tool
@@ -108,6 +110,7 @@ type CreateSignedRequestArgs struct {
 	TokenID         string  `json:"token_id,omitempty" jsonschema:"Token ID (for authorize_token_transfer, transfer_token, burn_token, and clawback_token)"`
 	ToAccountID     string  `json:"to_account_id,omitempty" jsonschema:"Destination account ID (for transfer_token and clawback_token)"`
 	FromAccountID   string  `json:"from_account_id,omitempty" jsonschema:"Source account holding the token (for clawback_token only)"`
+	TokenOwnerID    string  `json:"token_owner_id,omitempty" jsonschema:"Current token owner account ID (for authorize_token_transfer and unauthorize_token_transfer)"`
 }
 
 // RunHTTPServer starts an MCP server over HTTP with SSE transport.
@@ -414,18 +417,22 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 	// authorize_token_transfer tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "authorize_token_transfer",
-		Description: "Authorize a token to be transferred from an account. Must be called by the token owner before transfer_token.",
+		Description: "Authorize receiving a token transfer. Called by the future token receiver (account_id), signed by them, and directed at the current token owner (token_owner_id).",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args AuthorizeTokenTransferArgs) (*mcp.CallToolResult, any, error) {
 		if _, err := scalegraph.ScalegraphIdFromString(args.AccountID); err != nil {
 			return nil, nil, fmt.Errorf("invalid account_id: %v", err)
+		}
+		if _, err := scalegraph.ScalegraphIdFromString(args.TokenOwnerID); err != nil {
+			return nil, nil, fmt.Errorf("invalid token_owner_id: %v", err)
 		}
 		if args.TokenID == "" {
 			return nil, nil, fmt.Errorf("token_id is required")
 		}
 
 		payload := &crypto.AuthorizeTokenTransferPayload{
-			AccountID: args.AccountID,
-			TokenID:   args.TokenID,
+			AccountID:    args.AccountID,
+			TokenID:      args.TokenID,
+			TokenOwnerID: args.TokenOwnerID,
 		}
 		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
 		if err != nil {
@@ -436,7 +443,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, err
 		}
 
-		text := fmt.Sprintf("Token %s authorized for transfer from account %s", args.TokenID, args.AccountID[:16]+"...")
+		text := fmt.Sprintf("Token %s authorized for transfer to account %s from owner %s", args.TokenID, args.AccountID[:16]+"...", args.TokenOwnerID[:16]+"...")
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		}, nil, nil
@@ -445,18 +452,22 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 	// unauthorize_token_transfer tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "unauthorize_token_transfer",
-		Description: "Revoke a previously authorized token transfer from an account. Must be signed by the account that holds the authorization.",
+		Description: "Revoke a previously authorized token transfer. Called by the account that authorized (account_id), directed at the token owner (token_owner_id).",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args UnauthorizeTokenTransferArgs) (*mcp.CallToolResult, any, error) {
 		if _, err := scalegraph.ScalegraphIdFromString(args.AccountID); err != nil {
 			return nil, nil, fmt.Errorf("invalid account_id: %v", err)
+		}
+		if _, err := scalegraph.ScalegraphIdFromString(args.TokenOwnerID); err != nil {
+			return nil, nil, fmt.Errorf("invalid token_owner_id: %v", err)
 		}
 		if args.TokenID == "" {
 			return nil, nil, fmt.Errorf("token_id is required")
 		}
 
 		payload := &crypto.UnauthorizeTokenTransferPayload{
-			AccountID: args.AccountID,
-			TokenID:   args.TokenID,
+			AccountID:    args.AccountID,
+			TokenID:      args.TokenID,
+			TokenOwnerID: args.TokenOwnerID,
 		}
 		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
 		if err != nil {
@@ -467,7 +478,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, err
 		}
 
-		text := fmt.Sprintf("Token %s authorization revoked for account %s", args.TokenID, args.AccountID[:16]+"...")
+		text := fmt.Sprintf("Token %s authorization revoked by account %s", args.TokenID, args.AccountID[:16]+"...")
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		}, nil, nil
@@ -867,9 +878,13 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			if args.TokenID == "" {
 				return nil, nil, fmt.Errorf("token_id is required for authorize_token_transfer requests")
 			}
+			if args.TokenOwnerID == "" {
+				return nil, nil, fmt.Errorf("token_owner_id is required for authorize_token_transfer requests")
+			}
 			payload := &crypto.AuthorizeTokenTransferPayload{
-				AccountID: args.AccountID,
-				TokenID:   args.TokenID,
+				AccountID:    args.AccountID,
+				TokenID:      args.TokenID,
+				TokenOwnerID: args.TokenOwnerID,
 			}
 			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
 			if err != nil {
@@ -886,9 +901,13 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			if args.TokenID == "" {
 				return nil, nil, fmt.Errorf("token_id is required for unauthorize_token_transfer requests")
 			}
+			if args.TokenOwnerID == "" {
+				return nil, nil, fmt.Errorf("token_owner_id is required for unauthorize_token_transfer requests")
+			}
 			payload := &crypto.UnauthorizeTokenTransferPayload{
-				AccountID: args.AccountID,
-				TokenID:   args.TokenID,
+				AccountID:    args.AccountID,
+				TokenID:      args.TokenID,
+				TokenOwnerID: args.TokenOwnerID,
 			}
 			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
 			if err != nil {

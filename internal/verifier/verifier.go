@@ -1,11 +1,12 @@
-package crypto
+package verifier
 
 import (
 	"crypto/ed25519"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
+	"sg-emulator/internal/scalegraph"
 	"time"
+	. "sg-emulator/internal/crypto"
 )
 
 const (
@@ -17,13 +18,15 @@ const (
 type Verifier struct {
 	caCert          *x509.Certificate
 	timestampWindow time.Duration
+	scalegraphApp   *scalegraph.App
 }
 
 // NewVerifier creates a new Verifier with the given CA certificate
-func NewVerifier(caCert *x509.Certificate) *Verifier {
+func NewVerifier(caCert *x509.Certificate, scalegraphApp *scalegraph.App) *Verifier {
 	return &Verifier{
 		caCert:          caCert,
 		timestampWindow: DefaultTimestampWindow,
+		scalegraphApp:   scalegraphApp,
 	}
 }
 
@@ -112,69 +115,77 @@ func (v *Verifier) VerifyAccountID(sig *Signature, pubKey ed25519.PublicKey) err
 	return nil
 }
 
+// VerifyEnvelopeData implements crypto.SignatureVerifier. It resolves the signer's
+// certificate and public key (using the CA cert for CA-signed requests, or the
+// scalegraph app for account-signed requests), then verifies the cert chain,
+// account ID, signature, and timestamp.
+func (v *Verifier) VerifyEnvelopeData(signerID string, data SignableData, sig *Signature) error {
+	cert, pubKey, err := v.resolveSigner(signerID)
+	if err != nil {
+		return err
+	}
+
+	if err := v.VerifyCertificate(cert); err != nil {
+		return fmt.Errorf("certificate chain verification failed: %w", err)
+	}
+
+	if err := v.VerifyAccountID(sig, pubKey); err != nil {
+		return err
+	}
+
+	if err := v.VerifySignature(data, sig, pubKey); err != nil {
+		return err
+	}
+
+	return v.VerifyTimestamp(sig)
+}
+
+// resolveSigner returns the certificate and public key for the given signer ID.
+// If the signer ID matches the CA, the CA certificate is returned directly.
+// Otherwise the scalegraph app is queried for an account certificate.
+func (v *Verifier) resolveSigner(signerID string) (*x509.Certificate, ed25519.PublicKey, error) {
+	// Check if this is the CA's own signer ID
+	if caPubKey, ok := v.caCert.PublicKey.(ed25519.PublicKey); ok {
+		caIDBytes := DeriveAccountID(caPubKey)
+		caID := fmt.Sprintf("%x", caIDBytes)
+		if signerID == caID {
+			return v.caCert, caPubKey, nil
+		}
+	}
+
+	// Account-signed: look up from scalegraph app
+	id, err := scalegraph.ScalegraphIdFromString(signerID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid signer ID: %w", err)
+	}
+
+	cert, _, err := v.scalegraphApp.GetAccountCertAndPublicKey(id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get account certificate and public key: %w", err)
+	}
+
+	pubKey, ok := cert.PublicKey.(ed25519.PublicKey)
+	if !ok {
+		return nil, nil, fmt.Errorf("certificate public key is not Ed25519")
+	}
+
+	return cert, pubKey, nil
+}
+
 // VerifyEnvelope performs complete verification of a signed envelope:
 // 1. Parse and verify the certificate chain
 // 2. Verify the derived account ID matches the signer ID
 // 3. Verify the signature on the payload
 // 4. Verify the timestamp freshness
 func VerifyEnvelope[T SignableData](v *Verifier, envelope *SignedEnvelope[T]) (ed25519.PublicKey, error) {
-	// Parse certificate from PEM
-	cert, err := ParseCertificatePEM(envelope.Certificate)
+	if err := v.VerifyEnvelopeData(envelope.Signature.SignerID, envelope.Payload, &envelope.Signature); err != nil {
+		return nil, err
+	}
+
+	_, pubKey, err := v.resolveSigner(envelope.Signature.SignerID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate: %w", err)
-	}
-
-	// Verify certificate chain
-	if err := v.VerifyCertificate(cert); err != nil {
-		return nil, fmt.Errorf("certificate chain verification failed: %w", err)
-	}
-
-	// Extract public key from certificate
-	pubKey, ok := cert.PublicKey.(ed25519.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("certificate public key is not Ed25519")
-	}
-
-	// Verify account ID matches
-	if err := v.VerifyAccountID(&envelope.Signature, pubKey); err != nil {
 		return nil, err
 	}
-
-	// Verify signature
-	if err := v.VerifySignature(envelope.Payload, &envelope.Signature, pubKey); err != nil {
-		return nil, err
-	}
-
-	// Verify timestamp
-	if err := v.VerifyTimestamp(&envelope.Signature); err != nil {
-		return nil, err
-	}
-
 	return pubKey, nil
 }
 
-// ParseCertificatePEM parses a PEM-encoded X.509 certificate
-func ParseCertificatePEM(certPEM string) (*x509.Certificate, error) {
-	block, _ := pem.Decode([]byte(certPEM))
-	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM block")
-	}
-	if block.Type != "CERTIFICATE" {
-		return nil, fmt.Errorf("unexpected PEM block type: %s", block.Type)
-	}
-
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate: %w", err)
-	}
-
-	return cert, nil
-}
-
-// EncodeCertificatePEM encodes an X.509 certificate to PEM format
-func EncodeCertificatePEM(cert *x509.Certificate) string {
-	return string(pem.EncodeToMemory(&pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: cert.Raw,
-	}))
-}

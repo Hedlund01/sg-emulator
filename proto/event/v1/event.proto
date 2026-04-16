@@ -50,13 +50,15 @@ message TransferTokenEventData {
 }
 
 message AuthorizeTokenTransferEventData {
-  string account_id = 1;
-  string token_id = 2;
+  string account_id    = 1;
+  string token_id      = 2;
+  string token_owner_id = 3;
 }
 
 message UnauthorizeTokenTransferEventData {
-  string account_id = 1;
-  string token_id = 2;
+  string account_id    = 1;
+  string token_id      = 2;
+  string token_owner_id = 3;
 }
 
 message BurnTokenEventData {

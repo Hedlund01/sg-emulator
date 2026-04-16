@@ -149,18 +149,22 @@ func testMintTokenIntoAccount(t *testing.T, acc *Account, privKey ed25519.Privat
 	return token
 }
 
-// testAuthorizeTokenTransfer authorizes a token-transfer slot on acc for the
-// given tokenId. It first credits MBR_SLOT_COST balance so the MBR check passes.
-func testAuthorizeTokenTransfer(t *testing.T, acc *Account, tokenId string) {
+// testAuthorizeTokenTransfer authorizes a token-transfer slot on authorizer for the
+// given tokenId, directed at tokenOwner. It first credits MBR_SLOT_COST balance so
+// the MBR check passes. The token must already exist on tokenOwner.
+func testAuthorizeTokenTransfer(t *testing.T, authorizer *Account, tokenOwner *Account, tokenId string) {
 	t.Helper()
 
-	mintTx := newMintTransaction(acc, MBR_SLOT_COST)
-	err := acc.appendTransaction(mintTx)
+	mintTx := newMintTransaction(authorizer, MBR_SLOT_COST)
+	err := authorizer.appendTransaction(mintTx)
 	require.NoError(t, err, "failed to mint MBR_SLOT_COST balance before authorize")
 
-	tx := newAuthorizeTokenTransferTransaction(acc, &tokenId)
-	err = acc.appendTransaction(tx)
-	require.NoError(t, err, "failed to append authorize token transfer transaction")
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	err = authorizer.appendTransaction(tx)
+	require.NoError(t, err, "failed to append authorize token transfer transaction (authorizer side)")
+
+	err = tokenOwner.appendTransaction(tx)
+	require.NoError(t, err, "failed to append authorize token transfer transaction (token owner side)")
 }
 
 // runConcurrent runs fn concurrently n times and waits for all goroutines to finish.

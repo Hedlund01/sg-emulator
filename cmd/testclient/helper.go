@@ -235,45 +235,51 @@ func signLookupToken(account *accountCreds, tokenID string) (*tokenv1.LookupToke
 }
 
 // signAuthorizeTokenTransfer builds a signed AuthorizeTokenTransferRequest.
-func signAuthorizeTokenTransfer(owner *accountCreds, tokenID string) (*tokenv1.AuthorizeTokenTransferRequest, error) {
+// authorizer is the future token receiver; tokenOwnerID is the current token holder.
+func signAuthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string, tokenID string) (*tokenv1.AuthorizeTokenTransferRequest, error) {
 	payload := &crypto.AuthorizeTokenTransferPayload{
-		AccountID: owner.id,
-		TokenID:   tokenID,
+		AccountID:    authorizer.id,
+		TokenID:      tokenID,
+		TokenOwnerID: tokenOwnerID,
 	}
-	sig, err := crypto.Sign(payload, owner.privKey, owner.id)
+	sig, err := crypto.Sign(payload, authorizer.privKey, authorizer.id)
 	if err != nil {
 		return nil, err
 	}
 	return &tokenv1.AuthorizeTokenTransferRequest{
 		SignedEnvelope: &tokenv1.SignedAuthorizeTokenTransferEnvelope{
 			Payload: &tokenv1.AuthorizeTokenTransferPayload{
-				AccountId: owner.id,
-				TokenId:   tokenID,
+				AccountId:    authorizer.id,
+				TokenId:      tokenID,
+				TokenOwnerId: tokenOwnerID,
 			},
 			Signature:   toProtoSig(sig),
-			Certificate: owner.certPEM,
+			Certificate: authorizer.certPEM,
 		},
 	}, nil
 }
 
 // signUnauthorizeTokenTransfer builds a signed UnauthorizeTokenTransferRequest.
-func signUnauthorizeTokenTransfer(owner *accountCreds, tokenID string) (*tokenv1.UnauthorizeTokenTransferRequest, error) {
+// authorizer is the account revoking authorization; tokenOwnerID is the current token holder.
+func signUnauthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string, tokenID string) (*tokenv1.UnauthorizeTokenTransferRequest, error) {
 	payload := &crypto.UnauthorizeTokenTransferPayload{
-		AccountID: owner.id,
-		TokenID:   tokenID,
+		AccountID:    authorizer.id,
+		TokenID:      tokenID,
+		TokenOwnerID: tokenOwnerID,
 	}
-	sig, err := crypto.Sign(payload, owner.privKey, owner.id)
+	sig, err := crypto.Sign(payload, authorizer.privKey, authorizer.id)
 	if err != nil {
 		return nil, err
 	}
 	return &tokenv1.UnauthorizeTokenTransferRequest{
 		SignedEnvelope: &tokenv1.SignedUnauthorizeTokenTransferEnvelope{
 			Payload: &tokenv1.UnauthorizeTokenTransferPayload{
-				AccountId: owner.id,
-				TokenId:   tokenID,
+				AccountId:    authorizer.id,
+				TokenId:      tokenID,
+				TokenOwnerId: tokenOwnerID,
 			},
 			Signature:   toProtoSig(sig),
-			Certificate: owner.certPEM,
+			Certificate: authorizer.certPEM,
 		},
 	}, nil
 }

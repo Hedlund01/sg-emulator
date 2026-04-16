@@ -38,7 +38,4 @@ type CertificateAuthority interface {
 
 	// VerifyCertificate verifies that a certificate was signed by this CA
 	VerifyCertificate(cert *x509.Certificate) error
-
-	// NewVerifier creates a new Verifier using this CA's certificate
-	NewVerifier() *crypto.Verifier
 }

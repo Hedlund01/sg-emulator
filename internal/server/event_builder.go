@@ -23,9 +23,9 @@ func eventInvolvedAccounts(event *eventv1.Event) []string {
 	case *eventv1.Event_TransferToken:
 		return []string{d.TransferToken.GetFrom(), d.TransferToken.GetTo()}
 	case *eventv1.Event_AuthorizeTokenTransfer:
-		return []string{d.AuthorizeTokenTransfer.GetAccountId()}
+		return []string{d.AuthorizeTokenTransfer.GetAccountId(), d.AuthorizeTokenTransfer.GetTokenOwnerId()}
 	case *eventv1.Event_UnauthorizeTokenTransfer:
-		return []string{d.UnauthorizeTokenTransfer.GetAccountId()}
+		return []string{d.UnauthorizeTokenTransfer.GetAccountId(), d.UnauthorizeTokenTransfer.GetTokenOwnerId()}
 	case *eventv1.Event_BurnToken:
 		return []string{d.BurnToken.GetAccountId()}
 	case *eventv1.Event_ClawbackToken:
@@ -95,8 +95,9 @@ func BuildEvent(requestPayload any) *eventv1.Event {
 			Timestamp: now,
 			Data: &eventv1.Event_AuthorizeTokenTransfer{
 				AuthorizeTokenTransfer: &eventv1.AuthorizeTokenTransferEventData{
-					AccountId: req.AccountID,
-					TokenId:   req.TokenID,
+					AccountId:    req.AccountID,
+					TokenId:      req.TokenID,
+					TokenOwnerId: req.TokenOwnerID,
 				},
 			},
 		}
@@ -106,8 +107,9 @@ func BuildEvent(requestPayload any) *eventv1.Event {
 			Timestamp: now,
 			Data: &eventv1.Event_UnauthorizeTokenTransfer{
 				UnauthorizeTokenTransfer: &eventv1.UnauthorizeTokenTransferEventData{
-					AccountId: req.AccountID,
-					TokenId:   req.TokenID,
+					AccountId:    req.AccountID,
+					TokenId:      req.TokenID,
+					TokenOwnerId: req.TokenOwnerID,
 				},
 			},
 		}
@@ -174,13 +176,15 @@ func extractEventInfo(requestPayload any, responsePayload any) any {
 		}
 	case *scalegraph.AuthorizeTokenTransferRequest:
 		return &authorizeTokenTransferEventInfo{
-			AccountID: req.AccountID.String(),
-			TokenID:   req.TokenId,
+			AccountID:    req.AccountID.String(),
+			TokenID:      req.TokenId,
+			TokenOwnerID: req.TokenOwnerID.String(),
 		}
 	case *scalegraph.UnauthorizeTokenTransferRequest:
 		return &unauthorizeTokenTransferEventInfo{
-			AccountID: req.AccountID.String(),
-			TokenID:   req.TokenId,
+			AccountID:    req.AccountID.String(),
+			TokenID:      req.TokenId,
+			TokenOwnerID: req.TokenOwnerID.String(),
 		}
 	case *scalegraph.BurnTokenRequest:
 		return &burnTokenEventInfo{
@@ -225,13 +229,15 @@ type transferTokenEventInfo struct {
 }
 
 type authorizeTokenTransferEventInfo struct {
-	AccountID string
-	TokenID   string
+	AccountID    string
+	TokenID      string
+	TokenOwnerID string
 }
 
 type unauthorizeTokenTransferEventInfo struct {
-	AccountID string
-	TokenID   string
+	AccountID    string
+	TokenID      string
+	TokenOwnerID string
 }
 
 type burnTokenEventInfo struct {

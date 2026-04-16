@@ -268,15 +268,16 @@ func TestTransferTokenTransactionUniqueIDs(t *testing.T) {
 // --- AuthorizeTokenTransferTransaction Tests ---
 
 func TestAuthorizeTokenTransferTransactionFields(t *testing.T) {
-	acc, _ := testCreateAccount(t)
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, _ := testCreateAccount(t)
 	tokenId := "some-token-id"
 
-	tx := newAuthorizeTokenTransferTransaction(acc, &tokenId)
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
 
 	require.NotNil(t, tx)
 	assert.Equal(t, AuthorizeTokenTransfer, tx.Type())
-	assert.Equal(t, acc, tx.Sender(), "sender should be the account")
-	assert.Equal(t, acc, tx.Receiver(), "receiver should be the same account")
+	assert.Equal(t, authorizer, tx.Sender(), "sender should be the authorizer account")
+	assert.Equal(t, tokenOwner, tx.Receiver(), "receiver should be the token owner account")
 	assert.Equal(t, &tokenId, tx.TokenId())
 	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
 }

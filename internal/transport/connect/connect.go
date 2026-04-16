@@ -25,9 +25,9 @@ import (
 	"sg-emulator/gen/event/v1/eventv1connect"
 	tokenv1 "sg-emulator/gen/token/v1"
 	"sg-emulator/gen/token/v1/tokenv1connect"
-	"sg-emulator/internal/crypto"
 	"sg-emulator/internal/scalegraph"
 	"sg-emulator/internal/server"
+	sgverifier "sg-emulator/internal/verifier"
 )
 
 // Transport implements the ConnectRPC transport for VirtualApps.
@@ -42,12 +42,12 @@ type Transport struct {
 	wmSubscriber        message.Subscriber
 	activeSubscriptions map[string]struct{}
 	activeSubMu         sync.Mutex
-	verifier            *crypto.Verifier
+	verifier            *sgverifier.Verifier
 	caPublicKey         ed25519.PublicKey
 }
 
 // New creates a new ConnectRPC transport with the given address and client.
-func New(address string, client *server.Client, verifier *crypto.Verifier, caPublicKey ed25519.PublicKey, exposeAdmin bool, wmSubscriber message.Subscriber, logger *slog.Logger) *Transport {
+func New(address string, client *server.Client, verifier *sgverifier.Verifier, caPublicKey ed25519.PublicKey, exposeAdmin bool, wmSubscriber message.Subscriber, logger *slog.Logger) *Transport {
 	logger.Info("gRPC transport created", "address", address)
 	return &Transport{
 		address:             address,

@@ -194,7 +194,7 @@ afterMint:
 	if mintedTokenID != "" {
 		name := "TokenService/AuthorizeTokenTransfer"
 		start := time.Now()
-		req, err := signAuthorizeTokenTransfer(acc1, mintedTokenID)
+		req, err := signAuthorizeTokenTransfer(acc1, acc0.id, mintedTokenID)
 		if err != nil {
 			fail(name, start, fmt.Errorf("sign: %w", err))
 		} else {
@@ -256,7 +256,7 @@ afterMint:
 		}
 		unauthTokenID := tokenIDFromRawSig(rawSig2)
 		{
-			authReq, err := signAuthorizeTokenTransfer(acc1, unauthTokenID)
+			authReq, err := signAuthorizeTokenTransfer(acc1, acc0.id, unauthTokenID)
 			if err != nil {
 				fail(name, start, fmt.Errorf("sign authorize: %w", err))
 				goto afterUnauth
@@ -272,7 +272,7 @@ afterMint:
 			}
 		}
 		{
-			unauthReq, err := signUnauthorizeTokenTransfer(acc1, unauthTokenID)
+			unauthReq, err := signUnauthorizeTokenTransfer(acc1, acc0.id, unauthTokenID)
 			if err != nil {
 				fail(name, start, fmt.Errorf("sign: %w", err))
 				goto afterUnauth

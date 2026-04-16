@@ -842,9 +842,11 @@ func (m Model) updateAuthorizeTokenTransfer(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 				m.statusMsg = "Failed to parse private key: " + err.Error()
 				return m, nil
 			}
+			tokenOwnerID := accounts[m.tokenSourceIndex].ID()
 			payload := &crypto.AuthorizeTokenTransferPayload{
-				AccountID: receiverID.String(),
-				TokenID:   selectedToken.ID(),
+				AccountID:    receiverID.String(),
+				TokenID:      selectedToken.ID(),
+				TokenOwnerID: tokenOwnerID.String(),
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, receiverID.String(), creds.CertificatePEM)
 			if err != nil {
@@ -965,9 +967,11 @@ func (m Model) updateUnauthorizeTokenTransfer(msg tea.KeyMsg) (tea.Model, tea.Cm
 				m.statusMsg = "Failed to parse private key: " + err.Error()
 				return m, nil
 			}
+			tokenOwnerID := accounts[m.tokenSourceIndex].ID()
 			payload := &crypto.UnauthorizeTokenTransferPayload{
-				AccountID: receiverID.String(),
-				TokenID:   selectedToken.ID(),
+				AccountID:    receiverID.String(),
+				TokenID:      selectedToken.ID(),
+				TokenOwnerID: tokenOwnerID.String(),
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, receiverID.String(), creds.CertificatePEM)
 			if err != nil {

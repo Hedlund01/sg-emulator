@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"sg-emulator/internal/crypto"
 )
@@ -152,11 +153,17 @@ func (ca *CA) GetAccountCertificatePEM(accountID string) (string, error) {
 
 // VerifyCertificate verifies that a certificate was signed by this CA
 func (ca *CA) VerifyCertificate(cert *x509.Certificate) error {
-	verifier := crypto.NewVerifier(ca.certificate)
-	return verifier.VerifyCertificate(cert)
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.certificate)
+	opts := x509.VerifyOptions{
+		Roots:       roots,
+		CurrentTime: time.Now(),
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	if _, err := cert.Verify(opts); err != nil {
+		return fmt.Errorf("certificate verification failed: %w", err)
+	}
+	return nil
 }
 
-// NewVerifier creates a new Verifier using this CA's certificate
-func (ca *CA) NewVerifier() *crypto.Verifier {
-	return crypto.NewVerifier(ca.certificate)
-}
+

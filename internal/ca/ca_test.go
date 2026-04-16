@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"sg-emulator/internal/crypto"
+	sgverifier "sg-emulator/internal/verifier"
 )
 
 func TestCABootstrapAndLoad(t *testing.T) {
@@ -150,7 +151,7 @@ func TestVerifier(t *testing.T) {
 		t.Fatalf("Failed to create CA: %v", err)
 	}
 
-	verifier := certAuth.NewVerifier()
+	verifier := sgverifier.NewVerifier(certAuth.Certificate(), nil)
 
 	// Create account credentials
 	kp, cert, accountID, err := certAuth.CreateAccountCredentials()

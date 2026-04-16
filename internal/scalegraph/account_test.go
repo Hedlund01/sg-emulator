@@ -222,11 +222,13 @@ func TestAccountTokenStoreInitialized(t *testing.T) {
 func TestGetTokenReturnsNilForPlaceholder(t *testing.T) {
 	// Regression: GetToken guard was inverted — it returned the &Token{} placeholder
 	// (authorized-but-not-owned) as if it were a real token.
-	acc, _ := testCreateAccount(t)
-	tokenId := "placeholder-token-id"
-	testAuthorizeTokenTransfer(t, acc, tokenId)
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, kp := testCreateAccount(t)
+	minted := testMintTokenIntoAccount(t, tokenOwner, kp.PrivateKey)
 
-	token, ok := acc.GetToken(tokenId)
+	testAuthorizeTokenTransfer(t, authorizer, tokenOwner, minted.ID())
+
+	token, ok := authorizer.GetToken(minted.ID())
 	assert.False(t, ok, "GetToken should return false for a placeholder slot")
 	assert.Nil(t, token, "GetToken should return nil for a placeholder slot")
 }
@@ -243,27 +245,29 @@ func TestGetTokenReturnsTokenWhenOwned(t *testing.T) {
 }
 
 func TestGetTokensExcludesPlaceholders(t *testing.T) {
-	acc, kp := testCreateAccount(t)
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, kp := testCreateAccount(t)
 
-	// Authorize a slot but don't mint — the store only has a placeholder.
-	// We need a token ID to authorize; use one derived from a token we'll create
-	// but NOT append.
-	fakeToken := testCreateToken(t, acc, kp.PrivateKey)
-	testAuthorizeTokenTransfer(t, acc, fakeToken.ID())
+	// Mint a token into the owner, then authorize transfer to authorizer.
+	minted := testMintTokenIntoAccount(t, tokenOwner, kp.PrivateKey)
+	testAuthorizeTokenTransfer(t, authorizer, tokenOwner, minted.ID())
 
-	tokens := acc.GetTokens()
+	// Authorizer only has a placeholder slot, not an owned token.
+	tokens := authorizer.GetTokens()
 	assert.Empty(t, tokens, "GetTokens should not return placeholder slots")
 }
 
 func TestAuthorizeTokenTransferRequiresSufficientBalance(t *testing.T) {
 	// Account with 0 balance cannot cover MBR_SLOT_COST.
-	acc, _ := testCreateAccount(t)
-	tokenId := "some-token-id"
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, kp := testCreateAccount(t)
+	minted := testMintTokenIntoAccount(t, tokenOwner, kp.PrivateKey)
 
-	tx := newAuthorizeTokenTransferTransaction(acc, &tokenId)
-	err := acc.appendTransaction(tx)
+	mintedID := minted.ID()
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &mintedID)
+	err := authorizer.appendTransaction(tx)
 	assert.Error(t, err, "authorizing a token slot with 0 balance should fail")
-	assert.Equal(t, 0.0, acc.Balance(), "balance should be unchanged after failed authorization")
+	assert.Equal(t, 0.0, authorizer.Balance(), "balance should be unchanged after failed authorization")
 }
 
 func TestMintTokenIncreasesBlockchainLength(t *testing.T) {
@@ -315,21 +319,83 @@ func TestRollbackMintTokenRestoresState(t *testing.T) {
 }
 
 func TestRollbackAuthorizeTokenTransferRestoresState(t *testing.T) {
-	acc, _ := testCreateAccount(t)
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, kp := testCreateAccount(t)
+	minted := testMintTokenIntoAccount(t, tokenOwner, kp.PrivateKey)
+	tokenId := minted.ID()
+
 	// Give enough balance to cover MBR_SLOT_COST.
-	require.NoError(t, acc.appendTransaction(newMintTransaction(acc, 10.0)))
+	require.NoError(t, authorizer.appendTransaction(newMintTransaction(authorizer, 10.0)))
 
-	tokenId := "some-token-id"
-	authTx := newAuthorizeTokenTransferTransaction(acc, &tokenId)
-	require.NoError(t, acc.appendTransaction(authTx))
+	authTx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	require.NoError(t, authorizer.appendTransaction(authTx))
 
-	assert.Equal(t, MBR_SLOT_COST, acc.mbr, "mbr should equal MBR_SLOT_COST after authorization")
-	assert.NotNil(t, acc.tokenStore[tokenId], "placeholder slot should exist after authorization")
+	assert.Equal(t, MBR_SLOT_COST, authorizer.mbr, "mbr should equal MBR_SLOT_COST after authorization")
+	assert.NotNil(t, authorizer.tokenStore[tokenId], "placeholder slot should exist after authorization")
 
-	require.NoError(t, acc.rollbacklatestTransaction(authTx))
+	require.NoError(t, authorizer.rollbacklatestTransaction(authTx))
 
-	assert.Equal(t, 0.0, acc.mbr, "mbr should be 0 after rolling back authorization")
-	assert.Nil(t, acc.tokenStore[tokenId], "placeholder slot should be removed after rollback")
+	assert.Equal(t, 0.0, authorizer.mbr, "mbr should be 0 after rolling back authorization")
+	assert.Nil(t, authorizer.tokenStore[tokenId], "placeholder slot should be removed after rollback")
+}
+
+func TestAuthorizeTokenTransferAppendsToOwnerBlockchain(t *testing.T) {
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, kp := testCreateAccount(t)
+	minted := testMintTokenIntoAccount(t, tokenOwner, kp.PrivateKey)
+
+	ownerInitialLen := tokenOwner.Blockchain().Len()
+	authorizerInitialLen := authorizer.Blockchain().Len()
+
+	testAuthorizeTokenTransfer(t, authorizer, tokenOwner, minted.ID())
+
+	// Both blockchains should have grown (authorizer also got a mint for MBR)
+	assert.Greater(t, tokenOwner.Blockchain().Len(), ownerInitialLen, "token owner blockchain should grow after authorize")
+	assert.Greater(t, authorizer.Blockchain().Len(), authorizerInitialLen, "authorizer blockchain should grow after authorize")
+}
+
+func TestAuthorizeTokenTransferFailsIfTokenNotOnOwner(t *testing.T) {
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, _ := testCreateAccount(t)
+	// Give authorizer balance so MBR check passes
+	require.NoError(t, authorizer.appendTransaction(newMintTransaction(authorizer, MBR_SLOT_COST)))
+
+	nonExistentID := "nonexistent-token-id"
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &nonExistentID)
+
+	// Authorizer side succeeds (balance is fine)
+	require.NoError(t, authorizer.appendTransaction(tx))
+
+	// Token owner side should fail (token doesn't exist on owner)
+	err := tokenOwner.appendTransaction(tx)
+	assert.Error(t, err, "token owner should reject authorize if token doesn't exist")
+}
+
+func TestAuthorizeTokenTransferRollbackOnOwnerFailure(t *testing.T) {
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, _ := testCreateAccount(t)
+
+	// Give authorizer balance
+	require.NoError(t, authorizer.appendTransaction(newMintTransaction(authorizer, MBR_SLOT_COST+1)))
+	authorizerBalanceBefore := authorizer.Balance()
+	authorizerMBRBefore := authorizer.mbr
+
+	nonExistentID := "nonexistent-token-id"
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &nonExistentID)
+
+	// Authorizer side succeeds
+	require.NoError(t, authorizer.appendTransaction(tx))
+	assert.Equal(t, authorizerMBRBefore+MBR_SLOT_COST, authorizer.mbr, "MBR frozen after authorizer side")
+
+	// Token owner side fails
+	require.Error(t, tokenOwner.appendTransaction(tx))
+
+	// Rollback authorizer
+	require.NoError(t, authorizer.rollbacklatestTransaction(tx))
+
+	assert.Equal(t, authorizerMBRBefore, authorizer.mbr, "MBR restored after rollback")
+	assert.Equal(t, authorizerBalanceBefore, authorizer.Balance(), "balance restored after rollback")
+	assert.Nil(t, authorizer.tokenStore[nonExistentID], "placeholder slot removed after rollback")
 }
 
 func TestRollbackTransferTokenRestoresSenderToken(t *testing.T) {

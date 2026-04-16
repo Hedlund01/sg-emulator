@@ -16,6 +16,7 @@ import (
 	"sg-emulator/internal/transport/mcp"
 	"sg-emulator/internal/transport/rest"
 	"sg-emulator/internal/transport/tui"
+	sgverifier "sg-emulator/internal/verifier"
 )
 
 func main() {
@@ -129,7 +130,7 @@ func main() {
 
 			grpcAddr := fmt.Sprintf("localhost:%d", 50051+i)
 			grpcLogger := rootLogger.With("component", "grpc", "index", i, "address", grpcAddr)
-			vapp.AddTransport(grpc.New(grpcAddr, vapp.Client(), certAuth.NewVerifier(), certAuth.PublicKey(), *exposeAdmin, vapp.Subscriber(), grpcLogger))
+			vapp.AddTransport(grpc.New(grpcAddr, vapp.Client(), sgverifier.NewVerifier(certAuth.Certificate(), srv.App()), certAuth.PublicKey(), *exposeAdmin, vapp.Subscriber(), grpcLogger))
 			vapp.Start()
 
 			slog.Info("Created gRPC virtual app",

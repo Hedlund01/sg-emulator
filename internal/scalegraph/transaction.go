@@ -207,17 +207,19 @@ func (t *MintTokenTransaction) Token() *Token {
 }
 
 type AuthorizeTokenTransferTransaction struct {
-	id      ScalegraphId
-	account *Account
-	tokenId *string
+	id         ScalegraphId
+	sender     *Account // authorizer (future token receiver)
+	receiver   *Account // token owner (current token holder)
+	tokenId    *string
 }
 
-func newAuthorizeTokenTransferTransaction(account *Account, tokenId *string) *AuthorizeTokenTransferTransaction {
+func newAuthorizeTokenTransferTransaction(authorizer, tokenOwner *Account, tokenId *string) *AuthorizeTokenTransferTransaction {
 	txId, _ := NewScalegraphId()
 	return &AuthorizeTokenTransferTransaction{
-		id:      txId,
-		account: account,
-		tokenId: tokenId,
+		id:       txId,
+		sender:   authorizer,
+		receiver: tokenOwner,
+		tokenId:  tokenId,
 	}
 }
 
@@ -231,11 +233,11 @@ func (t *AuthorizeTokenTransferTransaction) Type() TransactionType {
 }
 
 func (t *AuthorizeTokenTransferTransaction) Sender() *Account {
-	return t.account
+	return t.sender
 }
 
 func (t *AuthorizeTokenTransferTransaction) Receiver() *Account {
-	return t.account
+	return t.receiver
 }
 
 func (t *AuthorizeTokenTransferTransaction) TokenId() *string {
@@ -281,17 +283,19 @@ func (t *TransferTokenTransaction) Token() *Token {
 }
 
 type UnauthorizeTokenTransferTransaction struct {
-	id      ScalegraphId
-	account *Account
-	tokenId *string
+	id       ScalegraphId
+	sender   *Account // authorizer revoking (future token receiver)
+	receiver *Account // token owner (current token holder)
+	tokenId  *string
 }
 
-func newUnauthorizeTokenTransferTransaction(account *Account, tokenId *string) *UnauthorizeTokenTransferTransaction {
+func newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner *Account, tokenId *string) *UnauthorizeTokenTransferTransaction {
 	txId, _ := NewScalegraphId()
 	return &UnauthorizeTokenTransferTransaction{
-		id:      txId,
-		account: account,
-		tokenId: tokenId,
+		id:       txId,
+		sender:   authorizer,
+		receiver: tokenOwner,
+		tokenId:  tokenId,
 	}
 }
 
@@ -305,11 +309,11 @@ func (t *UnauthorizeTokenTransferTransaction) Type() TransactionType {
 }
 
 func (t *UnauthorizeTokenTransferTransaction) Sender() *Account {
-	return t.account
+	return t.sender
 }
 
 func (t *UnauthorizeTokenTransferTransaction) Receiver() *Account {
-	return t.account
+	return t.receiver
 }
 
 func (t *UnauthorizeTokenTransferTransaction) TokenId() *string {

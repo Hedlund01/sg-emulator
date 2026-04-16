@@ -582,7 +582,7 @@ func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair tok
 		tokenID := tokenIDFromRawSig(rawSig)
 
 		// 2. Receiver authorizes the incoming transfer.
-		authReq, err := signAuthorizeTokenTransfer(receiver, tokenID)
+		authReq, err := signAuthorizeTokenTransfer(receiver, sender.id, tokenID)
 		if err != nil {
 			res.recordOpFailure(measured)
 			continue
