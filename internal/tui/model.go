@@ -27,6 +27,8 @@ const (
 	ViewTokenList
 	ViewBurnToken
 	ViewClawbackToken
+	ViewFreezeToken
+	ViewUnfreezeToken
 	ViewLookupToken
 )
 

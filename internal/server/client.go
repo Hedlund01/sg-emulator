@@ -426,3 +426,57 @@ func (c *Client) ClawbackTokenSigned(ctx context.Context, signedReq *crypto.Sign
 		SignedEnvelope: signedReq,
 	})
 }
+
+func (c *Client) FreezeTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.FreezeTokenPayload]) (*scalegraph.FreezeTokenResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"freeze_authority", signedReq.Payload.FreezeAuthority, "token_holder", signedReq.Payload.TokenHolder, "token_id", signedReq.Payload.TokenID, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Freeze token requested", logAttrs...)
+
+	freezeAuthority, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.FreezeAuthority)
+	if err != nil {
+		c.logger.Error("Invalid freeze authority account ID", "error", err)
+		return nil, err
+	}
+	tokenHolder, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.TokenHolder)
+	if err != nil {
+		c.logger.Error("Invalid token holder account ID", "error", err)
+		return nil, err
+	}
+
+	return Send[scalegraph.FreezeTokenRequest, scalegraph.FreezeTokenResponse](c, ctx, &scalegraph.FreezeTokenRequest{
+		FreezeAuthority: freezeAuthority,
+		TokenHolder:     tokenHolder,
+		TokenId:         signedReq.Payload.TokenID,
+		SignedEnvelope:  signedReq,
+	})
+}
+
+func (c *Client) UnfreezeTokenSigned(ctx context.Context, signedReq *crypto.SignedEnvelope[*crypto.UnfreezeTokenPayload]) (*scalegraph.UnfreezeTokenResponse, error) {
+	traceID := trace.GetTraceID(ctx)
+	logAttrs := []any{"freeze_authority", signedReq.Payload.FreezeAuthority, "token_holder", signedReq.Payload.TokenHolder, "token_id", signedReq.Payload.TokenID, "signed", true}
+	if traceID != "" {
+		logAttrs = append(logAttrs, "trace_id", traceID)
+	}
+	c.logger.Debug("Unfreeze token requested", logAttrs...)
+
+	freezeAuthority, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.FreezeAuthority)
+	if err != nil {
+		c.logger.Error("Invalid freeze authority account ID", "error", err)
+		return nil, err
+	}
+	tokenHolder, err := scalegraph.ScalegraphIdFromString(signedReq.Payload.TokenHolder)
+	if err != nil {
+		c.logger.Error("Invalid token holder account ID", "error", err)
+		return nil, err
+	}
+
+	return Send[scalegraph.UnfreezeTokenRequest, scalegraph.UnfreezeTokenResponse](c, ctx, &scalegraph.UnfreezeTokenRequest{
+		FreezeAuthority: freezeAuthority,
+		TokenHolder:     tokenHolder,
+		TokenId:         signedReq.Payload.TokenID,
+		SignedEnvelope:  signedReq,
+	})
+}

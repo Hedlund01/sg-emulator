@@ -88,6 +88,10 @@ func (m Model) View() string {
 		content = m.viewBurnToken()
 	case ViewClawbackToken:
 		content = m.viewClawbackToken()
+	case ViewFreezeToken:
+		content = m.viewFreezeToken()
+	case ViewUnfreezeToken:
+		content = m.viewUnfreezeToken()
 	case ViewLookupToken:
 		content = m.viewLookupToken()
 	}
@@ -770,6 +774,8 @@ func (m Model) viewTokenMenu() string {
 		"View Account Tokens",
 		"Burn Token",
 		"Clawback Token",
+		"Freeze Token",
+		"Unfreeze Token",
 		"Lookup Token",
 	}
 
@@ -1267,6 +1273,160 @@ func (m Model) viewClawbackToken() string {
 	)
 }
 
+func (m Model) viewFreezeToken() string {
+	title := titleStyle.Render("Freeze Token")
+
+	accounts := m.cachedAccounts
+	if len(accounts) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "No accounts available.", "", helpStyle.Render("esc: back"))
+	}
+
+	var content string
+
+	switch m.tokenStep {
+	case 0: // Select freeze authority account (signs the request)
+		content = "Step 1/3 — Select freeze authority account:\n\n"
+		for i, acc := range accounts {
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenAccountIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+
+	case 1: // Select token holder account
+		authority := accounts[m.tokenAccountIndex]
+		content = fmt.Sprintf("Authority: %s\n\n", m.getAccountDisplayName(authority))
+		content += "Step 2/3 — Select token holder account:\n\n"
+		for i, acc := range accounts {
+			if i == m.tokenAccountIndex {
+				continue
+			}
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f  Tokens: %d",
+				m.getAccountDisplayName(acc), acc.Balance(), len(acc.GetTokens()))
+			if i == m.tokenSourceIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+
+	case 2: // Select token to freeze (filtered: this authority, not already frozen)
+		authority := accounts[m.tokenAccountIndex]
+		holder := accounts[m.tokenSourceIndex]
+		content = fmt.Sprintf("Authority: %s\n", m.getAccountDisplayName(authority))
+		content += fmt.Sprintf("Holder:    %s\n\n", m.getAccountDisplayName(holder))
+		tokens := m.cachedTokens
+		if len(tokens) == 0 {
+			content += "No freezable tokens found."
+		} else {
+			content += "Step 3/3 — Select token to freeze:\n\n"
+			for i, tok := range tokens {
+				cursor := "  "
+				line := fmt.Sprintf("Value: %-12s  ID: %s", tok.Value(), shortID(tok.ID(), 8))
+				if i == m.tokenTokenIndex {
+					cursor = "> "
+					line = selectedStyle.Render(line)
+				}
+				content += cursor + line + "\n"
+			}
+		}
+	}
+
+	help := helpStyle.Render("↑/↓: navigate • enter: confirm • esc: back")
+	status := m.renderStatus()
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		content,
+		"",
+		status,
+		help,
+	)
+}
+
+func (m Model) viewUnfreezeToken() string {
+	title := titleStyle.Render("Unfreeze Token")
+
+	accounts := m.cachedAccounts
+	if len(accounts) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "", "No accounts available.", "", helpStyle.Render("esc: back"))
+	}
+
+	var content string
+
+	switch m.tokenStep {
+	case 0: // Select freeze authority account (signs the request)
+		content = "Step 1/3 — Select freeze authority account:\n\n"
+		for i, acc := range accounts {
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenAccountIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+
+	case 1: // Select token holder account
+		authority := accounts[m.tokenAccountIndex]
+		content = fmt.Sprintf("Authority: %s\n\n", m.getAccountDisplayName(authority))
+		content += "Step 2/3 — Select token holder account:\n\n"
+		for i, acc := range accounts {
+			if i == m.tokenAccountIndex {
+				continue
+			}
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f  Tokens: %d",
+				m.getAccountDisplayName(acc), acc.Balance(), len(acc.GetTokens()))
+			if i == m.tokenSourceIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+
+	case 2: // Select token to unfreeze (filtered: this authority, frozen only)
+		authority := accounts[m.tokenAccountIndex]
+		holder := accounts[m.tokenSourceIndex]
+		content = fmt.Sprintf("Authority: %s\n", m.getAccountDisplayName(authority))
+		content += fmt.Sprintf("Holder:    %s\n\n", m.getAccountDisplayName(holder))
+		tokens := m.cachedTokens
+		if len(tokens) == 0 {
+			content += "No frozen tokens found."
+		} else {
+			content += "Step 3/3 — Select token to unfreeze:\n\n"
+			for i, tok := range tokens {
+				cursor := "  "
+				line := fmt.Sprintf("Value: %-12s  ID: %s  [FROZEN]", tok.Value(), shortID(tok.ID(), 8))
+				if i == m.tokenTokenIndex {
+					cursor = "> "
+					line = selectedStyle.Render(line)
+				}
+				content += cursor + line + "\n"
+			}
+		}
+	}
+
+	help := helpStyle.Render("↑/↓: navigate • enter: confirm • esc: back")
+	status := m.renderStatus()
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		content,
+		"",
+		status,
+		help,
+	)
+}
+
 func (m Model) viewTokenList() string {
 	title := titleStyle.Render("Account Tokens")
 
@@ -1355,7 +1515,11 @@ func (m Model) viewTokenList() string {
 					}
 					freeze = faStr
 				}
-				line := fmt.Sprintf("#%d  val:%-12s  id:%s  clawback:%s  freeze:%s", i+1, tok.Value(), tokID, clawback, freeze)
+				frozenMark := ""
+				if tok.Frozen() {
+					frozenMark = "  [FROZEN]"
+				}
+				line := fmt.Sprintf("#%d  val:%-12s  id:%s  clawback:%s  freeze:%s%s", i+1, tok.Value(), tokID, clawback, freeze, frozenMark)
 				if i == m.tokenTokenIndex {
 					cursor = "> "
 					line = selectedStyle.Render(line)
@@ -1423,6 +1587,9 @@ func (m Model) viewLookupToken() string {
 			}
 			if t.FreezeAddress() != nil {
 				content += fmt.Sprintf("  Freeze:   %s\n", t.FreezeAddress().String())
+			}
+			if t.Frozen() {
+				content += "  Status:   [FROZEN]\n"
 			}
 		}
 	}

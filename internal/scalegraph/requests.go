@@ -336,6 +336,60 @@ func (r *SubscribeEventsRequest) Verify(verifier crypto.SignatureVerifier, caPub
 		})
 }
 
+type FreezeTokenRequest struct {
+	FreezeAuthority ScalegraphId
+	TokenHolder     ScalegraphId
+	TokenId         string
+	SignedEnvelope  *crypto.SignedEnvelope[*crypto.FreezeTokenPayload]
+}
+
+func (r *FreezeTokenRequest) RequiresSignature() bool { return true }
+
+func (r *FreezeTokenRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
+	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.FreezeAuthority.String(),
+		func(signed *crypto.FreezeTokenPayload) error {
+			if signed.FreezeAuthority != r.FreezeAuthority.String() {
+				return fmt.Errorf("FreezeAuthority mismatch")
+			}
+			if signed.TokenHolder != r.TokenHolder.String() {
+				return fmt.Errorf("TokenHolder mismatch")
+			}
+			if signed.TokenID != r.TokenId {
+				return fmt.Errorf("TokenID mismatch")
+			}
+			return nil
+		})
+}
+
+type FreezeTokenResponse struct{}
+
+type UnfreezeTokenRequest struct {
+	FreezeAuthority ScalegraphId
+	TokenHolder     ScalegraphId
+	TokenId         string
+	SignedEnvelope  *crypto.SignedEnvelope[*crypto.UnfreezeTokenPayload]
+}
+
+func (r *UnfreezeTokenRequest) RequiresSignature() bool { return true }
+
+func (r *UnfreezeTokenRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey ed25519.PublicKey) error {
+	return crypto.VerifyRequest(verifier, caPublicKey, r.SignedEnvelope, r.FreezeAuthority.String(),
+		func(signed *crypto.UnfreezeTokenPayload) error {
+			if signed.FreezeAuthority != r.FreezeAuthority.String() {
+				return fmt.Errorf("FreezeAuthority mismatch")
+			}
+			if signed.TokenHolder != r.TokenHolder.String() {
+				return fmt.Errorf("TokenHolder mismatch")
+			}
+			if signed.TokenID != r.TokenId {
+				return fmt.Errorf("TokenID mismatch")
+			}
+			return nil
+		})
+}
+
+type UnfreezeTokenResponse struct{}
+
 type LookupTokenRequest struct {
 	TokenID        string
 	AccountID      ScalegraphId

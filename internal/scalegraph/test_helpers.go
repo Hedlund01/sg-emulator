@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"log/slog"
 	"math/big"
 	"sync"
@@ -165,6 +166,58 @@ func testAuthorizeTokenTransfer(t *testing.T, authorizer *Account, tokenOwner *A
 
 	err = tokenOwner.appendTransaction(tx)
 	require.NoError(t, err, "failed to append authorize token transfer transaction (token owner side)")
+}
+
+// testCreateTokenWithAddresses creates a Token signed by acc using privKey,
+// with optional clawback and freeze addresses.
+func testCreateTokenWithAddresses(t *testing.T, acc *Account, privKey ed25519.PrivateKey, clawback, freeze *ScalegraphId) *Token {
+	t.Helper()
+
+	nonce := int64(acc.GetNonce())
+	var cbStr *string
+	if clawback != nil {
+		s := clawback.String()
+		cbStr = &s
+	}
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "test-value", ClawbackAddress: cbStr, Nonce: nonce}
+	sig, err := sgcrypto.Sign(payload, privKey, acc.ID().String())
+	require.NoError(t, err, "failed to sign token payload")
+
+	return newToken("test-value", *sig, clawback, freeze, nonce)
+}
+
+// testMintTokenWithAddressesInApp mints a token via app.MintToken with optional addresses.
+// It first ensures the account has enough balance for MBR_TOKEN_COST.
+// Returns the minted token ID.
+func testMintTokenWithAddressesInApp(t *testing.T, app *App,
+	privKey ed25519.PrivateKey, cert *x509.Certificate,
+	acc *Account, tokenValue string, clawback, freeze *ScalegraphId,
+) string {
+	t.Helper()
+
+	err := app.Mint(testCtx(), &MintRequest{To: acc.ID(), Amount: MBR_TOKEN_COST})
+	require.NoError(t, err, "failed to mint MBR balance")
+
+	nonce := int64(acc.GetNonce())
+	var cbStr *string
+	if clawback != nil {
+		s := clawback.String()
+		cbStr = &s
+	}
+	payload := &sgcrypto.MintTokenPayload{TokenValue: tokenValue, ClawbackAddress: cbStr, Nonce: nonce}
+	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
+	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
+	require.NoError(t, err, "failed to create signed envelope")
+
+	resp, err := app.MintToken(testCtx(), &MintTokenRequest{
+		TokenValue:      tokenValue,
+		ClawbackAddress: clawback,
+		FreezeAddress:   freeze,
+		Nonce:           nonce,
+		SignedEnvelope:  envelope,
+	})
+	require.NoError(t, err, "failed to mint token")
+	return resp.TokenID
 }
 
 // runConcurrent runs fn concurrently n times and waits for all goroutines to finish.

@@ -30,6 +30,10 @@ func eventInvolvedAccounts(event *eventv1.Event) []string {
 		return []string{d.BurnToken.GetAccountId()}
 	case *eventv1.Event_ClawbackToken:
 		return []string{d.ClawbackToken.GetFrom(), d.ClawbackToken.GetTo()}
+	case *eventv1.Event_FreezeToken:
+		return []string{d.FreezeToken.GetFreezeAuthority(), d.FreezeToken.GetTokenHolder()}
+	case *eventv1.Event_UnfreezeToken:
+		return []string{d.UnfreezeToken.GetFreezeAuthority(), d.UnfreezeToken.GetTokenHolder()}
 	default:
 		return nil
 	}
@@ -136,6 +140,30 @@ func BuildEvent(requestPayload any) *eventv1.Event {
 				},
 			},
 		}
+	case *freezeTokenEventInfo:
+		return &eventv1.Event{
+			Type:      eventv1.EventType_EVENT_TYPE_FREEZE_TOKEN,
+			Timestamp: now,
+			Data: &eventv1.Event_FreezeToken{
+				FreezeToken: &eventv1.FreezeTokenEventData{
+					FreezeAuthority: req.FreezeAuthority,
+					TokenHolder:     req.TokenHolder,
+					TokenId:         req.TokenID,
+				},
+			},
+		}
+	case *unfreezeTokenEventInfo:
+		return &eventv1.Event{
+			Type:      eventv1.EventType_EVENT_TYPE_UNFREEZE_TOKEN,
+			Timestamp: now,
+			Data: &eventv1.Event_UnfreezeToken{
+				UnfreezeToken: &eventv1.UnfreezeTokenEventData{
+					FreezeAuthority: req.FreezeAuthority,
+					TokenHolder:     req.TokenHolder,
+					TokenId:         req.TokenID,
+				},
+			},
+		}
 	default:
 		return nil
 	}
@@ -197,6 +225,18 @@ func extractEventInfo(requestPayload any, responsePayload any) any {
 			To:      req.To.String(),
 			TokenID: req.TokenId,
 		}
+	case *scalegraph.FreezeTokenRequest:
+		return &freezeTokenEventInfo{
+			FreezeAuthority: req.FreezeAuthority.String(),
+			TokenHolder:     req.TokenHolder.String(),
+			TokenID:         req.TokenId,
+		}
+	case *scalegraph.UnfreezeTokenRequest:
+		return &unfreezeTokenEventInfo{
+			FreezeAuthority: req.FreezeAuthority.String(),
+			TokenHolder:     req.TokenHolder.String(),
+			TokenID:         req.TokenId,
+		}
 	default:
 		return nil
 	}
@@ -249,4 +289,16 @@ type clawbackTokenEventInfo struct {
 	From    string
 	To      string
 	TokenID string
+}
+
+type freezeTokenEventInfo struct {
+	FreezeAuthority string
+	TokenHolder     string
+	TokenID         string
+}
+
+type unfreezeTokenEventInfo struct {
+	FreezeAuthority string
+	TokenHolder     string
+	TokenID         string
 }

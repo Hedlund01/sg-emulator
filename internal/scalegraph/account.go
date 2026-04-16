@@ -55,6 +55,10 @@ const (
 
 	MBR_TOKEN_COST = 1.0 // Each token creation transaction will require the sender to have at least this balance as MBR, which will unfreeze when the burn token transaction is executed.
 
+	MBR_FREEZE_COST = 0.1 // MBR locked by the freeze authority while a token is frozen; released on unfreeze.
+
+	MBR_UNFREEZE_COST = 0.1 // MBR released from the freeze authority when a token is unfrozen; must match MBR_FREEZE_COST.
+
 )
 
 type Account struct {
@@ -103,6 +107,8 @@ func (a *Account) registerTxHandlers() {
 	registerTxHandler(a.txHandlers, UnauthorizeTokenTransfer, a.handleUnauthorizeTokenTransferTx)
 	registerTxHandler(a.txHandlers, BurnToken, a.handleBurnTokenTx)
 	registerTxHandler(a.txHandlers, ClawbackTokenTransfer, a.handleClawbackTokenTx)
+	registerTxHandler(a.txHandlers, FreezeToken, a.handleFreezeTokenTx)
+	registerTxHandler(a.txHandlers, UnfreezeToken, a.handleUnfreezeTokenTx)
 }
 
 func (a *Account) registerTxRollbackHandlers() {
@@ -116,6 +122,8 @@ func (a *Account) registerTxRollbackHandlers() {
 	registerTxRollbackHandler(a.txRollbackHandlers, UnauthorizeTokenTransfer, a.rollbackUnauthorizeTokenTransferTx)
 	// BurnToken does not need a rollback handler because a burn token transaction only touches one account.
 	registerTxRollbackHandler(a.txRollbackHandlers, ClawbackTokenTransfer, a.rollbackClawbackTokenTx)
+	registerTxRollbackHandler(a.txRollbackHandlers, FreezeToken, a.rollbackFreezeTokenTx)
+	registerTxRollbackHandler(a.txRollbackHandlers, UnfreezeToken, a.rollbackUnfreezeTokenTx)
 }
 
 // PublicKey returns the account's public key (may be nil for legacy accounts)
@@ -361,9 +369,12 @@ func (a *Account) handleMintTokenTx(trx *MintTokenTransaction) error {
 
 func (a *Account) handleTransferTokenTx(trx *TransferTokenTransaction) error {
 	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
-		_, ok := a.tokenStore[trx.Token().ID()]
+		tok, ok := a.tokenStore[trx.Token().ID()]
 		if !ok {
 			return fmt.Errorf("token with ID %s does not exist in account %s", trx.Token().ID(), a.ID())
+		}
+		if tok.frozen {
+			return fmt.Errorf("token %s is frozen and cannot be transferred", tok.ID())
 		}
 		if err := a.removeToken(trx.Token().ID()); err != nil {
 			return fmt.Errorf("failed to remove token: %w", err)
@@ -555,6 +566,78 @@ func (a *Account) rollbackClawbackTokenTx(trx *ClawbackTokenTransaction) error {
 	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
 		if err := a.removeToken(token.ID()); err != nil {
 			return fmt.Errorf("failed to remove token during clawback rollback: %w", err)
+		}
+	}
+	return nil
+}
+
+func (a *Account) handleFreezeTokenTx(trx *FreezeTokenTransaction) error {
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		// Freeze authority: lock MBR
+		if a.balance-a.mbr < MBR_FREEZE_COST {
+			return fmt.Errorf("insufficient balance to cover MBR_FREEZE_COST: need %.2f available, have %.2f", MBR_FREEZE_COST, a.balance-a.mbr)
+		}
+		a.mbr += MBR_FREEZE_COST
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		// Token holder: freeze the token
+		tok, ok := a.tokenStore[trx.TokenID()]
+		if !ok {
+			return fmt.Errorf("token %s does not exist in account %s", trx.TokenID(), a.ID())
+		}
+		if tok.Equal(&Token{}) {
+			return fmt.Errorf("token %s is a placeholder slot and cannot be frozen", trx.TokenID())
+		}
+		if tok.frozen {
+			return fmt.Errorf("token %s is already frozen", trx.TokenID())
+		}
+		freezeAddr := tok.freezeAddress
+		if freezeAddr == nil || freezeAddr.String() != trx.Sender().ID().String() {
+			return fmt.Errorf("account %s is not the freeze authority for token %s", trx.Sender().ID(), trx.TokenID())
+		}
+		tok.frozen = true
+	} else {
+		return fmt.Errorf("either sender or receiver must be this account for freeze token transaction")
+	}
+	return nil
+}
+
+func (a *Account) handleUnfreezeTokenTx(trx *UnfreezeTokenTransaction) error {
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		// Freeze authority: release MBR
+		a.mbr -= MBR_UNFREEZE_COST
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		// Token holder: unfreeze the token
+		tok, ok := a.tokenStore[trx.TokenID()]
+		if !ok {
+			return fmt.Errorf("token %s does not exist in account %s", trx.TokenID(), a.ID())
+		}
+		if !tok.frozen {
+			return fmt.Errorf("token %s is not frozen", trx.TokenID())
+		}
+		tok.frozen = false
+	} else {
+		return fmt.Errorf("either sender or receiver must be this account for unfreeze token transaction")
+	}
+	return nil
+}
+
+func (a *Account) rollbackFreezeTokenTx(trx *FreezeTokenTransaction) error {
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		a.mbr -= MBR_FREEZE_COST
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		if tok, ok := a.tokenStore[trx.TokenID()]; ok {
+			tok.frozen = false
+		}
+	}
+	return nil
+}
+
+func (a *Account) rollbackUnfreezeTokenTx(trx *UnfreezeTokenTransaction) error {
+	if trx.Sender() != nil && trx.Sender().ID() == a.ID() {
+		a.mbr += MBR_UNFREEZE_COST
+	} else if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
+		if tok, ok := a.tokenStore[trx.TokenID()]; ok {
+			tok.frozen = true
 		}
 	}
 	return nil

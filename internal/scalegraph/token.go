@@ -13,6 +13,7 @@ type IToken interface {
 	Signature() crypto.Signature
 	ClawbackAddress() *ScalegraphId
 	FreezeAddress() *ScalegraphId
+	Frozen() bool
 	Nonce() int64
 	Equal(other IToken) bool
 	String() string
@@ -48,8 +49,8 @@ func TokenString(t IToken) string {
 	if t == nil {
 		return "Token{nil}"
 	}
-	return fmt.Sprintf("Token{ID: %s, Value: %s, Nonce: %d, ClawbackAddress: %v, Signature: %s}",
-		t.ID(), t.Value(), t.Nonce(), t.ClawbackAddress(), t.Signature())
+	return fmt.Sprintf("Token{ID: %s, Value: %s, Nonce: %d, ClawbackAddress: %v, Frozen: %v, Signature: %s}",
+		t.ID(), t.Value(), t.Nonce(), t.ClawbackAddress(), t.Frozen(), t.Signature())
 }
 
 type Token struct {
@@ -57,7 +58,8 @@ type Token struct {
 	signature       crypto.Signature
 	clawbackAddress *ScalegraphId
 	freezeAddress   *ScalegraphId
-	nonce 		 int64
+	nonce           int64
+	frozen          bool
 }
 
 func newToken(value string, signature crypto.Signature, clawbackAddress *ScalegraphId, freezeAddress *ScalegraphId, nonce int64) *Token {
@@ -67,6 +69,7 @@ func newToken(value string, signature crypto.Signature, clawbackAddress *Scalegr
 		clawbackAddress: clawbackAddress,
 		freezeAddress:   freezeAddress,
 		nonce:           nonce,
+		frozen:          false,
 	}
 }
 
@@ -88,6 +91,10 @@ func (t *Token) ClawbackAddress() *ScalegraphId {
 
 func (t *Token) FreezeAddress() *ScalegraphId {
 	return t.freezeAddress
+}
+
+func (t *Token) Frozen() bool {
+	return t.frozen
 }
 
 // Equal uses the generic TokenEqual function.

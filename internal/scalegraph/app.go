@@ -450,3 +450,93 @@ func (a *App) ClawbackToken(ctx context.Context, req *ClawbackTokenRequest) erro
 	logger.Info("Clawback token completed", "from", req.From, "to", req.To, "token_id", token.ID())
 	return nil
 }
+
+func (a *App) FreezeToken(ctx context.Context, req *FreezeTokenRequest) error {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+	logger.Debug("Freeze token operation initiated", "freeze_authority", req.FreezeAuthority, "token_holder", req.TokenHolder, "token_id", req.TokenId)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	authorityAcc, exists := a.accounts[req.FreezeAuthority]
+	if !exists {
+		return fmt.Errorf("freeze authority account not found: %s", req.FreezeAuthority)
+	}
+
+	holderAcc, exists := a.accounts[req.TokenHolder]
+	if !exists {
+		return fmt.Errorf("token holder account not found: %s", req.TokenHolder)
+	}
+
+	token, exists := holderAcc.GetToken(req.TokenId)
+	if !exists {
+		return fmt.Errorf("token not found in holder account: %s", req.TokenId)
+	}
+
+	if token.FreezeAddress() == nil || token.FreezeAddress().String() != req.FreezeAuthority.String() {
+		return fmt.Errorf("account %s is not the freeze authority for token %s", req.FreezeAuthority, req.TokenId)
+	}
+
+	freezeTx := newFreezeTokenTransaction(authorityAcc, holderAcc, req.TokenId)
+
+	if err := authorityAcc.appendTransaction(freezeTx); err != nil {
+		logger.Error("Failed to append freeze token transaction to authority", "error", err)
+		return err
+	}
+
+	if err := holderAcc.appendTransaction(freezeTx); err != nil {
+		logger.Error("Failed to append freeze token transaction to holder", "error", err)
+		authorityAcc.rollbacklatestTransaction(freezeTx)
+		return err
+	}
+
+	logger.Info("Freeze token completed", "freeze_authority", req.FreezeAuthority, "token_holder", req.TokenHolder, "token_id", req.TokenId)
+	return nil
+}
+
+func (a *App) UnfreezeToken(ctx context.Context, req *UnfreezeTokenRequest) error {
+	logger := a.logger
+	if traceID := trace.GetTraceID(ctx); traceID != "" {
+		logger = logger.With("trace_id", traceID)
+	}
+	logger.Debug("Unfreeze token operation initiated", "freeze_authority", req.FreezeAuthority, "token_holder", req.TokenHolder, "token_id", req.TokenId)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	authorityAcc, exists := a.accounts[req.FreezeAuthority]
+	if !exists {
+		return fmt.Errorf("freeze authority account not found: %s", req.FreezeAuthority)
+	}
+
+	holderAcc, exists := a.accounts[req.TokenHolder]
+	if !exists {
+		return fmt.Errorf("token holder account not found: %s", req.TokenHolder)
+	}
+
+	token, exists := holderAcc.GetToken(req.TokenId)
+	if !exists {
+		return fmt.Errorf("token not found in holder account: %s", req.TokenId)
+	}
+
+	if token.FreezeAddress() == nil || token.FreezeAddress().String() != req.FreezeAuthority.String() {
+		return fmt.Errorf("account %s is not the freeze authority for token %s", req.FreezeAuthority, req.TokenId)
+	}
+
+	unfreezeTx := newUnfreezeTokenTransaction(authorityAcc, holderAcc, req.TokenId)
+
+	if err := authorityAcc.appendTransaction(unfreezeTx); err != nil {
+		logger.Error("Failed to append unfreeze token transaction to authority", "error", err)
+		return err
+	}
+
+	if err := holderAcc.appendTransaction(unfreezeTx); err != nil {
+		logger.Error("Failed to append unfreeze token transaction to holder", "error", err)
+		authorityAcc.rollbacklatestTransaction(unfreezeTx)
+		return err
+	}
+
+	logger.Info("Unfreeze token completed", "freeze_authority", req.FreezeAuthority, "token_holder", req.TokenHolder, "token_id", req.TokenId)
+	return nil
+}

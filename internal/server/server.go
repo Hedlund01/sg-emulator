@@ -96,6 +96,8 @@ func (s *Server) registerHandlers() {
 	RegisterHandler(s, s.handleBurnToken)
 	RegisterHandler(s, s.handleClawbackToken)
 	RegisterHandler(s, s.handleTokenLookup)
+	RegisterHandler(s, s.handleFreezeToken)
+	RegisterHandler(s, s.handleUnfreezeToken)
 }
 
 func (s *Server) handleCreateAccount(ctx context.Context, req *scalegraph.CreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {
@@ -196,6 +198,20 @@ func (s *Server) handleTokenLookup(ctx context.Context, req *scalegraph.LookupTo
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (s *Server) handleFreezeToken(ctx context.Context, req *scalegraph.FreezeTokenRequest) (*scalegraph.FreezeTokenResponse, error) {
+	if err := s.app.FreezeToken(ctx, req); err != nil {
+		return nil, err
+	}
+	return &scalegraph.FreezeTokenResponse{}, nil
+}
+
+func (s *Server) handleUnfreezeToken(ctx context.Context, req *scalegraph.UnfreezeTokenRequest) (*scalegraph.UnfreezeTokenResponse, error) {
+	if err := s.app.UnfreezeToken(ctx, req); err != nil {
+		return nil, err
+	}
+	return &scalegraph.UnfreezeTokenResponse{}, nil
 }
 
 func (s *Server) handleAdminCreateAccount(ctx context.Context, req *scalegraph.AdminCreateAccountRequest) (*scalegraph.CreateAccountResponse, error) {

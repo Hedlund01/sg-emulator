@@ -281,3 +281,87 @@ func TestAuthorizeTokenTransferTransactionFields(t *testing.T) {
 	assert.Equal(t, &tokenId, tx.TokenId())
 	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
 }
+
+// --- BurnTokenTransaction Tests ---
+
+func TestBurnTokenTransactionProperties(t *testing.T) {
+	owner, _ := testCreateAccount(t)
+	tokenID := "some-token-id"
+
+	tx := newBurnTokenTransaction(owner, tokenID)
+
+	require.NotNil(t, tx)
+	assert.Equal(t, BurnToken, tx.Type())
+	assert.Equal(t, owner, tx.Sender(), "sender should be the token owner")
+	assert.Nil(t, tx.Receiver(), "burn transaction should have nil receiver")
+	assert.Equal(t, tokenID, tx.TokenID(), "TokenID should match")
+	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
+}
+
+// --- UnauthorizeTokenTransferTransaction Tests ---
+
+func TestUnauthorizeTokenTransferTransactionProperties(t *testing.T) {
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, _ := testCreateAccount(t)
+	tokenId := "some-token-id"
+
+	tx := newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+
+	require.NotNil(t, tx)
+	assert.Equal(t, UnauthorizeTokenTransfer, tx.Type())
+	assert.Equal(t, authorizer, tx.Sender(), "sender should be the authorizer")
+	assert.Equal(t, tokenOwner, tx.Receiver(), "receiver should be the token owner")
+	assert.Equal(t, &tokenId, tx.TokenId())
+	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
+}
+
+// --- ClawbackTokenTransaction Tests ---
+
+func TestClawbackTokenTransactionProperties(t *testing.T) {
+	from, _ := testCreateAccount(t) // token holder (sender)
+	to, _ := testCreateAccount(t)   // clawback authority (receiver)
+	token := Token{}
+
+	tx := newClawbackTokenTransaction(from, to, token)
+
+	require.NotNil(t, tx)
+	assert.Equal(t, ClawbackTokenTransfer, tx.Type())
+	assert.Equal(t, from, tx.Sender(), "sender should be the token holder")
+	assert.Equal(t, to, tx.Receiver(), "receiver should be the clawback authority")
+	assert.Equal(t, token, tx.Token())
+	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
+}
+
+// --- FreezeTokenTransaction Tests ---
+
+func TestFreezeTokenTransactionProperties(t *testing.T) {
+	authority, _ := testCreateAccount(t)
+	holder, _ := testCreateAccount(t)
+	tokenID := "some-token-id"
+
+	tx := newFreezeTokenTransaction(authority, holder, tokenID)
+
+	require.NotNil(t, tx)
+	assert.Equal(t, FreezeToken, tx.Type())
+	assert.Equal(t, authority, tx.Sender(), "sender should be the freeze authority")
+	assert.Equal(t, holder, tx.Receiver(), "receiver should be the token holder")
+	assert.Equal(t, tokenID, tx.TokenID())
+	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
+}
+
+// --- UnfreezeTokenTransaction Tests ---
+
+func TestUnfreezeTokenTransactionProperties(t *testing.T) {
+	authority, _ := testCreateAccount(t)
+	holder, _ := testCreateAccount(t)
+	tokenID := "some-token-id"
+
+	tx := newUnfreezeTokenTransaction(authority, holder, tokenID)
+
+	require.NotNil(t, tx)
+	assert.Equal(t, UnfreezeToken, tx.Type())
+	assert.Equal(t, authority, tx.Sender(), "sender should be the freeze authority")
+	assert.Equal(t, holder, tx.Receiver(), "receiver should be the token holder")
+	assert.Equal(t, tokenID, tx.TokenID())
+	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
+}

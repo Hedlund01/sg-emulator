@@ -327,6 +327,23 @@ func TestMintTokenEndToEndWithClawback(t *testing.T) {
 	assert.Equal(t, clawbackID, *token.ClawbackAddress())
 }
 
+func TestMintTokenEndToEndWithFreezeAddress(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	acc, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	freezeID := acc.ID() // use same account as freeze authority for simplicity
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, acc, "freeze-token", nil, &freezeID)
+
+	token, ok := acc.GetToken(tokenID)
+	assert.True(t, ok)
+	require.NotNil(t, token)
+	require.NotNil(t, token.FreezeAddress(), "freeze address should be set")
+	assert.Equal(t, freezeID, *token.FreezeAddress())
+}
+
 func TestMintTokenInsufficientBalanceForMBR(t *testing.T) {
 	app := testApp()
 	pubKey, privKey, cert := testKeyPairAndCert(t)
@@ -348,4 +365,198 @@ func TestMintTokenInsufficientBalanceForMBR(t *testing.T) {
 	_, err = app.MintToken(testCtx(), req)
 	assert.Error(t, err, "MintToken should fail when account has insufficient balance for MBR")
 	assert.Empty(t, acc.GetTokens(), "no tokens should be stored after a failed mint")
+}
+
+// --- BurnToken app-level tests ---
+
+func TestBurnTokenEndToEnd(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	acc, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, acc, "burn-token", nil, nil)
+
+	mbrBeforeBurn := acc.mbr
+
+	accID := acc.ID()
+	err = app.BurnToken(testCtx(), &BurnTokenRequest{AccountID: accID, TokenId: tokenID})
+	require.NoError(t, err)
+
+	_, ok := acc.GetToken(tokenID)
+	assert.False(t, ok, "token should be gone after burn")
+	assert.Equal(t, mbrBeforeBurn-MBR_TOKEN_COST, acc.mbr, "MBR should decrease after burn")
+}
+
+// --- UnauthorizeTokenTransfer app-level tests ---
+
+func TestUnauthorizeTokenTransferEndToEnd(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+	authorizer := createTestAccountInApp(t, app, MBR_SLOT_COST)
+
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "unauth-token", nil, nil)
+
+	// Authorize
+	err = app.AuthorizeTokenTransfer(testCtx(), &AuthorizeTokenTransferRequest{
+		AccountID:    authorizer.ID(),
+		TokenOwnerID: holder.ID(),
+		TokenId:      tokenID,
+	})
+	require.NoError(t, err)
+
+	mbrAfterAuth := authorizer.mbr
+
+	// Unauthorize
+	err = app.UnauthorizeTokenTransfer(testCtx(), &UnauthorizeTokenTransferRequest{
+		AccountID:    authorizer.ID(),
+		TokenOwnerID: holder.ID(),
+		TokenId:      tokenID,
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, authorizer.GetTokens(), "authorizer should have no tokens after unauthorize")
+	assert.Nil(t, authorizer.tokenStore[tokenID], "placeholder slot should be removed")
+	assert.Equal(t, mbrAfterAuth-MBR_SLOT_COST, authorizer.mbr, "MBR should decrease after unauthorize")
+}
+
+// --- ClawbackToken app-level tests ---
+
+func TestClawbackTokenEndToEnd(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	// Clawback uses addToken (no pre-authorization slot required on receiver side).
+	authority := createTestAccountInApp(t, app, 0)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	authorityID := authority.ID()
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "clawback-token", &authorityID, nil)
+
+	// Clawback: from=holder, to=authority — no prior authorization needed
+	err = app.ClawbackToken(testCtx(), &ClawbackTokenRequest{
+		From:    holder.ID(),
+		To:      authority.ID(),
+		TokenId: tokenID,
+	})
+	require.NoError(t, err)
+
+	_, holderHasToken := holder.GetToken(tokenID)
+	assert.False(t, holderHasToken, "holder should not have token after clawback")
+	_, authorityHasToken := authority.GetToken(tokenID)
+	assert.True(t, authorityHasToken, "authority should have token after clawback")
+}
+
+func TestClawbackTokenRejectsWrongAuthority(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	realAuthority := createTestAccountInApp(t, app, 0)
+	wrongAuthority := createTestAccountInApp(t, app, 0)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	realAuthorityID := realAuthority.ID()
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "clawback-token", &realAuthorityID, nil)
+
+	err = app.ClawbackToken(testCtx(), &ClawbackTokenRequest{
+		From:    holder.ID(),
+		To:      wrongAuthority.ID(),
+		TokenId: tokenID,
+	})
+	assert.Error(t, err, "clawback with wrong authority should fail")
+}
+
+// --- FreezeToken / UnfreezeToken app-level tests ---
+
+func TestFreezeTokenEndToEnd(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	authority := createTestAccountInApp(t, app, MBR_FREEZE_COST)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	authorityID := authority.ID()
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "freeze-token", nil, &authorityID)
+
+	mbrBefore := authority.mbr
+
+	// Freeze
+	err = app.FreezeToken(testCtx(), &FreezeTokenRequest{
+		FreezeAuthority: authority.ID(),
+		TokenHolder:     holder.ID(),
+		TokenId:         tokenID,
+	})
+	require.NoError(t, err)
+
+	tok, ok := holder.GetToken(tokenID)
+	require.True(t, ok)
+	assert.True(t, tok.Frozen(), "token should be frozen")
+	assert.Equal(t, mbrBefore+MBR_FREEZE_COST, authority.mbr, "authority MBR should increase")
+
+	// Transfer should fail while frozen
+	err = app.TransferToken(testCtx(), &TransferTokenRequest{
+		From:    holder.ID(),
+		To:      authority.ID(),
+		TokenId: tokenID,
+	})
+	assert.Error(t, err, "transfer of frozen token should fail")
+
+	// Unfreeze
+	err = app.UnfreezeToken(testCtx(), &UnfreezeTokenRequest{
+		FreezeAuthority: authority.ID(),
+		TokenHolder:     holder.ID(),
+		TokenId:         tokenID,
+	})
+	require.NoError(t, err)
+
+	tok, ok = holder.GetToken(tokenID)
+	require.True(t, ok)
+	assert.False(t, tok.Frozen(), "token should be unfrozen")
+	assert.Equal(t, mbrBefore, authority.mbr, "authority MBR should be restored after unfreeze")
+}
+
+func TestFreezeTokenRejectsWrongAuthority(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	realAuthority := createTestAccountInApp(t, app, 0)
+	wrongAuthority := createTestAccountInApp(t, app, MBR_FREEZE_COST)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	realAuthorityID := realAuthority.ID()
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "freeze-token", nil, &realAuthorityID)
+
+	err = app.FreezeToken(testCtx(), &FreezeTokenRequest{
+		FreezeAuthority: wrongAuthority.ID(),
+		TokenHolder:     holder.ID(),
+		TokenId:         tokenID,
+	})
+	assert.Error(t, err, "freeze by wrong authority should fail")
+}
+
+func TestUnfreezeTokenRejectsWhenNotFrozen(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+
+	authority := createTestAccountInApp(t, app, MBR_FREEZE_COST)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	authorityID := authority.ID()
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "freeze-token", nil, &authorityID)
+
+	err = app.UnfreezeToken(testCtx(), &UnfreezeTokenRequest{
+		FreezeAuthority: authority.ID(),
+		TokenHolder:     holder.ID(),
+		TokenId:         tokenID,
+	})
+	assert.Error(t, err, "unfreeze of non-frozen token should fail")
 }

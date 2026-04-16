@@ -19,6 +19,8 @@ enum EventType {
   EVENT_TYPE_AUTHORIZE_TOKEN_TRANSFER = 7;
   EVENT_TYPE_UNAUTHORIZE_TOKEN_TRANSFER = 8;
   EVENT_TYPE_CLAWBACK_TOKEN = 9;
+  EVENT_TYPE_FREEZE_TOKEN = 10;
+  EVENT_TYPE_UNFREEZE_TOKEN = 11;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +74,18 @@ message ClawbackTokenEventData {
   string token_id = 3;
 }
 
+message FreezeTokenEventData {
+  string freeze_authority = 1;
+  string token_holder     = 2;
+  string token_id         = 3;
+}
+
+message UnfreezeTokenEventData {
+  string freeze_authority = 1;
+  string token_holder     = 2;
+  string token_id         = 3;
+}
+
 message Event {
   EventType type = 1;
   int64 timestamp = 2;
@@ -85,6 +99,8 @@ message Event {
     UnauthorizeTokenTransferEventData unauthorize_token_transfer = 15;
     BurnTokenEventData burn_token = 16;
     ClawbackTokenEventData clawback_token = 17;
+    FreezeTokenEventData freeze_token = 18;
+    UnfreezeTokenEventData unfreeze_token = 19;
   }
 }
 

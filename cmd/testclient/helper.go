@@ -196,8 +196,7 @@ func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string, 
 	return &tokenv1.MintTokenRequest{
 		SignedEnvelope: &tokenv1.SignedMintTokenEnvelope{
 			Payload:     protoPayload,
-			Signature:   toProtoSig(sig),
-			Certificate: owner.certPEM,
+			Signature: toProtoSig(sig),
 		},
 	}, sig.Value, nil
 }
@@ -228,8 +227,7 @@ func signLookupToken(account *accountCreds, tokenID string) (*tokenv1.LookupToke
 	return &tokenv1.LookupTokenRequest{
 		SignedEnvelope: &tokenv1.SignedLookupTokenEnvelope{
 			Payload:     &tokenv1.LookupTokenPayload{TokenId: tokenID, AccountId: account.id},
-			Signature:   toProtoSig(sig),
-			Certificate: account.certPEM,
+			Signature: toProtoSig(sig),
 		},
 	}, nil
 }
@@ -249,12 +247,11 @@ func signAuthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string, t
 	return &tokenv1.AuthorizeTokenTransferRequest{
 		SignedEnvelope: &tokenv1.SignedAuthorizeTokenTransferEnvelope{
 			Payload: &tokenv1.AuthorizeTokenTransferPayload{
-				AccountId:    authorizer.id,
-				TokenId:      tokenID,
-				TokenOwnerId: tokenOwnerID,
+				AccountId:     authorizer.id,
+				TokenId:       tokenID,
+				TokenOwnerId:  tokenOwnerID,
 			},
-			Signature:   toProtoSig(sig),
-			Certificate: authorizer.certPEM,
+			Signature: toProtoSig(sig),
 		},
 	}, nil
 }
@@ -278,8 +275,7 @@ func signUnauthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string,
 				TokenId:      tokenID,
 				TokenOwnerId: tokenOwnerID,
 			},
-			Signature:   toProtoSig(sig),
-			Certificate: authorizer.certPEM,
+			Signature: toProtoSig(sig),
 		},
 	}, nil
 }
@@ -302,8 +298,7 @@ func signTransferToken(from *accountCreds, toID, tokenID string) (*tokenv1.Trans
 				To:      toID,
 				TokenId: tokenID,
 			},
-			Signature:   toProtoSig(sig),
-			Certificate: from.certPEM,
+			Signature: toProtoSig(sig),
 		},
 	}, nil
 }
@@ -324,8 +319,7 @@ func signBurnToken(owner *accountCreds, tokenID string) (*tokenv1.BurnTokenReque
 				AccountId: owner.id,
 				TokenId:   tokenID,
 			},
-			Signature:   toProtoSig(sig),
-			Certificate: owner.certPEM,
+			Signature: toProtoSig(sig),
 		},
 	}, nil
 }
@@ -349,8 +343,7 @@ func signClawbackToken(authority *accountCreds, fromID, tokenID string) (*tokenv
 				To:      authority.id,
 				TokenId: tokenID,
 			},
-			Signature:   toProtoSig(sig),
-			Certificate: authority.certPEM,
+			Signature: toProtoSig(sig),
 		},
 	}, nil
 }

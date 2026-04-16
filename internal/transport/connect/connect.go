@@ -207,6 +207,34 @@ func (h *tokenHandler) ClawbackToken(ctx context.Context, req *tokenv1.ClawbackT
 	return &tokenv1.ClawbackTokenResponse{Success: true}, nil
 }
 
+// FreezeToken handles a freeze token request.
+func (h *tokenHandler) FreezeToken(ctx context.Context, req *tokenv1.FreezeTokenRequest) (*tokenv1.FreezeTokenResponse, error) {
+	envelope, err := convertFreezeTokenEnvelope(req)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	if _, err := h.client.FreezeTokenSigned(ctx, envelope); err != nil {
+		h.logger.Error("FreezeToken failed", "error", err)
+		return &tokenv1.FreezeTokenResponse{Success: false, ErrorMessage: err.Error()}, nil
+	}
+	return &tokenv1.FreezeTokenResponse{Success: true}, nil
+}
+
+// UnfreezeToken handles an unfreeze token request.
+func (h *tokenHandler) UnfreezeToken(ctx context.Context, req *tokenv1.UnfreezeTokenRequest) (*tokenv1.UnfreezeTokenResponse, error) {
+	envelope, err := convertUnfreezeTokenEnvelope(req)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	if _, err := h.client.UnfreezeTokenSigned(ctx, envelope); err != nil {
+		h.logger.Error("UnfreezeToken failed", "error", err)
+		return &tokenv1.UnfreezeTokenResponse{Success: false, ErrorMessage: err.Error()}, nil
+	}
+	return &tokenv1.UnfreezeTokenResponse{Success: true}, nil
+}
+
 // accountHandler implements accountv1connect.AccountServiceHandler.
 type accountHandler struct {
 	accountv1connect.UnimplementedAccountServiceHandler

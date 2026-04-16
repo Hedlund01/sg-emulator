@@ -155,6 +155,54 @@ message ClawbackTokenResponse {
 }
 
 // ---------------------------------------------------------------------------
+// FreezeToken
+// ---------------------------------------------------------------------------
+
+message FreezeTokenPayload {
+  string freeze_authority = 1 [(buf.validate.field).string = {min_len: 1}];
+  string token_holder     = 2 [(buf.validate.field).string = {min_len: 1}];
+  string token_id         = 3 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SignedFreezeTokenEnvelope {
+  FreezeTokenPayload  payload   = 1 [(buf.validate.field).required = true];
+  common.v1.Signature signature = 2 [(buf.validate.field).required = true];
+}
+
+message FreezeTokenRequest {
+  SignedFreezeTokenEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message FreezeTokenResponse {
+  bool   success       = 1;
+  string error_message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// UnfreezeToken
+// ---------------------------------------------------------------------------
+
+message UnfreezeTokenPayload {
+  string freeze_authority = 1 [(buf.validate.field).string = {min_len: 1}];
+  string token_holder     = 2 [(buf.validate.field).string = {min_len: 1}];
+  string token_id         = 3 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SignedUnfreezeTokenEnvelope {
+  UnfreezeTokenPayload payload   = 1 [(buf.validate.field).required = true];
+  common.v1.Signature  signature = 2 [(buf.validate.field).required = true];
+}
+
+message UnfreezeTokenRequest {
+  SignedUnfreezeTokenEnvelope signed_envelope = 1 [(buf.validate.field).required = true];
+}
+
+message UnfreezeTokenResponse {
+  bool   success       = 1;
+  string error_message = 2;
+}
+
+// ---------------------------------------------------------------------------
 // LookupToken
 // ---------------------------------------------------------------------------
 
@@ -199,4 +247,6 @@ service TokenService {
   rpc BurnToken(BurnTokenRequest)                           returns (BurnTokenResponse);
   rpc ClawbackToken(ClawbackTokenRequest)                   returns (ClawbackTokenResponse);
   rpc LookupToken(LookupTokenRequest)                       returns (LookupTokenResponse);
+  rpc FreezeToken(FreezeTokenRequest)                       returns (FreezeTokenResponse);
+  rpc UnfreezeToken(UnfreezeTokenRequest)                   returns (UnfreezeTokenResponse);
 }

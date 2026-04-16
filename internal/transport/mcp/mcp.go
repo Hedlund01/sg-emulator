@@ -81,6 +81,20 @@ type ClawbackTokenArgs struct {
 	TokenID       string `json:"token_id" jsonschema:"The token ID to clawback"`
 }
 
+// FreezeTokenArgs represents arguments for freeze_token tool
+type FreezeTokenArgs struct {
+	FreezeAuthorityID string `json:"freeze_authority_id" jsonschema:"Freeze authority account ID that signs the request (hex string)"`
+	TokenHolderID     string `json:"token_holder_id" jsonschema:"Account ID of the token holder (hex string)"`
+	TokenID           string `json:"token_id" jsonschema:"The token ID to freeze"`
+}
+
+// UnfreezeTokenArgs represents arguments for unfreeze_token tool
+type UnfreezeTokenArgs struct {
+	FreezeAuthorityID string `json:"freeze_authority_id" jsonschema:"Freeze authority account ID that signs the request (hex string)"`
+	TokenHolderID     string `json:"token_holder_id" jsonschema:"Account ID of the token holder (hex string)"`
+	TokenID           string `json:"token_id" jsonschema:"The token ID to unfreeze"`
+}
+
 // LookupTokenArgs represents arguments for lookup_token tool
 type LookupTokenArgs struct {
 	AccountID string `json:"account_id" jsonschema:"Account ID to look up the token in (hex string)"`
@@ -100,17 +114,18 @@ type AdminMintArgs struct {
 
 // CreateSignedRequestArgs represents arguments for create_signed_request tool
 type CreateSignedRequestArgs struct {
-	Type            string  `json:"type" jsonschema:"Type of request: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token', 'burn_token', 'clawback_token', or 'lookup_token'"`
+	Type            string  `json:"type" jsonschema:"Type of request: 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token', 'burn_token', 'clawback_token', 'freeze_token', 'unfreeze_token', or 'lookup_token'"`
 	AccountID       string  `json:"account_id" jsonschema:"Account ID that will sign the request (must have credentials)"`
 	ToID            string  `json:"to_id,omitempty" jsonschema:"Destination account ID (for transfer only)"`
 	Amount          float64 `json:"amount,omitempty" jsonschema:"Amount to transfer (for transfer only)"`
 	TokenValue      string  `json:"token_value,omitempty" jsonschema:"Token value/name (for mint_token only)"`
 	ClawbackAddress string  `json:"clawback_address,omitempty" jsonschema:"Optional clawback address hex string (for mint_token only)"`
 	FreezeAddress   string  `json:"freeze_address,omitempty" jsonschema:"Optional freeze address hex string (for mint_token only)"`
-	TokenID         string  `json:"token_id,omitempty" jsonschema:"Token ID (for authorize_token_transfer, transfer_token, burn_token, and clawback_token)"`
+	TokenID         string  `json:"token_id,omitempty" jsonschema:"Token ID (for authorize_token_transfer, transfer_token, burn_token, clawback_token, freeze_token, and unfreeze_token)"`
 	ToAccountID     string  `json:"to_account_id,omitempty" jsonschema:"Destination account ID (for transfer_token and clawback_token)"`
 	FromAccountID   string  `json:"from_account_id,omitempty" jsonschema:"Source account holding the token (for clawback_token only)"`
 	TokenOwnerID    string  `json:"token_owner_id,omitempty" jsonschema:"Current token owner account ID (for authorize_token_transfer and unauthorize_token_transfer)"`
+	TokenHolderID   string  `json:"token_holder_id,omitempty" jsonschema:"Token holder account ID (for freeze_token and unfreeze_token)"`
 }
 
 // RunHTTPServer starts an MCP server over HTTP with SSE transport.
@@ -586,6 +601,76 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		}, nil, nil
 	})
 
+	// freeze_token tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "freeze_token",
+		Description: "Freeze a token, preventing it from being transferred. Must be signed by the freeze authority.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args FreezeTokenArgs) (*mcp.CallToolResult, any, error) {
+		if _, err := scalegraph.ScalegraphIdFromString(args.FreezeAuthorityID); err != nil {
+			return nil, nil, fmt.Errorf("invalid freeze_authority_id: %v", err)
+		}
+		if _, err := scalegraph.ScalegraphIdFromString(args.TokenHolderID); err != nil {
+			return nil, nil, fmt.Errorf("invalid token_holder_id: %v", err)
+		}
+		if args.TokenID == "" {
+			return nil, nil, fmt.Errorf("token_id is required")
+		}
+
+		payload := &crypto.FreezeTokenPayload{
+			FreezeAuthority: args.FreezeAuthorityID,
+			TokenHolder:     args.TokenHolderID,
+			TokenID:         args.TokenID,
+		}
+		signedEnvelope, err := createSignedEnvelope(srv, args.FreezeAuthorityID, payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		if _, err := client.FreezeTokenSigned(context.Background(), signedEnvelope); err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Token %s frozen by %s (holder: %s)", args.TokenID, args.FreezeAuthorityID[:16]+"...", args.TokenHolderID[:16]+"...")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
+	// unfreeze_token tool
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "unfreeze_token",
+		Description: "Unfreeze a previously frozen token, allowing it to be transferred again. Must be signed by the freeze authority.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args UnfreezeTokenArgs) (*mcp.CallToolResult, any, error) {
+		if _, err := scalegraph.ScalegraphIdFromString(args.FreezeAuthorityID); err != nil {
+			return nil, nil, fmt.Errorf("invalid freeze_authority_id: %v", err)
+		}
+		if _, err := scalegraph.ScalegraphIdFromString(args.TokenHolderID); err != nil {
+			return nil, nil, fmt.Errorf("invalid token_holder_id: %v", err)
+		}
+		if args.TokenID == "" {
+			return nil, nil, fmt.Errorf("token_id is required")
+		}
+
+		payload := &crypto.UnfreezeTokenPayload{
+			FreezeAuthority: args.FreezeAuthorityID,
+			TokenHolder:     args.TokenHolderID,
+			TokenID:         args.TokenID,
+		}
+		signedEnvelope, err := createSignedEnvelope(srv, args.FreezeAuthorityID, payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create signed request: %v", err)
+		}
+
+		if _, err := client.UnfreezeTokenSigned(context.Background(), signedEnvelope); err != nil {
+			return nil, nil, err
+		}
+
+		text := fmt.Sprintf("Token %s unfrozen by %s (holder: %s)", args.TokenID, args.FreezeAuthorityID[:16]+"...", args.TokenHolderID[:16]+"...")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
 	// lookup_token tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "lookup_token",
@@ -992,8 +1077,62 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
 			}
 
+		case "freeze_token":
+			if args.TokenID == "" {
+				return nil, nil, fmt.Errorf("token_id is required for freeze_token requests")
+			}
+			if args.TokenHolderID == "" {
+				return nil, nil, fmt.Errorf("token_holder_id is required for freeze_token requests")
+			}
+			if _, err := scalegraph.ScalegraphIdFromString(args.TokenHolderID); err != nil {
+				return nil, nil, fmt.Errorf("invalid token_holder_id: %v", err)
+			}
+			// account_id is the freeze authority (signer)
+			payload := &crypto.FreezeTokenPayload{
+				FreezeAuthority: args.AccountID,
+				TokenHolder:     args.TokenHolderID,
+				TokenID:         args.TokenID,
+			}
+			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
+			}
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
+		case "unfreeze_token":
+			if args.TokenID == "" {
+				return nil, nil, fmt.Errorf("token_id is required for unfreeze_token requests")
+			}
+			if args.TokenHolderID == "" {
+				return nil, nil, fmt.Errorf("token_holder_id is required for unfreeze_token requests")
+			}
+			if _, err := scalegraph.ScalegraphIdFromString(args.TokenHolderID); err != nil {
+				return nil, nil, fmt.Errorf("invalid token_holder_id: %v", err)
+			}
+			// account_id is the freeze authority (signer)
+			payload := &crypto.UnfreezeTokenPayload{
+				FreezeAuthority: args.AccountID,
+				TokenHolder:     args.TokenHolderID,
+				TokenID:         args.TokenID,
+			}
+			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create signed envelope: %v", err)
+			}
+			signedEnvelopeJSON, err = json.MarshalIndent(map[string]interface{}{
+				"signed_envelope": envelope,
+			}, "", "  ")
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal signed envelope: %v", err)
+			}
+
 		default:
-			return nil, nil, fmt.Errorf("unsupported request type: %s (must be 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token', 'burn_token', 'clawback_token', or 'lookup_token')", args.Type)
+			return nil, nil, fmt.Errorf("unsupported request type: %s (must be 'transfer', 'get_account', 'mint_token', 'authorize_token_transfer', 'unauthorize_token_transfer', 'transfer_token', 'burn_token', 'clawback_token', 'freeze_token', 'unfreeze_token', or 'lookup_token')", args.Type)
 		}
 
 		text := fmt.Sprintf("Signed %s request created for account %s\n\n", args.Type, args.AccountID[:16]+"...")
@@ -1019,6 +1158,10 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			text += "2. Find the POST /tokens/burn endpoint\n"
 		case "clawback_token":
 			text += "2. Find the POST /tokens/clawback endpoint\n"
+		case "freeze_token":
+			text += "2. Find the POST /tokens/freeze endpoint\n"
+		case "unfreeze_token":
+			text += "2. Find the POST /tokens/unfreeze endpoint\n"
 		}
 		text += "3. Click 'Try it out'\n"
 		text += "4. Paste the entire JSON above into the request body\n"

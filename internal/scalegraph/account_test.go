@@ -398,6 +398,309 @@ func TestAuthorizeTokenTransferRollbackOnOwnerFailure(t *testing.T) {
 	assert.Nil(t, authorizer.tokenStore[nonExistentID], "placeholder slot removed after rollback")
 }
 
+// --- BurnToken handler tests ---
+
+func TestBurnTokenRemovesTokenAndUnfreezesMBR(t *testing.T) {
+	acc, kp := testCreateAccount(t)
+	tok := testMintTokenIntoAccount(t, acc, kp.PrivateKey)
+
+	mbrBefore := acc.mbr
+
+	burnTx := newBurnTokenTransaction(acc, tok.ID())
+	err := acc.appendTransaction(burnTx)
+	require.NoError(t, err)
+
+	_, ok := acc.GetToken(tok.ID())
+	assert.False(t, ok, "token should be removed after burn")
+	assert.Equal(t, mbrBefore-MBR_TOKEN_COST, acc.mbr, "MBR should decrease by MBR_TOKEN_COST after burn")
+}
+
+func TestBurnTokenFailsForNonExistentToken(t *testing.T) {
+	acc, _ := testCreateAccount(t)
+
+	burnTx := newBurnTokenTransaction(acc, "nonexistent-token-id")
+	err := acc.appendTransaction(burnTx)
+	assert.Error(t, err, "burn should fail for non-existent token")
+}
+
+// --- UnauthorizeTokenTransfer handler tests ---
+
+func TestUnauthorizeTokenTransferRemovesSlotAndUnfreezesMBR(t *testing.T) {
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, kp := testCreateAccount(t)
+	minted := testMintTokenIntoAccount(t, tokenOwner, kp.PrivateKey)
+	testAuthorizeTokenTransfer(t, authorizer, tokenOwner, minted.ID())
+
+	mbrAfterAuth := authorizer.mbr
+
+	tokenId := minted.ID()
+	tx := newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	require.NoError(t, authorizer.appendTransaction(tx))
+	require.NoError(t, tokenOwner.appendTransaction(tx))
+
+	assert.Nil(t, authorizer.tokenStore[minted.ID()], "placeholder slot should be removed after unauthorize")
+	assert.Equal(t, mbrAfterAuth-MBR_SLOT_COST, authorizer.mbr, "MBR should decrease by MBR_SLOT_COST after unauthorize")
+}
+
+func TestRollbackUnauthorizeTokenTransferRestoresState(t *testing.T) {
+	authorizer, _ := testCreateAccount(t)
+	tokenOwner, kp := testCreateAccount(t)
+	minted := testMintTokenIntoAccount(t, tokenOwner, kp.PrivateKey)
+	testAuthorizeTokenTransfer(t, authorizer, tokenOwner, minted.ID())
+
+	mbrAfterAuth := authorizer.mbr
+
+	tokenId := minted.ID()
+	tx := newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	require.NoError(t, authorizer.appendTransaction(tx))
+	require.NoError(t, tokenOwner.appendTransaction(tx))
+
+	require.NoError(t, authorizer.rollbacklatestTransaction(tx))
+
+	assert.NotNil(t, authorizer.tokenStore[minted.ID()], "placeholder slot should be restored after rollback")
+	assert.Equal(t, mbrAfterAuth, authorizer.mbr, "MBR should be restored to post-authorize value after rollback")
+}
+
+// --- ClawbackToken handler tests ---
+
+func TestClawbackTokenMovesTokenToAuthority(t *testing.T) {
+	// Note: clawback authority validation is at the app layer; account handler uses addToken (no slot required).
+	authority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+	tok := testMintTokenIntoAccount(t, holder, kp.PrivateKey)
+
+	// from=holder (sender, loses token), to=authority (receiver, gains token)
+	clawbackTx := newClawbackTokenTransaction(holder, authority, *tok)
+	require.NoError(t, holder.appendTransaction(clawbackTx))
+	require.NoError(t, authority.appendTransaction(clawbackTx))
+
+	_, holderHasToken := holder.GetToken(tok.ID())
+	assert.False(t, holderHasToken, "holder should not have token after clawback")
+
+	_, authorityHasToken := authority.GetToken(tok.ID())
+	assert.True(t, authorityHasToken, "authority should have token after clawback")
+}
+
+func TestClawbackTokenRollback(t *testing.T) {
+	authority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+	tok := testMintTokenIntoAccount(t, holder, kp.PrivateKey)
+
+	clawbackTx := newClawbackTokenTransaction(holder, authority, *tok)
+	require.NoError(t, holder.appendTransaction(clawbackTx))
+	require.NoError(t, authority.appendTransaction(clawbackTx))
+
+	// Rollback both sides (authority first, then holder, matching two-party rollback pattern)
+	require.NoError(t, authority.rollbacklatestTransaction(clawbackTx))
+	require.NoError(t, holder.rollbacklatestTransaction(clawbackTx))
+
+	_, holderHasToken := holder.GetToken(tok.ID())
+	assert.True(t, holderHasToken, "holder should have token restored after rollback")
+
+	_, authorityHasToken := authority.GetToken(tok.ID())
+	assert.False(t, authorityHasToken, "authority should not have token after rollback")
+}
+
+// --- FreezeToken handler tests ---
+
+func TestFreezeTokenSetsFrozenFlag(t *testing.T) {
+	authority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+
+	authorityID := authority.ID()
+	tok := testCreateTokenWithAddresses(t, holder, kp.PrivateKey, nil, &authorityID)
+	require.NoError(t, holder.appendTransaction(newMintTransaction(holder, MBR_TOKEN_COST)))
+	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
+
+	// Give authority enough balance for MBR_FREEZE_COST
+	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
+	mbrBefore := authority.mbr
+
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	require.NoError(t, authority.appendTransaction(freezeTx))
+	require.NoError(t, holder.appendTransaction(freezeTx))
+
+	assert.True(t, holder.tokenStore[tok.ID()].frozen, "token should be frozen after freeze transaction")
+	assert.Equal(t, mbrBefore+MBR_FREEZE_COST, authority.mbr, "authority MBR should increase by MBR_FREEZE_COST")
+}
+
+func TestFreezeTokenFailsWithoutFreezeAddress(t *testing.T) {
+	authority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+
+	// Mint token with no freeze address
+	tok := testMintTokenIntoAccount(t, holder, kp.PrivateKey)
+	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
+
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	require.NoError(t, authority.appendTransaction(freezeTx), "authority side succeeds (just locks MBR)")
+	err := holder.appendTransaction(freezeTx)
+	assert.Error(t, err, "holder should reject freeze when token has no freeze address")
+}
+
+func TestFreezeTokenFailsForWrongAuthority(t *testing.T) {
+	wrongAuthority, _ := testCreateAccount(t)
+	realAuthority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+
+	realAuthorityID := realAuthority.ID()
+	tok := testCreateTokenWithAddresses(t, holder, kp.PrivateKey, nil, &realAuthorityID)
+	require.NoError(t, holder.appendTransaction(newMintTransaction(holder, MBR_TOKEN_COST)))
+	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
+
+	require.NoError(t, wrongAuthority.appendTransaction(newMintTransaction(wrongAuthority, MBR_FREEZE_COST)))
+
+	freezeTx := newFreezeTokenTransaction(wrongAuthority, holder, tok.ID())
+	require.NoError(t, wrongAuthority.appendTransaction(freezeTx))
+	err := holder.appendTransaction(freezeTx)
+	assert.Error(t, err, "holder should reject freeze when wrong authority signs")
+}
+
+func TestFreezeTokenFailsInsufficientMBRBalance(t *testing.T) {
+	authority, _ := testCreateAccount(t) // balance = 0
+	holder, kp := testCreateAccount(t)
+
+	authorityID := authority.ID()
+	tok := testCreateTokenWithAddresses(t, holder, kp.PrivateKey, nil, &authorityID)
+	require.NoError(t, holder.appendTransaction(newMintTransaction(holder, MBR_TOKEN_COST)))
+	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
+
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	err := authority.appendTransaction(freezeTx)
+	assert.Error(t, err, "freeze should fail when authority has insufficient balance for MBR_FREEZE_COST")
+}
+
+func TestRollbackFreezeTokenRestoresState(t *testing.T) {
+	authority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+
+	authorityID := authority.ID()
+	tok := testCreateTokenWithAddresses(t, holder, kp.PrivateKey, nil, &authorityID)
+	require.NoError(t, holder.appendTransaction(newMintTransaction(holder, MBR_TOKEN_COST)))
+	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
+	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
+
+	mbrBefore := authority.mbr
+
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	require.NoError(t, authority.appendTransaction(freezeTx))
+	require.NoError(t, holder.appendTransaction(freezeTx))
+
+	require.NoError(t, holder.rollbacklatestTransaction(freezeTx))
+	require.NoError(t, authority.rollbacklatestTransaction(freezeTx))
+
+	assert.False(t, holder.tokenStore[tok.ID()].frozen, "token should be unfrozen after rollback")
+	assert.Equal(t, mbrBefore, authority.mbr, "authority MBR should be restored after rollback")
+}
+
+// --- UnfreezeToken handler tests ---
+
+func TestUnfreezeTokenClearsFrozenFlag(t *testing.T) {
+	authority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+
+	authorityID := authority.ID()
+	tok := testCreateTokenWithAddresses(t, holder, kp.PrivateKey, nil, &authorityID)
+	require.NoError(t, holder.appendTransaction(newMintTransaction(holder, MBR_TOKEN_COST)))
+	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
+	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
+
+	// Freeze first
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	require.NoError(t, authority.appendTransaction(freezeTx))
+	require.NoError(t, holder.appendTransaction(freezeTx))
+	require.True(t, holder.tokenStore[tok.ID()].frozen)
+
+	mbrAfterFreeze := authority.mbr
+
+	// Now unfreeze
+	unfreezeTx := newUnfreezeTokenTransaction(authority, holder, tok.ID())
+	require.NoError(t, authority.appendTransaction(unfreezeTx))
+	require.NoError(t, holder.appendTransaction(unfreezeTx))
+
+	assert.False(t, holder.tokenStore[tok.ID()].frozen, "token should be unfrozen after unfreeze transaction")
+	assert.Equal(t, mbrAfterFreeze-MBR_UNFREEZE_COST, authority.mbr, "authority MBR should decrease by MBR_UNFREEZE_COST")
+}
+
+func TestRollbackUnfreezeTokenRestoresState(t *testing.T) {
+	authority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+
+	authorityID := authority.ID()
+	tok := testCreateTokenWithAddresses(t, holder, kp.PrivateKey, nil, &authorityID)
+	require.NoError(t, holder.appendTransaction(newMintTransaction(holder, MBR_TOKEN_COST)))
+	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
+	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
+
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	require.NoError(t, authority.appendTransaction(freezeTx))
+	require.NoError(t, holder.appendTransaction(freezeTx))
+
+	mbrAfterFreeze := authority.mbr
+
+	unfreezeTx := newUnfreezeTokenTransaction(authority, holder, tok.ID())
+	require.NoError(t, authority.appendTransaction(unfreezeTx))
+	require.NoError(t, holder.appendTransaction(unfreezeTx))
+
+	// Rollback unfreeze
+	require.NoError(t, holder.rollbacklatestTransaction(unfreezeTx))
+	require.NoError(t, authority.rollbacklatestTransaction(unfreezeTx))
+
+	assert.True(t, holder.tokenStore[tok.ID()].frozen, "token should be frozen again after rollback of unfreeze")
+	assert.Equal(t, mbrAfterFreeze, authority.mbr, "authority MBR should be restored to post-freeze value")
+}
+
+// --- Transfer blocking tests ---
+
+func TestTransferFrozenTokenFails(t *testing.T) {
+	receiver, _ := testCreateAccount(t)
+	authority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+
+	authorityID := authority.ID()
+	tok := testCreateTokenWithAddresses(t, holder, kp.PrivateKey, nil, &authorityID)
+	require.NoError(t, holder.appendTransaction(newMintTransaction(holder, MBR_TOKEN_COST)))
+	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
+	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
+
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	require.NoError(t, authority.appendTransaction(freezeTx))
+	require.NoError(t, holder.appendTransaction(freezeTx))
+
+	// Attempt transfer of frozen token
+	transferTx := newTransferTokenTransaction(holder, receiver, tok)
+	err := holder.appendTransaction(transferTx)
+	assert.Error(t, err, "transfer of frozen token should fail")
+	assert.Contains(t, err.Error(), "frozen", "error should mention frozen")
+
+	_, holderStillHasToken := holder.GetToken(tok.ID())
+	assert.True(t, holderStillHasToken, "token should still be in holder's store after failed transfer")
+}
+
+func TestClawbackFrozenTokenSucceeds(t *testing.T) {
+	authority, _ := testCreateAccount(t)
+	holder, kp := testCreateAccount(t)
+
+	authorityID := authority.ID()
+	tok := testCreateTokenWithAddresses(t, holder, kp.PrivateKey, &authorityID, &authorityID)
+	require.NoError(t, holder.appendTransaction(newMintTransaction(holder, MBR_TOKEN_COST)))
+	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
+	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
+
+	// Freeze the token
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	require.NoError(t, authority.appendTransaction(freezeTx))
+	require.NoError(t, holder.appendTransaction(freezeTx))
+
+	// Clawback should succeed even when frozen (no frozen check in handleClawbackTokenTx)
+	clawbackTx := newClawbackTokenTransaction(holder, authority, *tok)
+	require.NoError(t, holder.appendTransaction(clawbackTx))
+	require.NoError(t, authority.appendTransaction(clawbackTx))
+
+	_, authorityHasToken := authority.GetToken(tok.ID())
+	assert.True(t, authorityHasToken, "authority should have token after clawback of frozen token")
+}
+
 func TestRollbackTransferTokenRestoresSenderToken(t *testing.T) {
 	// This is the core regression: a failed transfer (receiver not authorized)
 	// must leave the sender's token intact.

@@ -240,6 +240,40 @@ func (r *SubscribePayload) Bytes() []byte {
 	return data
 }
 
+// FreezeTokenPayload is the signed payload for a freeze token request.
+type FreezeTokenPayload struct {
+	FreezeAuthority string `json:"freeze_authority"`
+	TokenHolder     string `json:"token_holder"`
+	TokenID         string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *FreezeTokenPayload) Bytes() []byte {
+	data, _ := json.Marshal(FreezeTokenPayload{
+		FreezeAuthority: r.FreezeAuthority,
+		TokenHolder:     r.TokenHolder,
+		TokenID:         r.TokenID,
+	})
+	return data
+}
+
+// UnfreezeTokenPayload is the signed payload for an unfreeze token request.
+type UnfreezeTokenPayload struct {
+	FreezeAuthority string `json:"freeze_authority"`
+	TokenHolder     string `json:"token_holder"`
+	TokenID         string `json:"token_id"`
+}
+
+// Bytes returns the canonical byte representation for signing
+func (r *UnfreezeTokenPayload) Bytes() []byte {
+	data, _ := json.Marshal(UnfreezeTokenPayload{
+		FreezeAuthority: r.FreezeAuthority,
+		TokenHolder:     r.TokenHolder,
+		TokenID:         r.TokenID,
+	})
+	return data
+}
+
 type LookupTokenPayload struct {
 	TokenID   string `json:"token_id"`
 	AccountID string `json:"account_id"`

@@ -900,6 +900,235 @@ func BenchmarkClient_CreateAccount(b *testing.B) {
 	}
 }
 
+// --- Token operation integration tests ---
+
+func TestClient_MintToken_Success(t *testing.T) {
+	logger := newTestLogger()
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
+	srv.Start()
+	defer srv.Stop()
+
+	client := NewClient(srv.RequestChannel(), logger)
+	ctx := context.Background()
+
+	holder, err := createTestAccount(ctx, srv, client, scalegraph.MBR_TOKEN_COST)
+	if err != nil {
+		t.Fatalf("Failed to create holder account: %v", err)
+	}
+
+	envelope, err := createSignedMintToken(ctx, srv, client, holder.ID(), "test-token", nil, nil)
+	if err != nil {
+		t.Fatalf("Failed to create signed mint token: %v", err)
+	}
+
+	resp, err := client.MintTokenSigned(ctx, envelope)
+	if err != nil {
+		t.Fatalf("MintTokenSigned failed: %v", err)
+	}
+	if resp.TokenID == "" {
+		t.Error("Expected non-empty token ID from MintTokenSigned")
+	}
+}
+
+func TestClient_FreezeToken_Success(t *testing.T) {
+	logger := newTestLogger()
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
+	srv.Start()
+	defer srv.Stop()
+
+	client := NewClient(srv.RequestChannel(), logger)
+	ctx := context.Background()
+
+	authority, err := createTestAccount(ctx, srv, client, scalegraph.MBR_FREEZE_COST)
+	if err != nil {
+		t.Fatalf("Failed to create authority account: %v", err)
+	}
+	holder, err := createTestAccount(ctx, srv, client, scalegraph.MBR_TOKEN_COST)
+	if err != nil {
+		t.Fatalf("Failed to create holder account: %v", err)
+	}
+
+	freeze := authority.ID()
+	envelope, err := createSignedMintToken(ctx, srv, client, holder.ID(), "freeze-test-token", nil, &freeze)
+	if err != nil {
+		t.Fatalf("Failed to create signed mint: %v", err)
+	}
+	mintResp, err := client.MintTokenSigned(ctx, envelope)
+	if err != nil {
+		t.Fatalf("MintTokenSigned failed: %v", err)
+	}
+	tokenID := mintResp.TokenID
+
+	// Freeze
+	freezeEnv, err := createSignedFreezeToken(ctx, srv, authority.ID(), holder.ID(), tokenID)
+	if err != nil {
+		t.Fatalf("Failed to create signed freeze: %v", err)
+	}
+	_, err = client.FreezeTokenSigned(ctx, freezeEnv)
+	if err != nil {
+		t.Fatalf("FreezeTokenSigned failed: %v", err)
+	}
+
+	// Transfer should fail (token is frozen, no auth slot either)
+	transferEnv, err := createSignedTransferToken(ctx, srv, holder.ID(), authority.ID(), tokenID)
+	if err != nil {
+		t.Fatalf("Failed to create signed transfer: %v", err)
+	}
+	_, err = client.TransferTokenSigned(ctx, transferEnv)
+	if err == nil {
+		t.Error("Expected TransferTokenSigned to fail for frozen token, but got no error")
+	}
+}
+
+func TestClient_UnfreezeToken_AfterFreeze(t *testing.T) {
+	logger := newTestLogger()
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
+	srv.Start()
+	defer srv.Stop()
+
+	client := NewClient(srv.RequestChannel(), logger)
+	ctx := context.Background()
+
+	authority, err := createTestAccount(ctx, srv, client, scalegraph.MBR_FREEZE_COST)
+	if err != nil {
+		t.Fatalf("Failed to create authority: %v", err)
+	}
+	holder, err := createTestAccount(ctx, srv, client, scalegraph.MBR_TOKEN_COST)
+	if err != nil {
+		t.Fatalf("Failed to create holder: %v", err)
+	}
+
+	freeze := authority.ID()
+	mintEnv, err := createSignedMintToken(ctx, srv, client, holder.ID(), "unfreeze-test-token", nil, &freeze)
+	if err != nil {
+		t.Fatalf("Failed to sign mint: %v", err)
+	}
+	mintResp, err := client.MintTokenSigned(ctx, mintEnv)
+	if err != nil {
+		t.Fatalf("MintTokenSigned failed: %v", err)
+	}
+	tokenID := mintResp.TokenID
+
+	freezeEnv, err := createSignedFreezeToken(ctx, srv, authority.ID(), holder.ID(), tokenID)
+	if err != nil {
+		t.Fatalf("Failed to sign freeze: %v", err)
+	}
+	if _, err = client.FreezeTokenSigned(ctx, freezeEnv); err != nil {
+		t.Fatalf("FreezeTokenSigned failed: %v", err)
+	}
+
+	unfreezeEnv, err := createSignedUnfreezeToken(ctx, srv, authority.ID(), holder.ID(), tokenID)
+	if err != nil {
+		t.Fatalf("Failed to sign unfreeze: %v", err)
+	}
+	if _, err = client.UnfreezeTokenSigned(ctx, unfreezeEnv); err != nil {
+		t.Fatalf("UnfreezeTokenSigned failed: %v", err)
+	}
+}
+
+func TestClient_ClawbackToken_Success(t *testing.T) {
+	logger := newTestLogger()
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
+	srv.Start()
+	defer srv.Stop()
+
+	client := NewClient(srv.RequestChannel(), logger)
+	ctx := context.Background()
+
+	// Authority gets the token back via clawback (no pre-auth slot needed for clawback)
+	authority, err := createTestAccount(ctx, srv, client, 0)
+	if err != nil {
+		t.Fatalf("Failed to create authority: %v", err)
+	}
+	holder, err := createTestAccount(ctx, srv, client, scalegraph.MBR_TOKEN_COST)
+	if err != nil {
+		t.Fatalf("Failed to create holder: %v", err)
+	}
+
+	clawback := authority.ID()
+	mintEnv, err := createSignedMintToken(ctx, srv, client, holder.ID(), "clawback-test-token", &clawback, nil)
+	if err != nil {
+		t.Fatalf("Failed to sign mint: %v", err)
+	}
+	mintResp, err := client.MintTokenSigned(ctx, mintEnv)
+	if err != nil {
+		t.Fatalf("MintTokenSigned failed: %v", err)
+	}
+	tokenID := mintResp.TokenID
+
+	clawbackEnv, err := createSignedClawbackToken(ctx, srv, authority.ID(), holder.ID(), tokenID)
+	if err != nil {
+		t.Fatalf("Failed to sign clawback: %v", err)
+	}
+	if _, err = client.ClawbackTokenSigned(ctx, clawbackEnv); err != nil {
+		t.Fatalf("ClawbackTokenSigned failed: %v", err)
+	}
+}
+
+func TestClient_FreezeToken_WrongAuthority(t *testing.T) {
+	logger := newTestLogger()
+	srv, cleanup, err := newTestServer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create test server: %v", err)
+	}
+	defer cleanup()
+	srv.Start()
+	defer srv.Stop()
+
+	client := NewClient(srv.RequestChannel(), logger)
+	ctx := context.Background()
+
+	realAuthority, err := createTestAccount(ctx, srv, client, 0)
+	if err != nil {
+		t.Fatalf("Failed to create real authority: %v", err)
+	}
+	wrongAuthority, err := createTestAccount(ctx, srv, client, scalegraph.MBR_FREEZE_COST)
+	if err != nil {
+		t.Fatalf("Failed to create wrong authority: %v", err)
+	}
+	holder, err := createTestAccount(ctx, srv, client, scalegraph.MBR_TOKEN_COST)
+	if err != nil {
+		t.Fatalf("Failed to create holder: %v", err)
+	}
+
+	freeze := realAuthority.ID()
+	mintEnv, err := createSignedMintToken(ctx, srv, client, holder.ID(), "freeze-wrong-auth-token", nil, &freeze)
+	if err != nil {
+		t.Fatalf("Failed to sign mint: %v", err)
+	}
+	mintResp, err := client.MintTokenSigned(ctx, mintEnv)
+	if err != nil {
+		t.Fatalf("MintTokenSigned failed: %v", err)
+	}
+	tokenID := mintResp.TokenID
+
+	// Wrong authority tries to freeze — should fail
+	freezeEnv, err := createSignedFreezeToken(ctx, srv, wrongAuthority.ID(), holder.ID(), tokenID)
+	if err != nil {
+		t.Fatalf("Failed to sign freeze: %v", err)
+	}
+	_, err = client.FreezeTokenSigned(ctx, freezeEnv)
+	if err == nil {
+		t.Error("Expected FreezeTokenSigned to fail with wrong authority, but got no error")
+	}
+}
+
 // BenchmarkClient_GetAccount benchmarks account retrieval
 func BenchmarkClient_GetAccount(b *testing.B) {
 	logger := newTestLogger()

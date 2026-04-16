@@ -90,6 +90,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateBurnToken(msg)
 		case ViewClawbackToken:
 			return m.updateClawbackToken(msg)
+		case ViewFreezeToken:
+			return m.updateFreezeToken(msg)
+		case ViewUnfreezeToken:
+			return m.updateUnfreezeToken(msg)
 		case ViewLookupToken:
 			return m.updateLookupToken(msg)
 		}
@@ -589,6 +593,10 @@ func (m Model) updateTokenMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 6:
 			m.view = ViewClawbackToken
 		case 7:
+			m.view = ViewFreezeToken
+		case 8:
+			m.view = ViewUnfreezeToken
+		case 9:
 			m.view = ViewLookupToken
 			m.lookupTokenInput.SetValue("")
 			m.lookupTokenInput.Blur()
@@ -1327,6 +1335,276 @@ func (m Model) updateClawbackToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			_ = m.refreshAccounts()
 			m.statusMsg = "Token clawed back!"
+			m.view = ViewTokenMenu
+			m.tokenStep = 0
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateFreezeToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	accounts := m.cachedAccounts
+
+	switch msg.String() {
+	case "esc":
+		if m.tokenStep > 0 {
+			m.tokenStep--
+			m.statusMsg = ""
+		} else {
+			m.view = ViewTokenMenu
+		}
+		return m, nil
+	}
+
+	switch m.tokenStep {
+	case 0: // Pick the freeze authority account (signs)
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenAccountIndex > 0 {
+				m.tokenAccountIndex--
+			}
+		case "down", "j":
+			if m.tokenAccountIndex < len(accounts)-1 {
+				m.tokenAccountIndex++
+			}
+		case "enter":
+			if len(accounts) < 2 {
+				m.statusMsg = "Need at least 2 accounts"
+				return m, nil
+			}
+			m.tokenSourceIndex = 0
+			if m.tokenSourceIndex == m.tokenAccountIndex {
+				m.tokenSourceIndex = 1
+			}
+			m.tokenStep = 1
+			m.statusMsg = ""
+		}
+
+	case 1: // Pick the token holder account
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenSourceIndex > 0 {
+				m.tokenSourceIndex--
+				if m.tokenSourceIndex == m.tokenAccountIndex {
+					if m.tokenSourceIndex > 0 {
+						m.tokenSourceIndex--
+					} else {
+						m.tokenSourceIndex++
+					}
+				}
+			}
+		case "down", "j":
+			if m.tokenSourceIndex < len(accounts)-1 {
+				m.tokenSourceIndex++
+				if m.tokenSourceIndex == m.tokenAccountIndex {
+					if m.tokenSourceIndex < len(accounts)-1 {
+						m.tokenSourceIndex++
+					} else {
+						m.tokenSourceIndex--
+					}
+				}
+			}
+		case "enter":
+			if err := m.refreshTokensForIndex(m.tokenSourceIndex); err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+			authorityID := accounts[m.tokenAccountIndex].ID()
+			var filtered []*scalegraph.Token
+			for _, tok := range m.cachedTokens {
+				if fa := tok.FreezeAddress(); fa != nil && *fa == authorityID && !tok.Frozen() {
+					filtered = append(filtered, tok)
+				}
+			}
+			if len(filtered) == 0 {
+				m.statusMsg = "No freezable tokens for this authority in selected account"
+				return m, nil
+			}
+			m.cachedTokens = filtered
+			m.tokenTokenIndex = 0
+			m.tokenStep = 2
+			m.statusMsg = ""
+		}
+
+	case 2: // Pick the token to freeze
+		tokens := m.cachedTokens
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenTokenIndex > 0 {
+				m.tokenTokenIndex--
+			}
+		case "down", "j":
+			if m.tokenTokenIndex < len(tokens)-1 {
+				m.tokenTokenIndex++
+			}
+		case "enter":
+			authorityAcc := accounts[m.tokenAccountIndex]
+			holderAcc := accounts[m.tokenSourceIndex]
+			selectedToken := tokens[m.tokenTokenIndex]
+			authorityID := authorityAcc.ID()
+			holderID := holderAcc.ID()
+
+			creds, err := m.getCredentials(authorityID)
+			if err != nil {
+				m.statusMsg = "Failed to load credentials: " + err.Error()
+				return m, nil
+			}
+			privKey, err := crypto.DecodePrivateKeyPEM([]byte(creds.PrivateKeyPEM))
+			if err != nil {
+				m.statusMsg = "Failed to parse private key: " + err.Error()
+				return m, nil
+			}
+			payload := &crypto.FreezeTokenPayload{
+				FreezeAuthority: authorityID.String(),
+				TokenHolder:     holderID.String(),
+				TokenID:         selectedToken.ID(),
+			}
+			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, authorityID.String(), creds.CertificatePEM)
+			if err != nil {
+				m.statusMsg = "Failed to sign request: " + err.Error()
+				return m, nil
+			}
+			if _, err := m.app.FreezeTokenSigned(context.Background(), signedEnvelope); err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+			_ = m.refreshAccounts()
+			m.statusMsg = "Token frozen!"
+			m.view = ViewTokenMenu
+			m.tokenStep = 0
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateUnfreezeToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	accounts := m.cachedAccounts
+
+	switch msg.String() {
+	case "esc":
+		if m.tokenStep > 0 {
+			m.tokenStep--
+			m.statusMsg = ""
+		} else {
+			m.view = ViewTokenMenu
+		}
+		return m, nil
+	}
+
+	switch m.tokenStep {
+	case 0: // Pick the freeze authority account (signs)
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenAccountIndex > 0 {
+				m.tokenAccountIndex--
+			}
+		case "down", "j":
+			if m.tokenAccountIndex < len(accounts)-1 {
+				m.tokenAccountIndex++
+			}
+		case "enter":
+			if len(accounts) < 2 {
+				m.statusMsg = "Need at least 2 accounts"
+				return m, nil
+			}
+			m.tokenSourceIndex = 0
+			if m.tokenSourceIndex == m.tokenAccountIndex {
+				m.tokenSourceIndex = 1
+			}
+			m.tokenStep = 1
+			m.statusMsg = ""
+		}
+
+	case 1: // Pick the token holder account
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenSourceIndex > 0 {
+				m.tokenSourceIndex--
+				if m.tokenSourceIndex == m.tokenAccountIndex {
+					if m.tokenSourceIndex > 0 {
+						m.tokenSourceIndex--
+					} else {
+						m.tokenSourceIndex++
+					}
+				}
+			}
+		case "down", "j":
+			if m.tokenSourceIndex < len(accounts)-1 {
+				m.tokenSourceIndex++
+				if m.tokenSourceIndex == m.tokenAccountIndex {
+					if m.tokenSourceIndex < len(accounts)-1 {
+						m.tokenSourceIndex++
+					} else {
+						m.tokenSourceIndex--
+					}
+				}
+			}
+		case "enter":
+			if err := m.refreshTokensForIndex(m.tokenSourceIndex); err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+			authorityID := accounts[m.tokenAccountIndex].ID()
+			var filtered []*scalegraph.Token
+			for _, tok := range m.cachedTokens {
+				if fa := tok.FreezeAddress(); fa != nil && *fa == authorityID && tok.Frozen() {
+					filtered = append(filtered, tok)
+				}
+			}
+			if len(filtered) == 0 {
+				m.statusMsg = "No frozen tokens for this authority in selected account"
+				return m, nil
+			}
+			m.cachedTokens = filtered
+			m.tokenTokenIndex = 0
+			m.tokenStep = 2
+			m.statusMsg = ""
+		}
+
+	case 2: // Pick the token to unfreeze
+		tokens := m.cachedTokens
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenTokenIndex > 0 {
+				m.tokenTokenIndex--
+			}
+		case "down", "j":
+			if m.tokenTokenIndex < len(tokens)-1 {
+				m.tokenTokenIndex++
+			}
+		case "enter":
+			authorityAcc := accounts[m.tokenAccountIndex]
+			holderAcc := accounts[m.tokenSourceIndex]
+			selectedToken := tokens[m.tokenTokenIndex]
+			authorityID := authorityAcc.ID()
+			holderID := holderAcc.ID()
+
+			creds, err := m.getCredentials(authorityID)
+			if err != nil {
+				m.statusMsg = "Failed to load credentials: " + err.Error()
+				return m, nil
+			}
+			privKey, err := crypto.DecodePrivateKeyPEM([]byte(creds.PrivateKeyPEM))
+			if err != nil {
+				m.statusMsg = "Failed to parse private key: " + err.Error()
+				return m, nil
+			}
+			payload := &crypto.UnfreezeTokenPayload{
+				FreezeAuthority: authorityID.String(),
+				TokenHolder:     holderID.String(),
+				TokenID:         selectedToken.ID(),
+			}
+			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, authorityID.String(), creds.CertificatePEM)
+			if err != nil {
+				m.statusMsg = "Failed to sign request: " + err.Error()
+				return m, nil
+			}
+			if _, err := m.app.UnfreezeTokenSigned(context.Background(), signedEnvelope); err != nil {
+				m.statusMsg = err.Error()
+				return m, nil
+			}
+			_ = m.refreshAccounts()
+			m.statusMsg = "Token unfrozen!"
 			m.view = ViewTokenMenu
 			m.tokenStep = 0
 		}

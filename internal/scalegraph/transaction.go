@@ -12,6 +12,8 @@ const (
 	AuthorizeTokenTransfer
 	UnauthorizeTokenTransfer
 	ClawbackTokenTransfer
+	FreezeToken
+	UnfreezeToken
 )
 
 func (tt TransactionType) String() string {
@@ -34,6 +36,10 @@ func (tt TransactionType) String() string {
 		return "UnauthorizeTokenTransfer"
 	case ClawbackTokenTransfer:
 		return "ClawbackTokenTransfer"
+	case FreezeToken:
+		return "FreezeToken"
+	case UnfreezeToken:
+		return "UnfreezeToken"
 	default:
 		return "Unknown"
 	}
@@ -393,3 +399,49 @@ func (t *ClawbackTokenTransaction) Receiver() *Account {
 func (t *ClawbackTokenTransaction) Token() Token {
 	return t.token
 }
+
+type FreezeTokenTransaction struct {
+	id              ScalegraphId
+	freezeAuthority *Account // sender
+	tokenHolder     *Account // receiver
+	tokenID         string
+}
+
+func newFreezeTokenTransaction(authority, holder *Account, tokenID string) *FreezeTokenTransaction {
+	txId, _ := NewScalegraphId()
+	return &FreezeTokenTransaction{
+		id:              txId,
+		freezeAuthority: authority,
+		tokenHolder:     holder,
+		tokenID:         tokenID,
+	}
+}
+
+func (t *FreezeTokenTransaction) ID() ScalegraphId      { return t.id }
+func (t *FreezeTokenTransaction) Type() TransactionType { return FreezeToken }
+func (t *FreezeTokenTransaction) Sender() *Account      { return t.freezeAuthority }
+func (t *FreezeTokenTransaction) Receiver() *Account    { return t.tokenHolder }
+func (t *FreezeTokenTransaction) TokenID() string       { return t.tokenID }
+
+type UnfreezeTokenTransaction struct {
+	id              ScalegraphId
+	freezeAuthority *Account // sender
+	tokenHolder     *Account // receiver
+	tokenID         string
+}
+
+func newUnfreezeTokenTransaction(authority, holder *Account, tokenID string) *UnfreezeTokenTransaction {
+	txId, _ := NewScalegraphId()
+	return &UnfreezeTokenTransaction{
+		id:              txId,
+		freezeAuthority: authority,
+		tokenHolder:     holder,
+		tokenID:         tokenID,
+	}
+}
+
+func (t *UnfreezeTokenTransaction) ID() ScalegraphId      { return t.id }
+func (t *UnfreezeTokenTransaction) Type() TransactionType { return UnfreezeToken }
+func (t *UnfreezeTokenTransaction) Sender() *Account      { return t.freezeAuthority }
+func (t *UnfreezeTokenTransaction) Receiver() *Account    { return t.tokenHolder }
+func (t *UnfreezeTokenTransaction) TokenID() string       { return t.tokenID }

@@ -174,6 +174,40 @@ func convertClawbackTokenEnvelope(req *tokenv1.ClawbackTokenRequest) (*crypto.Si
 	}, nil
 }
 
+// convertFreezeTokenEnvelope converts a proto FreezeTokenRequest into a domain SignedEnvelope.
+func convertFreezeTokenEnvelope(req *tokenv1.FreezeTokenRequest) (*crypto.SignedEnvelope[*crypto.FreezeTokenPayload], error) {
+	env := req.GetSignedEnvelope()
+	sig, err := convertSignature(env.GetSignature())
+	if err != nil {
+		return nil, err
+	}
+	return &crypto.SignedEnvelope[*crypto.FreezeTokenPayload]{
+		Payload: &crypto.FreezeTokenPayload{
+			FreezeAuthority: env.GetPayload().GetFreezeAuthority(),
+			TokenHolder:     env.GetPayload().GetTokenHolder(),
+			TokenID:         env.GetPayload().GetTokenId(),
+		},
+		Signature: sig,
+	}, nil
+}
+
+// convertUnfreezeTokenEnvelope converts a proto UnfreezeTokenRequest into a domain SignedEnvelope.
+func convertUnfreezeTokenEnvelope(req *tokenv1.UnfreezeTokenRequest) (*crypto.SignedEnvelope[*crypto.UnfreezeTokenPayload], error) {
+	env := req.GetSignedEnvelope()
+	sig, err := convertSignature(env.GetSignature())
+	if err != nil {
+		return nil, err
+	}
+	return &crypto.SignedEnvelope[*crypto.UnfreezeTokenPayload]{
+		Payload: &crypto.UnfreezeTokenPayload{
+			FreezeAuthority: env.GetPayload().GetFreezeAuthority(),
+			TokenHolder:     env.GetPayload().GetTokenHolder(),
+			TokenID:         env.GetPayload().GetTokenId(),
+		},
+		Signature: sig,
+	}, nil
+}
+
 // convertGetAccountEnvelope converts a proto GetAccountRequest into a domain SignedEnvelope.
 func convertGetAccountEnvelope(req *accountv1.GetAccountRequest) (*crypto.SignedEnvelope[*crypto.GetAccountPayload], error) {
 	env := req.GetSignedEnvelope()
