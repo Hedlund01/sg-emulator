@@ -193,7 +193,7 @@ func createSignedTransfer(ctx context.Context, srv *Server, client *Client, from
 	if err != nil {
 		return nil, err
 	}
-	nonce := fromAccount.GetNonce() + 1
+	nonce := fromAccount.GetNonce()
 
 	// Create transfer request
 	transferReq := &crypto.TransferPayload{

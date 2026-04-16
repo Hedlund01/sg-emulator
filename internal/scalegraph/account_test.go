@@ -125,7 +125,7 @@ func TestAccountGetNonce(t *testing.T) {
 
 	// Outgoing transfer must increment nonce
 	_, err = app.Transfer(testCtx(), &TransferRequest{
-		From: acc1.ID(), To: acc2.ID(), Amount: 1.0, Nonce: 1,
+		From: acc1.ID(), To: acc2.ID(), Amount: 1.0, Nonce: 0,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1), acc1.GetNonce(), "nonce should be 1 after first outgoing transfer")
@@ -293,11 +293,11 @@ func TestRollbackMintTokenRestoresState(t *testing.T) {
 	lenAfterFirstMint := acc.Blockchain().Len()
 
 	// Mint a second token with a different value so it gets a different ID.
-	nonce2 := int64(acc.GetNonce()) + 1
+	nonce2 := int64(acc.GetNonce())
 	payload2 := &sgcrypto.MintTokenPayload{TokenValue: "other-value", Nonce: nonce2}
 	sig2, err := sgcrypto.Sign(payload2, kp.PrivateKey, acc.ID().String())
 	require.NoError(t, err)
-	tok2 := newToken("other-value", *sig2, nil, nonce2)
+	tok2 := newToken("other-value", *sig2, nil, nil, nonce2)
 	mintTx2 := newMintTokenTransaction(acc, tok2)
 	require.NoError(t, acc.appendTransaction(mintTx2))
 	require.Equal(t, 2, len(acc.GetTokens()), "should have two tokens before rollback")

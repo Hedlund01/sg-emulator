@@ -531,6 +531,14 @@ func (m Model) viewTransactionDetail() string {
 			detailContent += fmt.Sprintf("  %s\n\n", mintTokTx.Token().Value())
 			detailContent += lipgloss.NewStyle().Bold(true).Render("Token ID:") + "\n"
 			detailContent += fmt.Sprintf("  %s\n", shortID(mintTokTx.Token().ID(), 16))
+			if mintTokTx.Token().ClawbackAddress() != nil {
+				detailContent += "\n" + lipgloss.NewStyle().Bold(true).Render("Clawback:") + "\n"
+				detailContent += fmt.Sprintf("  %s\n", mintTokTx.Token().ClawbackAddress().String())
+			}
+			if mintTokTx.Token().FreezeAddress() != nil {
+				detailContent += "\n" + lipgloss.NewStyle().Bold(true).Render("Freeze:") + "\n"
+				detailContent += fmt.Sprintf("  %s\n", mintTokTx.Token().FreezeAddress().String())
+			}
 		}
 	case scalegraph.TransferToken:
 		isTokenTx = true
@@ -817,7 +825,7 @@ func (m Model) viewMintToken() string {
 		content = fmt.Sprintf("Account: %s\n", m.getAccountDisplayName(accounts[m.tokenAccountIndex]))
 		content += fmt.Sprintf("Token value: %s\n\n", m.tokenValueInput.Value())
 		content += "Select clawback address (or none):\n\n"
-		// Index 0 = No clawback; index 1..N = other accounts
+		// Index 0 = No clawback; index 1..N = accounts
 		noClawbackCursor := "  "
 		noClawbackLabel := "No clawback"
 		if m.tokenClawbackIndex == 0 {
@@ -833,6 +841,36 @@ func (m Model) viewMintToken() string {
 				line += " (minter)"
 			}
 			if clawbackIdx == m.tokenClawbackIndex {
+				cursor = "> "
+				line = selectedStyle.Render(line)
+			}
+			content += cursor + line + "\n"
+		}
+	case 3:
+		clawbackLabel := "None"
+		if m.tokenClawbackIndex > 0 {
+			clawbackLabel = m.getAccountDisplayName(accounts[m.tokenClawbackIndex-1])
+		}
+		content = fmt.Sprintf("Account: %s\n", m.getAccountDisplayName(accounts[m.tokenAccountIndex]))
+		content += fmt.Sprintf("Token value: %s\n", m.tokenValueInput.Value())
+		content += fmt.Sprintf("Clawback: %s\n\n", clawbackLabel)
+		content += "Select freeze address (or none):\n\n"
+		// Index 0 = No freeze; index 1..N = accounts
+		noFreezeCursor := "  "
+		noFreezeLabel := "No freeze"
+		if m.tokenFreezeIndex == 0 {
+			noFreezeCursor = "> "
+			noFreezeLabel = selectedStyle.Render(noFreezeLabel)
+		}
+		content += noFreezeCursor + noFreezeLabel + "\n"
+		for i, acc := range accounts {
+			freezeIdx := i + 1
+			cursor := "  "
+			line := fmt.Sprintf("%s  Balance: %.2f", m.getAccountDisplayName(acc), acc.Balance())
+			if i == m.tokenAccountIndex {
+				line += " (minter)"
+			}
+			if freezeIdx == m.tokenFreezeIndex {
 				cursor = "> "
 				line = selectedStyle.Render(line)
 			}
@@ -1203,6 +1241,9 @@ func (m Model) viewClawbackToken() string {
 			for i, tok := range tokens {
 				cursor := "  "
 				line := fmt.Sprintf("Value: %-12s  ID: %s", tok.Value(), shortID(tok.ID(), 8))
+				if tok.FreezeAddress() != nil {
+					line += fmt.Sprintf("  freeze:%s", shortID(tok.FreezeAddress().String(), 8))
+				}
 				if i == m.tokenTokenIndex {
 					cursor = "> "
 					line = selectedStyle.Render(line)
@@ -1300,14 +1341,21 @@ func (m Model) viewTokenList() string {
 				tokID := shortID(tok.ID(), 16)
 				clawback := "none"
 				if tok.ClawbackAddress() != nil {
-					ca := tok.ClawbackAddress()
-					caStr := ca.String()
+					caStr := tok.ClawbackAddress().String()
 					if len(caStr) > 8 {
 						caStr = caStr[:8] + "..."
 					}
 					clawback = caStr
 				}
-				line := fmt.Sprintf("#%d  val:%-12s  id:%s  clawback:%s", i+1, tok.Value(), tokID, clawback)
+				freeze := "none"
+				if tok.FreezeAddress() != nil {
+					faStr := tok.FreezeAddress().String()
+					if len(faStr) > 8 {
+						faStr = faStr[:8] + "..."
+					}
+					freeze = faStr
+				}
+				line := fmt.Sprintf("#%d  val:%-12s  id:%s  clawback:%s  freeze:%s", i+1, tok.Value(), tokID, clawback, freeze)
 				if i == m.tokenTokenIndex {
 					cursor = "> "
 					line = selectedStyle.Render(line)
@@ -1372,6 +1420,9 @@ func (m Model) viewLookupToken() string {
 			content += fmt.Sprintf("  Value: %s\n", t.Value())
 			if t.ClawbackAddress() != nil {
 				content += fmt.Sprintf("  Clawback: %s\n", t.ClawbackAddress().String())
+			}
+			if t.FreezeAddress() != nil {
+				content += fmt.Sprintf("  Freeze:   %s\n", t.FreezeAddress().String())
 			}
 		}
 	}

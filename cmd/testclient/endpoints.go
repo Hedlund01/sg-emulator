@@ -101,9 +101,9 @@ func RunEndpointTests(ctx context.Context, cfg *config) []endpointResult {
 	{
 		name := "CurrencyService/Transfer"
 		start := time.Now()
-		// nonce=1 is correct when the account has no prior transfers; the server
+		// nonce=0 is correct when the account has no prior transfers; the server
 		// will return an error if the nonce is wrong and we surface it as a failure.
-		req, err := signTransfer(acc0, acc1.id, 0.01, 1)
+		req, err := signTransfer(acc0, acc1.id, 0.01, 0)
 		if err != nil {
 			fail(name, start, fmt.Errorf("sign: %w", err))
 		} else {
@@ -118,7 +118,8 @@ func RunEndpointTests(ctx context.Context, cfg *config) []endpointResult {
 		}
 	}
 
-	// acc0Nonce tracks acc0's outgoingTxCount. After the Transfer above, it is 1.
+	// acc0Nonce tracks acc0's current outgoingTxCount (= the nonce for the next tx).
+	// After the Transfer above (which used nonce=0), it is now 1.
 	var acc0Nonce int64 = 1
 
 	// ------------------------------------------------------------------
@@ -145,8 +146,8 @@ func RunEndpointTests(ctx context.Context, cfg *config) []endpointResult {
 
 		// b) Mint a token.
 		{
-			acc0Nonce++
 			req, rawSig, err := signMintToken(acc0, "test-token-v1", "", acc0Nonce)
+			acc0Nonce++
 			if err != nil {
 				cancelSub()
 				fail(name, start, fmt.Errorf("sign mint: %w", err))
@@ -236,8 +237,8 @@ afterMint:
 	{
 		name := "TokenService/UnauthorizeTokenTransfer"
 		start := time.Now()
-		acc0Nonce++
 		req2, rawSig2, err := signMintToken(acc0, "test-token-unauth", "", acc0Nonce)
+		acc0Nonce++
 		if err != nil {
 			fail(name, start, fmt.Errorf("mint for unauth: %w", err))
 			goto afterUnauth
@@ -294,8 +295,8 @@ afterUnauth:
 	{
 		name := "TokenService/BurnToken"
 		start := time.Now()
-		acc0Nonce++
 		req3, rawSig3, err := signMintToken(acc0, "test-token-burn", "", acc0Nonce)
+		acc0Nonce++
 		if err != nil {
 			fail(name, start, fmt.Errorf("mint for burn: %w", err))
 			goto afterBurn
@@ -337,8 +338,8 @@ afterBurn:
 	{
 		name := "TokenService/ClawbackToken"
 		start := time.Now()
-		acc0Nonce++
 		req4, rawSig4, err := signMintToken(acc0, "test-token-clawback", acc1.id, acc0Nonce)
+		acc0Nonce++
 		if err != nil {
 			fail(name, start, fmt.Errorf("mint for clawback: %w", err))
 			goto afterClawback

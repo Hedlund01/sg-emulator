@@ -17,7 +17,8 @@ option go_package = "sg-emulator/gen/token/v1;tokenv1";
 message MintTokenPayload {
   string token_value       = 1 [(buf.validate.field).string = {min_len: 1}];
   string clawback_address  = 2; // optional; empty means no clawback authority
-  int64 nonce             = 3 [(buf.validate.field).int64 = {gt: 0}];
+  string freeze_address    = 3; // optional; empty means no freeze authority
+  int64 nonce             = 4 [(buf.validate.field).int64 = {gt: 0}];
 }
 
 message SignedMintTokenEnvelope {

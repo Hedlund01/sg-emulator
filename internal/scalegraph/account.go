@@ -152,8 +152,8 @@ func (a *Account) Blockchain() IBlockchain {
 	return a.blockchain
 }
 
-// GetNonce returns the number of outgoing Transfer transactions sent by this account.
-// The next Transfer from this account must use nonce = GetNonce() + 1.
+// GetNonce returns the number of outgoing transactions (Transfers and MintTokens) sent by this account.
+// The next outgoing transaction from this account must use nonce = GetNonce().
 func (a *Account) GetNonce() uint64 {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -345,8 +345,8 @@ func (a *Account) handleBurnTx(trx *BurnTransaction) error {
 
 func (a *Account) handleMintTokenTx(trx *MintTokenTransaction) error {
 	if trx.Receiver() != nil && trx.Receiver().ID() == a.ID() {
-		if trx.Token().Nonce() != int64(a.outgoingTxCount)+1 {
-			return fmt.Errorf("nonce mismatch: expected %d, got %d", int64(a.outgoingTxCount)+1, trx.Token().Nonce())
+		if trx.Token().Nonce() != int64(a.outgoingTxCount) {
+			return fmt.Errorf("nonce mismatch: expected %d, got %d", int64(a.outgoingTxCount), trx.Token().Nonce())
 		}
 
 		if err := a.mintToken(trx.Token()); err != nil {

@@ -248,11 +248,23 @@ func (c *Client) MintTokenSigned(ctx context.Context, signedReq *crypto.SignedEn
 		}
 		clawBackAddr = &addr
 	}
-	logAttrs = append(logAttrs, "clawback_address", clawBackAddr)
+
+	var freezeAddr *scalegraph.ScalegraphId = nil
+	if signedReq.Payload.FreezeAddress != nil {
+		addr, err := scalegraph.ScalegraphIdFromString(*signedReq.Payload.FreezeAddress)
+		if err != nil {
+			c.logger.Error("Invalid freeze address", "error", err, "freeze_address", *signedReq.Payload.FreezeAddress)
+			return nil, err
+		}
+		freezeAddr = &addr
+	}
+	logAttrs = append(logAttrs, "clawback_address", clawBackAddr, "freeze_address", freezeAddr)
 
 	return Send[scalegraph.MintTokenRequest, scalegraph.MintTokenResponse](c, ctx, &scalegraph.MintTokenRequest{
 		TokenValue:      signedReq.Payload.TokenValue,
 		ClawbackAddress: clawBackAddr,
+		FreezeAddress:   freezeAddr,
+		Nonce:           signedReq.Payload.Nonce,
 		SignedEnvelope:  signedReq,
 	})
 }

@@ -139,7 +139,7 @@ func toProtoSig(sig *crypto.Signature) *commonv1.Signature {
 }
 
 // signTransfer builds a signed TransferRequest.
-// nonce must equal the sender's current blockchain length + 1.
+// nonce must equal the sender's current outgoingTxCount (GetNonce()).
 func signTransfer(from *accountCreds, toID string, amount float64, nonce uint64) (*currencyv1.TransferRequest, error) {
 	ts := time.Now().Unix()
 	payload := &crypto.TransferPayload{
@@ -171,7 +171,7 @@ func signTransfer(from *accountCreds, toID string, amount float64, nonce uint64)
 // signMintToken builds a signed MintTokenRequest.
 // It returns the request and the raw signature bytes so the caller can derive
 // the token ID via tokenIDFromRawSig.
-// nonce must equal the minter's current outgoingTxCount + 1.
+// nonce must equal the minter's current outgoingTxCount (GetNonce()).
 func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string, nonce int64) (*tokenv1.MintTokenRequest, []byte, error) {
 	var cbPtr *string
 	if clawbackAddr != "" {

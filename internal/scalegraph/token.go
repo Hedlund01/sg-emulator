@@ -12,6 +12,7 @@ type IToken interface {
 	Value() string
 	Signature() crypto.Signature
 	ClawbackAddress() *ScalegraphId
+	FreezeAddress() *ScalegraphId
 	Nonce() int64
 	Equal(other IToken) bool
 	String() string
@@ -55,14 +56,16 @@ type Token struct {
 	value           string
 	signature       crypto.Signature
 	clawbackAddress *ScalegraphId
+	freezeAddress   *ScalegraphId
 	nonce 		 int64
 }
 
-func newToken(value string, signature crypto.Signature, clawbackAddress *ScalegraphId, nonce int64) *Token {
+func newToken(value string, signature crypto.Signature, clawbackAddress *ScalegraphId, freezeAddress *ScalegraphId, nonce int64) *Token {
 	return &Token{
 		value:           value,
 		signature:       signature,
 		clawbackAddress: clawbackAddress,
+		freezeAddress:   freezeAddress,
 		nonce:           nonce,
 	}
 }
@@ -81,6 +84,10 @@ func (t *Token) Signature() crypto.Signature {
 
 func (t *Token) ClawbackAddress() *ScalegraphId {
 	return t.clawbackAddress
+}
+
+func (t *Token) FreezeAddress() *ScalegraphId {
+	return t.freezeAddress
 }
 
 // Equal uses the generic TokenEqual function.

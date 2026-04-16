@@ -13,6 +13,40 @@ import (
 	"sg-emulator/internal/server/messages"
 )
 
+// slogWatermillLogger adapts a *slog.Logger to the watermill.LoggerAdapter interface
+// so that watermill logs are routed through slog (and in TUI mode go to the log file).
+type slogWatermillLogger struct {
+	logger *slog.Logger
+}
+
+func (l *slogWatermillLogger) fields(f watermill.LogFields) []any {
+	attrs := make([]any, 0, len(f)*2)
+	for k, v := range f {
+		attrs = append(attrs, k, v)
+	}
+	return attrs
+}
+
+func (l *slogWatermillLogger) Error(msg string, err error, fields watermill.LogFields) {
+	l.logger.Error(msg, append(l.fields(fields), "error", err)...)
+}
+
+func (l *slogWatermillLogger) Info(msg string, fields watermill.LogFields) {
+	l.logger.Info(msg, l.fields(fields)...)
+}
+
+func (l *slogWatermillLogger) Debug(msg string, fields watermill.LogFields) {
+	l.logger.Debug(msg, l.fields(fields)...)
+}
+
+func (l *slogWatermillLogger) Trace(msg string, fields watermill.LogFields) {
+	l.logger.Debug(msg, l.fields(fields)...) // slog has no Trace; map to Debug
+}
+
+func (l *slogWatermillLogger) With(fields watermill.LogFields) watermill.LoggerAdapter {
+	return &slogWatermillLogger{logger: l.logger.With(l.fields(fields)...)}
+}
+
 // VirtualApp represents a virtual application instance with its own ID and transports.
 // Each VirtualApp can have multiple transports (REST, gRPC, etc.) running simultaneously.
 type VirtualApp struct {
@@ -42,7 +76,7 @@ func newVirtualApp(requestChan chan<- messages.Request, logger *slog.Logger) (*V
 			Persistent:                     false,
 			BlockPublishUntilSubscriberAck: false,
 		},
-		watermill.NewStdLogger(false, false),
+		&slogWatermillLogger{logger: logger.With("component", "watermill")},
 	)
 
 	return &VirtualApp{

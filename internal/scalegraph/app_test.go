@@ -135,8 +135,8 @@ func TestTransfer(t *testing.T) {
 	acc1 := createTestAccountInApp(t, app, 100.0)
 	acc2 := createTestAccountInApp(t, app, 50.0)
 
-	// Nonce = number of outgoing transfers + 1 (fresh account has nonce 0, first transfer uses 1)
-	nonce := acc1.GetNonce() + 1
+	// Nonce = current outgoingTxCount (fresh account has nonce 0, first transfer uses 0)
+	nonce := acc1.GetNonce()
 
 	// Test successful transfer
 	_, err := app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 30.0, Nonce: nonce})
@@ -146,7 +146,7 @@ func TestTransfer(t *testing.T) {
 	assert.Equal(t, 80.0, acc2.Balance(), "receiver balance after transfer")
 
 	// Test transfer with insufficient funds
-	nonce = acc1.GetNonce() + 1
+	nonce = acc1.GetNonce()
 	_, err = app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 100.0, Nonce: nonce})
 	assert.Error(t, err, "should error for insufficient funds")
 
@@ -156,11 +156,11 @@ func TestTransfer(t *testing.T) {
 
 	// Test transfer from non-existent account
 	fakeID, _ := NewScalegraphId()
-	_, err = app.Transfer(testCtx(), &TransferRequest{From: fakeID, To: acc2.ID(), Amount: 10.0, Nonce: 1})
+	_, err = app.Transfer(testCtx(), &TransferRequest{From: fakeID, To: acc2.ID(), Amount: 10.0, Nonce: 0})
 	assert.Error(t, err, "should error for non-existent sender")
 
 	// Test transfer to non-existent account
-	nonce = acc1.GetNonce() + 1
+	nonce = acc1.GetNonce()
 	_, err = app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: fakeID, Amount: 10.0, Nonce: nonce})
 	assert.Error(t, err, "should error for non-existent receiver")
 }
@@ -169,7 +169,7 @@ func TestTransferSelfTransfer(t *testing.T) {
 	app := testApp()
 	acc := createTestAccountInApp(t, app, 100.0)
 
-	nonce := acc.GetNonce() + 1
+	nonce := acc.GetNonce()
 	_, err := app.Transfer(testCtx(), &TransferRequest{From: acc.ID(), To: acc.ID(), Amount: 10.0, Nonce: nonce})
 	assert.Error(t, err, "self-transfer should not be allowed")
 	assert.Equal(t, 100.0, acc.Balance(), "balance should not change after rejected self-transfer")
@@ -180,7 +180,7 @@ func TestTransferZeroAmount(t *testing.T) {
 	acc1 := createTestAccountInApp(t, app, 100.0)
 	acc2 := createTestAccountInApp(t, app, 50.0)
 
-	nonce := acc1.GetNonce() + 1
+	nonce := acc1.GetNonce()
 	_, err := app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 0, Nonce: nonce})
 	require.NoError(t, err)
 
@@ -222,7 +222,7 @@ func TestTransferAtomicity(t *testing.T) {
 	initialTotal := acc1.Balance() + acc2.Balance()
 
 	// Successful transfer should preserve total balance
-	nonce := acc1.GetNonce() + 1
+	nonce := acc1.GetNonce()
 	_, err := app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 25.0, Nonce: nonce})
 	require.NoError(t, err)
 
@@ -233,7 +233,7 @@ func TestTransferAtomicity(t *testing.T) {
 	beforeAcc1 := acc1.Balance()
 	beforeAcc2 := acc2.Balance()
 
-	nonce = acc1.GetNonce() + 1
+	nonce = acc1.GetNonce()
 	_, err = app.Transfer(testCtx(), &TransferRequest{From: acc1.ID(), To: acc2.ID(), Amount: 1000.0, Nonce: nonce})
 	assert.Error(t, err, "transfer should fail for insufficient funds")
 
@@ -268,7 +268,7 @@ func TestMintTokenEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build a real signed envelope (same path as the TUI/REST transport)
-	payload := &sgcrypto.MintTokenPayload{TokenValue: "hello-token", Nonce: 1}
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "hello-token", Nonce: 0}
 	certDER := cert.Raw
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
 	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
@@ -277,6 +277,7 @@ func TestMintTokenEndToEnd(t *testing.T) {
 	req := &MintTokenRequest{
 		TokenValue:      "hello-token",
 		ClawbackAddress: nil,
+		Nonce:           0,
 		SignedEnvelope:  envelope,
 	}
 
@@ -302,7 +303,7 @@ func TestMintTokenEndToEndWithClawback(t *testing.T) {
 	clawbackID := acc.ID()
 
 	clawbackStr := clawbackID.String()
-	payload := &sgcrypto.MintTokenPayload{TokenValue: "clawback-token", ClawbackAddress: &clawbackStr, Nonce: 1}
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "clawback-token", ClawbackAddress: &clawbackStr, Nonce: 0}
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
 	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
 	require.NoError(t, err)
@@ -310,6 +311,7 @@ func TestMintTokenEndToEndWithClawback(t *testing.T) {
 	req := &MintTokenRequest{
 		TokenValue:      "clawback-token",
 		ClawbackAddress: &clawbackID,
+		Nonce:           0,
 		SignedEnvelope:  envelope,
 	}
 
@@ -333,7 +335,7 @@ func TestMintTokenInsufficientBalanceForMBR(t *testing.T) {
 	acc, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, 0)
 	require.NoError(t, err)
 
-	payload := &sgcrypto.MintTokenPayload{TokenValue: "some-token", Nonce: 1}
+	payload := &sgcrypto.MintTokenPayload{TokenValue: "some-token", Nonce: 0}
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
 	envelope, err := sgcrypto.CreateSignedEnvelope(payload, privKey, acc.ID().String(), certPEM)
 	require.NoError(t, err)

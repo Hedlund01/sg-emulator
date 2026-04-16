@@ -60,10 +60,15 @@ func convertMintTokenEnvelope(req *tokenv1.MintTokenRequest) (*crypto.SignedEnve
 	if v := env.GetPayload().GetClawbackAddress(); v != "" {
 		clawbackAddr = &v
 	}
+	var freezeAddr *string
+	if v := env.GetPayload().GetFreezeAddress(); v != "" {
+		freezeAddr = &v
+	}
 	return &crypto.SignedEnvelope[*crypto.MintTokenPayload]{
 		Payload: &crypto.MintTokenPayload{
 			TokenValue:      env.GetPayload().GetTokenValue(),
 			ClawbackAddress: clawbackAddr,
+			FreezeAddress:   freezeAddr,
 			Nonce:           env.GetPayload().GetNonce(),
 		},
 		Signature:   sig,

@@ -44,6 +44,7 @@ type MintTokenArgs struct {
 	AccountID       string `json:"account_id" jsonschema:"Account ID of the token minter (hex string)"`
 	TokenValue      string `json:"token_value" jsonschema:"The value/name of the token to mint"`
 	ClawbackAddress string `json:"clawback_address,omitempty" jsonschema:"Optional clawback address (hex string)"`
+	FreezeAddress   string `json:"freeze_address,omitempty" jsonschema:"Optional freeze address (hex string)"`
 }
 
 // AuthorizeTokenTransferArgs represents arguments for authorize_token_transfer tool
@@ -103,6 +104,7 @@ type CreateSignedRequestArgs struct {
 	Amount          float64 `json:"amount,omitempty" jsonschema:"Amount to transfer (for transfer only)"`
 	TokenValue      string  `json:"token_value,omitempty" jsonschema:"Token value/name (for mint_token only)"`
 	ClawbackAddress string  `json:"clawback_address,omitempty" jsonschema:"Optional clawback address hex string (for mint_token only)"`
+	FreezeAddress   string  `json:"freeze_address,omitempty" jsonschema:"Optional freeze address hex string (for mint_token only)"`
 	TokenID         string  `json:"token_id,omitempty" jsonschema:"Token ID (for authorize_token_transfer, transfer_token, burn_token, and clawback_token)"`
 	ToAccountID     string  `json:"to_account_id,omitempty" jsonschema:"Destination account ID (for transfer_token and clawback_token)"`
 	FromAccountID   string  `json:"from_account_id,omitempty" jsonschema:"Source account holding the token (for clawback_token only)"`
@@ -302,7 +304,7 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to get account for nonce: %v", err)
 		}
-		nonce := fromAccount.GetNonce() + 1
+		nonce := fromAccount.GetNonce()
 
 		// Create transfer request
 		transferReq := &crypto.TransferPayload{
@@ -369,6 +371,14 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			clawbackAddr = &args.ClawbackAddress
 		}
 
+		var freezeAddr *string
+		if args.FreezeAddress != "" {
+			if _, err := scalegraph.ScalegraphIdFromString(args.FreezeAddress); err != nil {
+				return nil, nil, fmt.Errorf("invalid freeze_address: %v", err)
+			}
+			freezeAddr = &args.FreezeAddress
+		}
+
 		nonce, err := getAccountNonce(client, srv, args.AccountID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
@@ -376,7 +386,8 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		payload := &crypto.MintTokenPayload{
 			TokenValue:      args.TokenValue,
 			ClawbackAddress: clawbackAddr,
-			Nonce:           int64(nonce) + 1,
+			FreezeAddress:   freezeAddr,
+			Nonce:           int64(nonce),
 		}
 		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
 		if err != nil {
@@ -391,6 +402,9 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 		text := fmt.Sprintf("Token minted for account %s\nToken value: %s\nToken ID: %s", args.AccountID[:16]+"...", args.TokenValue, resp.TokenID)
 		if args.ClawbackAddress != "" {
 			text += fmt.Sprintf("\nClawback address: %s", args.ClawbackAddress[:16]+"...")
+		}
+		if args.FreezeAddress != "" {
+			text += fmt.Sprintf("\nFreeze address: %s", args.FreezeAddress[:16]+"...")
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
@@ -744,8 +758,6 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
 			}
-			nonce++
-
 			// Create transfer request
 			transferReq := &crypto.TransferPayload{
 				From:      args.AccountID,
@@ -802,6 +814,13 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 				}
 				clawbackAddr = &args.ClawbackAddress
 			}
+			var freezeAddr *string
+			if args.FreezeAddress != "" {
+				if _, err := scalegraph.ScalegraphIdFromString(args.FreezeAddress); err != nil {
+					return nil, nil, fmt.Errorf("invalid freeze_address: %v", err)
+				}
+				freezeAddr = &args.FreezeAddress
+			}
 			nonce, err := getAccountNonce(client, srv, args.AccountID)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
@@ -809,7 +828,8 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			payload := &crypto.MintTokenPayload{
 				TokenValue:      args.TokenValue,
 				ClawbackAddress: clawbackAddr,
-				Nonce:           int64(nonce) + 1,
+				FreezeAddress:   freezeAddr,
+				Nonce:           int64(nonce),
 			}
 			envelope, err := crypto.CreateSignedEnvelope(payload, privKey, args.AccountID, certPEM)
 			if err != nil {

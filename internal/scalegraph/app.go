@@ -156,7 +156,7 @@ func (a *App) Transfer(ctx context.Context, req *TransferRequest) (*TransferResp
 	}
 
 	// Validate nonce before proceeding
-	expectedNonce := fromAcc.GetNonce() + 1
+	expectedNonce := fromAcc.GetNonce()
 	if req.Nonce != expectedNonce {
 		logger.Warn("Nonce mismatch", "from", req.From, "expected", expectedNonce, "got", req.Nonce)
 		return nil, fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, req.Nonce)
@@ -223,8 +223,9 @@ func (a *App) MintToken(ctx context.Context, req *MintTokenRequest) (*MintTokenR
 		logger.Warn("Account not found for mint token", "account_id", signerID)
 		return nil, fmt.Errorf("destination account not found: %s", signerID)
 	}
+	toAcc.GetNonce()
 
-	token := newToken(req.TokenValue, req.SignedEnvelope.Signature, req.ClawbackAddress, req.SignedEnvelope.Payload.Nonce)
+	token := newToken(req.TokenValue, req.SignedEnvelope.Signature, req.ClawbackAddress, req.FreezeAddress, req.Nonce)
 	mintTokenTx := newMintTokenTransaction(toAcc, token)
 
 	if err := toAcc.appendTransaction(mintTokenTx); err != nil {

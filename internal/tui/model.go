@@ -83,6 +83,7 @@ type Model struct {
 	tokenToAccountIndex int // to-account selector (TransferToken step 2)
 	tokenSourceIndex    int // source account selector (AuthorizeTokenTransfer step 1: token owner)
 	tokenClawbackIndex  int // 0 = "No clawback", 1+ = account index (MintToken step 2)
+	tokenFreezeIndex    int // 0 = "No freeze",   1+ = account index (MintToken step 3)
 	tokenTokenIndex     int // selected token index within an account's token list
 	tokenValueInput     textinput.Model
 	lookupTokenInput    textinput.Model

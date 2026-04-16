@@ -439,7 +439,7 @@ func (m Model) updateSendMoney(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			// Get account to calculate nonce
 			fromAccount := accounts[m.sendFromIndex]
-			nonce := fromAccount.GetNonce() + 1
+			nonce := fromAccount.GetNonce()
 
 			// Load credentials (from cache or disk)
 			creds, err := m.getCredentials(fromID)
@@ -563,6 +563,7 @@ func (m Model) updateTokenMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tokenToAccountIndex = 0
 		m.tokenSourceIndex = 0
 		m.tokenClawbackIndex = 0
+		m.tokenFreezeIndex = 0
 		m.tokenTokenIndex = 0
 		m.tokenListOffset = 0
 		m.statusMsg = ""
@@ -646,7 +647,7 @@ func (m Model) updateMintToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case 2:
-		// clawback list size: 1 ("No clawback") + len(accounts) (all accounts, including minting account)
+		// clawback list size: 1 ("No clawback") + len(accounts)
 		clawbackCount := len(accounts) + 1
 		switch msg.String() {
 		case "up", "k":
@@ -658,11 +659,35 @@ func (m Model) updateMintToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.tokenClawbackIndex++
 			}
 		case "enter":
+			m.tokenStep = 3
+			m.tokenFreezeIndex = 0
+			m.statusMsg = ""
+		}
+	case 3:
+		// freeze list size: 1 ("No freeze") + len(accounts)
+		freezeCount := len(accounts) + 1
+		switch msg.String() {
+		case "up", "k":
+			if m.tokenFreezeIndex > 0 {
+				m.tokenFreezeIndex--
+			}
+		case "down", "j":
+			if m.tokenFreezeIndex < freezeCount-1 {
+				m.tokenFreezeIndex++
+			}
+		case "enter":
 			// Resolve clawback address (nil if index 0)
 			var clawbackAddr *scalegraph.ScalegraphId
 			if m.tokenClawbackIndex > 0 {
 				id := accounts[m.tokenClawbackIndex-1].ID()
 				clawbackAddr = &id
+			}
+
+			// Resolve freeze address (nil if index 0)
+			var freezeAddr *scalegraph.ScalegraphId
+			if m.tokenFreezeIndex > 0 {
+				id := accounts[m.tokenFreezeIndex-1].ID()
+				freezeAddr = &id
 			}
 
 			signerID := accounts[m.tokenAccountIndex].ID()
@@ -677,7 +702,7 @@ func (m Model) updateMintToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			nonce := int64(accounts[m.tokenAccountIndex].GetNonce()) + 1
+			nonce := int64(accounts[m.tokenAccountIndex].GetNonce())
 			payload := &crypto.MintTokenPayload{
 				TokenValue: m.tokenValueInput.Value(),
 				Nonce:      nonce,
@@ -685,6 +710,10 @@ func (m Model) updateMintToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if clawbackAddr != nil {
 				clawbackStr := clawbackAddr.String()
 				payload.ClawbackAddress = &clawbackStr
+			}
+			if freezeAddr != nil {
+				freezeStr := freezeAddr.String()
+				payload.FreezeAddress = &freezeStr
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, signerID.String(), creds.CertificatePEM)
 			if err != nil {

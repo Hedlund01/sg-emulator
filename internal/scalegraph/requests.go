@@ -116,6 +116,8 @@ type MintResponse struct{}
 type MintTokenRequest struct {
 	TokenValue      string
 	ClawbackAddress *ScalegraphId
+	FreezeAddress   *ScalegraphId
+	Nonce           int64
 	SignedEnvelope  *crypto.SignedEnvelope[*crypto.MintTokenPayload]
 }
 
@@ -133,6 +135,18 @@ func (r *MintTokenRequest) Verify(verifier *crypto.Verifier, caPublicKey ed25519
 		func(signed *crypto.MintTokenPayload) error {
 			if signed.TokenValue != r.TokenValue {
 				return fmt.Errorf("TokenValue mismatch")
+			}
+			if signed.Nonce != r.Nonce {
+				return fmt.Errorf("Nonce mismatch, expected %d, got %d", r.Nonce, signed.Nonce)
+			}
+			// Compare freeze addresses
+			switch {
+			case r.FreezeAddress == nil && signed.FreezeAddress != nil:
+				return fmt.Errorf("FreezeAddress mismatch: request nil, signed %s", *signed.FreezeAddress)
+			case r.FreezeAddress != nil && signed.FreezeAddress == nil:
+				return fmt.Errorf("FreezeAddress mismatch: request %s, signed nil", r.FreezeAddress)
+			case r.FreezeAddress != nil && signed.FreezeAddress != nil && r.FreezeAddress.String() != *signed.FreezeAddress:
+				return fmt.Errorf("FreezeAddress mismatch")
 			}
 			// Compare clawback addresses
 			switch {

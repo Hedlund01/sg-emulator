@@ -132,6 +132,7 @@ func (r *GetAccountPayload) Bytes() []byte {
 type MintTokenPayload struct {
 	TokenValue      string  `json:"token_value"`
 	ClawbackAddress *string `json:"clawback_address,omitempty"`
+	FreezeAddress   *string `json:"freeze_address,omitempty"`
 	Nonce           int64   `json:"nonce"`
 }
 
@@ -140,6 +141,7 @@ func (r *MintTokenPayload) Bytes() []byte {
 	data, _ := json.Marshal(MintTokenPayload{
 		TokenValue:      r.TokenValue,
 		ClawbackAddress: r.ClawbackAddress,
+		FreezeAddress:   r.FreezeAddress,
 		Nonce:           r.Nonce,
 	})
 	return data
