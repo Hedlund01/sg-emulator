@@ -199,6 +199,145 @@ func TestTransferNonceMismatch(t *testing.T) {
 	assert.Equal(t, 100.0, acc1.Balance(), "balance should not change after nonce mismatch")
 }
 
+func TestAuthorizeTokenTransferNonceMismatch(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+	authorizer := createTestAccountInApp(t, app, MBR_SLOT_COST)
+
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "authorize-nonce", nil, nil)
+
+	err = app.AuthorizeTokenTransfer(testCtx(), &AuthorizeTokenTransferRequest{
+		AccountID:    authorizer.ID(),
+		TokenOwnerID: holder.ID(),
+		TokenId:      tokenID,
+		Nonce:        999,
+	})
+	assert.Error(t, err, "should error for nonce mismatch")
+}
+
+func TestUnauthorizeTokenTransferNonceMismatch(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+	authorizer := createTestAccountInApp(t, app, MBR_SLOT_COST)
+
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "unauthorize-nonce", nil, nil)
+
+	err = app.AuthorizeTokenTransfer(testCtx(), &AuthorizeTokenTransferRequest{
+		AccountID:    authorizer.ID(),
+		TokenOwnerID: holder.ID(),
+		TokenId:      tokenID,
+		Nonce:        authorizer.GetNonce(),
+	})
+	require.NoError(t, err)
+
+	err = app.UnauthorizeTokenTransfer(testCtx(), &UnauthorizeTokenTransferRequest{
+		AccountID:    authorizer.ID(),
+		TokenOwnerID: holder.ID(),
+		TokenId:      tokenID,
+		Nonce:        999,
+	})
+	assert.Error(t, err, "should error for nonce mismatch")
+}
+
+func TestTransferTokenNonceMismatch(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+	receiver := createTestAccountInApp(t, app, 0)
+
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "transfer-token-nonce", nil, nil)
+
+	err = app.TransferToken(testCtx(), &TransferTokenRequest{
+		From:    holder.ID(),
+		To:      receiver.ID(),
+		TokenId: tokenID,
+		Nonce:   999,
+	})
+	assert.Error(t, err, "should error for nonce mismatch")
+}
+
+func TestBurnTokenNonceMismatch(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+	owner, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, owner, "burn-token-nonce", nil, nil)
+
+	err = app.BurnToken(testCtx(), &BurnTokenRequest{AccountID: owner.ID(), TokenId: tokenID, Nonce: 999})
+	assert.Error(t, err, "should error for nonce mismatch")
+}
+
+func TestClawbackTokenNonceMismatch(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+	authority := createTestAccountInApp(t, app, 0)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	authorityID := authority.ID()
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "clawback-nonce", &authorityID, nil)
+
+	err = app.ClawbackToken(testCtx(), &ClawbackTokenRequest{
+		From:    holder.ID(),
+		To:      authority.ID(),
+		TokenId: tokenID,
+		Nonce:   999,
+	})
+	assert.Error(t, err, "should error for nonce mismatch")
+}
+
+func TestFreezeTokenNonceMismatch(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+	authority := createTestAccountInApp(t, app, MBR_FREEZE_COST)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	authorityID := authority.ID()
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "freeze-nonce", nil, &authorityID)
+
+	err = app.FreezeToken(testCtx(), &FreezeTokenRequest{
+		FreezeAuthority: authority.ID(),
+		TokenHolder:     holder.ID(),
+		TokenId:         tokenID,
+		Nonce:           999,
+	})
+	assert.Error(t, err, "should error for nonce mismatch")
+}
+
+func TestUnfreezeTokenNonceMismatch(t *testing.T) {
+	app := testApp()
+	pubKey, privKey, cert := testKeyPairAndCert(t)
+	authority := createTestAccountInApp(t, app, MBR_FREEZE_COST)
+	holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+	require.NoError(t, err)
+
+	authorityID := authority.ID()
+	tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "unfreeze-nonce", nil, &authorityID)
+
+	err = app.FreezeToken(testCtx(), &FreezeTokenRequest{
+		FreezeAuthority: authority.ID(),
+		TokenHolder:     holder.ID(),
+		TokenId:         tokenID,
+		Nonce:           authority.GetNonce(),
+	})
+	require.NoError(t, err)
+
+	err = app.UnfreezeToken(testCtx(), &UnfreezeTokenRequest{
+		FreezeAuthority: authority.ID(),
+		TokenHolder:     holder.ID(),
+		TokenId:         tokenID,
+		Nonce:           999,
+	})
+	assert.Error(t, err, "should error for nonce mismatch")
+}
+
 func TestMint(t *testing.T) {
 	app := testApp()
 	acc := createTestAccountInApp(t, app, 100.0)
@@ -381,7 +520,7 @@ func TestBurnTokenEndToEnd(t *testing.T) {
 	mbrBeforeBurn := acc.mbr
 
 	accID := acc.ID()
-	err = app.BurnToken(testCtx(), &BurnTokenRequest{AccountID: accID, TokenId: tokenID})
+	err = app.BurnToken(testCtx(), &BurnTokenRequest{AccountID: accID, TokenId: tokenID, Nonce: acc.GetNonce()})
 	require.NoError(t, err)
 
 	_, ok := acc.GetToken(tokenID)
@@ -406,6 +545,7 @@ func TestUnauthorizeTokenTransferEndToEnd(t *testing.T) {
 		AccountID:    authorizer.ID(),
 		TokenOwnerID: holder.ID(),
 		TokenId:      tokenID,
+		Nonce:        authorizer.GetNonce(),
 	})
 	require.NoError(t, err)
 
@@ -416,6 +556,7 @@ func TestUnauthorizeTokenTransferEndToEnd(t *testing.T) {
 		AccountID:    authorizer.ID(),
 		TokenOwnerID: holder.ID(),
 		TokenId:      tokenID,
+		Nonce:        authorizer.GetNonce(),
 	})
 	require.NoError(t, err)
 
@@ -443,6 +584,7 @@ func TestClawbackTokenEndToEnd(t *testing.T) {
 		From:    holder.ID(),
 		To:      authority.ID(),
 		TokenId: tokenID,
+		Nonce:   authority.GetNonce(),
 	})
 	require.NoError(t, err)
 
@@ -492,6 +634,7 @@ func TestFreezeTokenEndToEnd(t *testing.T) {
 		FreezeAuthority: authority.ID(),
 		TokenHolder:     holder.ID(),
 		TokenId:         tokenID,
+		Nonce:           authority.GetNonce(),
 	})
 	require.NoError(t, err)
 
@@ -505,6 +648,7 @@ func TestFreezeTokenEndToEnd(t *testing.T) {
 		From:    holder.ID(),
 		To:      authority.ID(),
 		TokenId: tokenID,
+		Nonce:   holder.GetNonce(),
 	})
 	assert.Error(t, err, "transfer of frozen token should fail")
 
@@ -513,6 +657,7 @@ func TestFreezeTokenEndToEnd(t *testing.T) {
 		FreezeAuthority: authority.ID(),
 		TokenHolder:     holder.ID(),
 		TokenId:         tokenID,
+		Nonce:           authority.GetNonce(),
 	})
 	require.NoError(t, err)
 

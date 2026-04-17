@@ -444,10 +444,16 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("token_id is required")
 		}
 
+		nonce, err := getAccountNonce(client, srv, args.AccountID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
+		}
+
 		payload := &crypto.AuthorizeTokenTransferPayload{
 			AccountID:    args.AccountID,
 			TokenID:      args.TokenID,
 			TokenOwnerID: args.TokenOwnerID,
+			Nonce:        nonce,
 		}
 		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
 		if err != nil {
@@ -479,10 +485,16 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("token_id is required")
 		}
 
+		nonce, err := getAccountNonce(client, srv, args.AccountID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
+		}
+
 		payload := &crypto.UnauthorizeTokenTransferPayload{
 			AccountID:    args.AccountID,
 			TokenID:      args.TokenID,
 			TokenOwnerID: args.TokenOwnerID,
+			Nonce:        nonce,
 		}
 		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
 		if err != nil {
@@ -514,10 +526,16 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("token_id is required")
 		}
 
+		nonce, err := getAccountNonce(client, srv, args.FromAccountID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
+		}
+
 		payload := &crypto.TransferTokenPayload{
 			From:    args.FromAccountID,
 			To:      args.ToAccountID,
 			TokenID: args.TokenID,
+			Nonce:   nonce,
 		}
 		signedEnvelope, err := createSignedEnvelope(srv, args.FromAccountID, payload)
 		if err != nil {
@@ -546,9 +564,15 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("token_id is required")
 		}
 
+		nonce, err := getAccountNonce(client, srv, args.AccountID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
+		}
+
 		payload := &crypto.BurnTokenPayload{
 			AccountID: args.AccountID,
 			TokenID:   args.TokenID,
+			Nonce:     nonce,
 		}
 		signedEnvelope, err := createSignedEnvelope(srv, args.AccountID, payload)
 		if err != nil {
@@ -580,10 +604,16 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("token_id is required")
 		}
 
+		nonce, err := getAccountNonce(client, srv, args.ToAccountID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
+		}
+
 		payload := &crypto.ClawbackTokenPayload{
 			From:    args.FromAccountID,
 			To:      args.ToAccountID,
 			TokenID: args.TokenID,
+			Nonce:   nonce,
 		}
 		// Signed by the clawback authority (to_account_id), not the holder
 		signedEnvelope, err := createSignedEnvelope(srv, args.ToAccountID, payload)
@@ -616,10 +646,16 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("token_id is required")
 		}
 
+		nonce, err := getAccountNonce(client, srv, args.FreezeAuthorityID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
+		}
+
 		payload := &crypto.FreezeTokenPayload{
 			FreezeAuthority: args.FreezeAuthorityID,
 			TokenHolder:     args.TokenHolderID,
 			TokenID:         args.TokenID,
+			Nonce:           nonce,
 		}
 		signedEnvelope, err := createSignedEnvelope(srv, args.FreezeAuthorityID, payload)
 		if err != nil {
@@ -651,10 +687,16 @@ func registerTools(mcpServer *mcp.Server, client *server.Client, srv *server.Ser
 			return nil, nil, fmt.Errorf("token_id is required")
 		}
 
+		nonce, err := getAccountNonce(client, srv, args.FreezeAuthorityID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get account nonce: %v", err)
+		}
+
 		payload := &crypto.UnfreezeTokenPayload{
 			FreezeAuthority: args.FreezeAuthorityID,
 			TokenHolder:     args.TokenHolderID,
 			TokenID:         args.TokenID,
+			Nonce:           nonce,
 		}
 		signedEnvelope, err := createSignedEnvelope(srv, args.FreezeAuthorityID, payload)
 		if err != nil {

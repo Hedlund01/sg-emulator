@@ -213,19 +213,21 @@ func (t *MintTokenTransaction) Token() *Token {
 }
 
 type AuthorizeTokenTransferTransaction struct {
-	id         ScalegraphId
-	sender     *Account // authorizer (future token receiver)
-	receiver   *Account // token owner (current token holder)
-	tokenId    *string
+	id       ScalegraphId
+	sender   *Account // authorizer (future token receiver)
+	receiver *Account // token owner (current token holder)
+	tokenId  *string
+	nonce    uint64
 }
 
-func newAuthorizeTokenTransferTransaction(authorizer, tokenOwner *Account, tokenId *string) *AuthorizeTokenTransferTransaction {
+func newAuthorizeTokenTransferTransaction(authorizer, tokenOwner *Account, tokenId *string, nonce uint64) *AuthorizeTokenTransferTransaction {
 	txId, _ := NewScalegraphId()
 	return &AuthorizeTokenTransferTransaction{
 		id:       txId,
 		sender:   authorizer,
 		receiver: tokenOwner,
 		tokenId:  tokenId,
+		nonce:    nonce,
 	}
 }
 
@@ -250,20 +252,26 @@ func (t *AuthorizeTokenTransferTransaction) TokenId() *string {
 	return t.tokenId
 }
 
+func (t *AuthorizeTokenTransferTransaction) Nonce() uint64 {
+	return t.nonce
+}
+
 type TransferTokenTransaction struct {
 	id       ScalegraphId
 	sender   *Account
 	receiver *Account
 	token    *Token
+	nonce    uint64
 }
 
-func newTransferTokenTransaction(sender, receiver *Account, token *Token) *TransferTokenTransaction {
+func newTransferTokenTransaction(sender, receiver *Account, token *Token, nonce uint64) *TransferTokenTransaction {
 	txId, _ := NewScalegraphId()
 	return &TransferTokenTransaction{
 		id:       txId,
 		sender:   sender,
 		receiver: receiver,
 		token:    token,
+		nonce:    nonce,
 	}
 }
 
@@ -288,20 +296,26 @@ func (t *TransferTokenTransaction) Token() *Token {
 	return t.token
 }
 
+func (t *TransferTokenTransaction) Nonce() uint64 {
+	return t.nonce
+}
+
 type UnauthorizeTokenTransferTransaction struct {
 	id       ScalegraphId
 	sender   *Account // authorizer revoking (future token receiver)
 	receiver *Account // token owner (current token holder)
 	tokenId  *string
+	nonce    uint64
 }
 
-func newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner *Account, tokenId *string) *UnauthorizeTokenTransferTransaction {
+func newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner *Account, tokenId *string, nonce uint64) *UnauthorizeTokenTransferTransaction {
 	txId, _ := NewScalegraphId()
 	return &UnauthorizeTokenTransferTransaction{
 		id:       txId,
 		sender:   authorizer,
 		receiver: tokenOwner,
 		tokenId:  tokenId,
+		nonce:    nonce,
 	}
 }
 
@@ -326,18 +340,24 @@ func (t *UnauthorizeTokenTransferTransaction) TokenId() *string {
 	return t.tokenId
 }
 
+func (t *UnauthorizeTokenTransferTransaction) Nonce() uint64 {
+	return t.nonce
+}
+
 type BurnTokenTransaction struct {
 	id        ScalegraphId
 	accountID *Account
 	tokenID   string
+	nonce     uint64
 }
 
-func newBurnTokenTransaction(account *Account, tokenID string) *BurnTokenTransaction {
+func newBurnTokenTransaction(account *Account, tokenID string, nonce uint64) *BurnTokenTransaction {
 	txId, _ := NewScalegraphId()
 	return &BurnTokenTransaction{
 		id:        txId,
 		accountID: account,
 		tokenID:   tokenID,
+		nonce:     nonce,
 	}
 }
 
@@ -362,20 +382,26 @@ func (t *BurnTokenTransaction) TokenID() string {
 	return t.tokenID
 }
 
+func (t *BurnTokenTransaction) Nonce() uint64 {
+	return t.nonce
+}
+
 type ClawbackTokenTransaction struct {
 	id    ScalegraphId
 	from  *Account
 	to    *Account
 	token Token
+	nonce uint64
 }
 
-func newClawbackTokenTransaction(from, to *Account, token Token) *ClawbackTokenTransaction {
+func newClawbackTokenTransaction(from, to *Account, token Token, nonce uint64) *ClawbackTokenTransaction {
 	txId, _ := NewScalegraphId()
 	return &ClawbackTokenTransaction{
 		id:    txId,
 		from:  from,
 		to:    to,
 		token: token,
+		nonce: nonce,
 	}
 }
 
@@ -400,20 +426,26 @@ func (t *ClawbackTokenTransaction) Token() Token {
 	return t.token
 }
 
+func (t *ClawbackTokenTransaction) Nonce() uint64 {
+	return t.nonce
+}
+
 type FreezeTokenTransaction struct {
 	id              ScalegraphId
 	freezeAuthority *Account // sender
 	tokenHolder     *Account // receiver
 	tokenID         string
+	nonce           uint64
 }
 
-func newFreezeTokenTransaction(authority, holder *Account, tokenID string) *FreezeTokenTransaction {
+func newFreezeTokenTransaction(authority, holder *Account, tokenID string, nonce uint64) *FreezeTokenTransaction {
 	txId, _ := NewScalegraphId()
 	return &FreezeTokenTransaction{
 		id:              txId,
 		freezeAuthority: authority,
 		tokenHolder:     holder,
 		tokenID:         tokenID,
+		nonce:           nonce,
 	}
 }
 
@@ -422,21 +454,24 @@ func (t *FreezeTokenTransaction) Type() TransactionType { return FreezeToken }
 func (t *FreezeTokenTransaction) Sender() *Account      { return t.freezeAuthority }
 func (t *FreezeTokenTransaction) Receiver() *Account    { return t.tokenHolder }
 func (t *FreezeTokenTransaction) TokenID() string       { return t.tokenID }
+func (t *FreezeTokenTransaction) Nonce() uint64         { return t.nonce }
 
 type UnfreezeTokenTransaction struct {
 	id              ScalegraphId
 	freezeAuthority *Account // sender
 	tokenHolder     *Account // receiver
 	tokenID         string
+	nonce           uint64
 }
 
-func newUnfreezeTokenTransaction(authority, holder *Account, tokenID string) *UnfreezeTokenTransaction {
+func newUnfreezeTokenTransaction(authority, holder *Account, tokenID string, nonce uint64) *UnfreezeTokenTransaction {
 	txId, _ := NewScalegraphId()
 	return &UnfreezeTokenTransaction{
 		id:              txId,
 		freezeAuthority: authority,
 		tokenHolder:     holder,
 		tokenID:         tokenID,
+		nonce:           nonce,
 	}
 }
 
@@ -445,3 +480,4 @@ func (t *UnfreezeTokenTransaction) Type() TransactionType { return UnfreezeToken
 func (t *UnfreezeTokenTransaction) Sender() *Account      { return t.freezeAuthority }
 func (t *UnfreezeTokenTransaction) Receiver() *Account    { return t.tokenHolder }
 func (t *UnfreezeTokenTransaction) TokenID() string       { return t.tokenID }
+func (t *UnfreezeTokenTransaction) Nonce() uint64         { return t.nonce }

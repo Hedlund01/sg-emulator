@@ -71,15 +71,15 @@ type currencyTransferRecord struct {
 
 // workerResult is returned by each benchmark worker goroutine.
 type workerResult struct {
-	opLats           []time.Duration
-	txLats           []time.Duration
-	opAttempted      int64
-	opSucceeded      int64
-	opFailed         int64
-	txAttempted      int64
-	txSucceeded      int64
-	txFailed         int64
-	transfers        []tokenTransferRecord
+	opLats            []time.Duration
+	txLats            []time.Duration
+	opAttempted       int64
+	opSucceeded       int64
+	opFailed          int64
+	txAttempted       int64
+	txSucceeded       int64
+	txFailed          int64
+	transfers         []tokenTransferRecord
 	currencyTransfers []currencyTransferRecord
 }
 
@@ -493,7 +493,7 @@ func runCurrencyWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair 
 	sender := pair.sender
 	receiver := pair.receiver
 
-	var nonce uint64 = 1
+	var nonce uint64 = 0
 
 	warmupEnd := time.Now().Add(bcfg.warmup)
 	benchEnd := warmupEnd.Add(bcfg.duration)
@@ -503,18 +503,18 @@ func runCurrencyWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair 
 			return res
 		}
 
-		now := time.Now()
-		measured := !now.Before(warmupEnd)
-		res.recordOpAttempt(measured)
-
+		// Create signed request
 		req, err := signTransfer(sender, receiver.id, 0.01, nonce)
 		if err != nil {
-			res.recordOpFailure(measured)
-			nonce++
 			continue
 		}
 
+		// Increment op and tx counter if after warmup
+		now := time.Now()
+		measured := !now.Before(warmupEnd)
+		res.recordOpAttempt(measured)
 		res.recordTxAttempt(measured)
+
 		txStart := time.Now()
 		resp, err := c.currency.Transfer(ctx, req)
 		txElapsed := time.Since(txStart)
@@ -546,7 +546,10 @@ func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair tok
 	sender := pair.sender
 	receiver := pair.receiver
 
-	var mintSeq uint64
+	// nextMintNonce tracks sender outgoing tx count for nonce-bearing mint txs.
+	var nextMintNonce int64 = 0
+	// Receiver authorizes incoming token transfers, so it has its own nonce stream.
+	var receiverNonce uint64 = 0
 
 	warmupEnd := time.Now().Add(bcfg.warmup)
 	benchEnd := warmupEnd.Add(bcfg.duration)
@@ -559,30 +562,30 @@ func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair tok
 		now := time.Now()
 		measured := !now.Before(warmupEnd)
 		res.recordOpAttempt(measured)
+		res.recordTxAttempt(measured)
 
-		mintSeq++
-
-		// 1. Mint a new token.
-		mintReq, rawSig, err := signMintToken(sender, fmt.Sprintf("bench-%d", mintSeq), "", int64(mintSeq))
+		// 1. Mint a new token. Token value must be non-empty.
+		tokenValue := fmt.Sprintf("bench-%d", nextMintNonce)
+		mintReq, rawSig, err := signMintToken(sender, tokenValue, "", nextMintNonce)
 		if err != nil {
-			res.recordOpFailure(measured)
 			continue
 		}
 
-		res.recordTxAttempt(measured)
 		mintStart := time.Now()
 		mintResp, err := c.token.MintToken(ctx, mintReq)
 		mintElapsed := time.Since(mintStart)
+
 		if err != nil || !mintResp.GetSuccess() {
 			res.recordTxFailure(measured, mintElapsed)
 			res.recordOpFailure(measured)
 			continue
 		}
+		nextMintNonce++
 		res.recordTxSuccess(measured, mintElapsed)
 		tokenID := tokenIDFromRawSig(rawSig)
 
 		// 2. Receiver authorizes the incoming transfer.
-		authReq, err := signAuthorizeTokenTransfer(receiver, sender.id, tokenID)
+		authReq, err := signAuthorizeTokenTransfer(receiver, sender.id, tokenID, receiverNonce)
 		if err != nil {
 			res.recordOpFailure(measured)
 			continue
@@ -597,10 +600,11 @@ func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair tok
 			res.recordOpFailure(measured)
 			continue
 		}
+		receiverNonce++
 		res.recordTxSuccess(measured, authElapsed)
 
 		// 3. Transfer the token.
-		xferReq, err := signTransferToken(sender, receiver.id, tokenID)
+		xferReq, err := signTransferToken(sender, receiver.id, tokenID, uint64(nextMintNonce))
 		if err != nil {
 			res.recordOpFailure(measured)
 			continue
@@ -616,6 +620,7 @@ func runTokenWorker(ctx context.Context, c *clients, bcfg *benchConfig, pair tok
 			res.recordOpFailure(measured)
 			continue
 		}
+		nextMintNonce++
 		res.recordTxSuccess(measured, xferElapsed)
 
 		if measured {
@@ -795,6 +800,12 @@ func appendBenchCSV(path string, runIdx int, label string, s benchSample) {
 		return
 	}
 	defer f.Close()
+
+	// Write CSV header once when creating a new/empty file.
+	if info, statErr := f.Stat(); statErr == nil && info.Size() == 0 {
+		fmt.Fprintln(f, "run_idx,label,tx_succeeded_per_sec,tx_p50_ms,tx_p95_ms")
+	}
+
 	fmt.Fprintf(f, "%d, %q, %.1f, %.1f, %.1f\n", runIdx, label, s.txSuccessRate, durMs(s.txP50), durMs(s.txP95))
 }
 

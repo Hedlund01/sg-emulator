@@ -121,6 +121,9 @@ func RunEndpointTests(ctx context.Context, cfg *config) []endpointResult {
 	// acc0Nonce tracks acc0's current outgoingTxCount (= the nonce for the next tx).
 	// After the Transfer above (which used nonce=0), it is now 1.
 	var acc0Nonce int64 = 1
+	// acc1Nonce tracks acc1's current outgoingTxCount (= the nonce for the next tx).
+	// acc1 has sent nothing yet.
+	var acc1Nonce uint64 = 0
 
 	// ------------------------------------------------------------------
 	// 2. Subscribe + MintToken (event delivery check)
@@ -194,7 +197,7 @@ afterMint:
 	if mintedTokenID != "" {
 		name := "TokenService/AuthorizeTokenTransfer"
 		start := time.Now()
-		req, err := signAuthorizeTokenTransfer(acc1, acc0.id, mintedTokenID)
+		req, err := signAuthorizeTokenTransfer(acc1, acc0.id, mintedTokenID, acc1Nonce)
 		if err != nil {
 			fail(name, start, fmt.Errorf("sign: %w", err))
 		} else {
@@ -204,6 +207,7 @@ afterMint:
 			} else if !resp.GetSuccess() {
 				fail(name, start, fmt.Errorf("server error: %s", resp.GetErrorMessage()))
 			} else {
+				acc1Nonce++
 				pass(name, start)
 			}
 		}
@@ -214,7 +218,7 @@ afterMint:
 		{
 			name := "TokenService/TransferToken"
 			start := time.Now()
-			req, err := signTransferToken(acc0, acc1.id, mintedTokenID)
+			req, err := signTransferToken(acc0, acc1.id, mintedTokenID, uint64(acc0Nonce))
 			if err != nil {
 				fail(name, start, fmt.Errorf("sign: %w", err))
 			} else {
@@ -224,6 +228,7 @@ afterMint:
 				} else if !resp.GetSuccess() {
 					fail(name, start, fmt.Errorf("server error: %s", resp.GetErrorMessage()))
 				} else {
+					acc0Nonce++
 					pass(name, start)
 				}
 			}
@@ -256,7 +261,7 @@ afterMint:
 		}
 		unauthTokenID := tokenIDFromRawSig(rawSig2)
 		{
-			authReq, err := signAuthorizeTokenTransfer(acc1, acc0.id, unauthTokenID)
+			authReq, err := signAuthorizeTokenTransfer(acc1, acc0.id, unauthTokenID, acc1Nonce)
 			if err != nil {
 				fail(name, start, fmt.Errorf("sign authorize: %w", err))
 				goto afterUnauth
@@ -270,9 +275,10 @@ afterMint:
 				fail(name, start, fmt.Errorf("authorize server error: %s", resp.GetErrorMessage()))
 				goto afterUnauth
 			}
+			acc1Nonce++
 		}
 		{
-			unauthReq, err := signUnauthorizeTokenTransfer(acc1, acc0.id, unauthTokenID)
+			unauthReq, err := signUnauthorizeTokenTransfer(acc1, acc0.id, unauthTokenID, acc1Nonce)
 			if err != nil {
 				fail(name, start, fmt.Errorf("sign: %w", err))
 				goto afterUnauth
@@ -283,6 +289,7 @@ afterMint:
 			} else if !resp.GetSuccess() {
 				fail(name, start, fmt.Errorf("server error: %s", resp.GetErrorMessage()))
 			} else {
+				acc1Nonce++
 				pass(name, start)
 			}
 		}
@@ -314,7 +321,7 @@ afterUnauth:
 		}
 		burnTokenID := tokenIDFromRawSig(rawSig3)
 		{
-			burnReq, err := signBurnToken(acc0, burnTokenID)
+			burnReq, err := signBurnToken(acc0, burnTokenID, uint64(acc0Nonce))
 			if err != nil {
 				fail(name, start, fmt.Errorf("sign: %w", err))
 				goto afterBurn
@@ -325,6 +332,7 @@ afterUnauth:
 			} else if !resp.GetSuccess() {
 				fail(name, start, fmt.Errorf("server error: %s", resp.GetErrorMessage()))
 			} else {
+				acc0Nonce++
 				pass(name, start)
 			}
 		}
@@ -357,7 +365,7 @@ afterBurn:
 		}
 		cbTokenID := tokenIDFromRawSig(rawSig4)
 		{
-			cbReq, err := signClawbackToken(acc1, acc0.id, cbTokenID)
+			cbReq, err := signClawbackToken(acc1, acc0.id, cbTokenID, acc1Nonce)
 			if err != nil {
 				fail(name, start, fmt.Errorf("sign: %w", err))
 				goto afterClawback
@@ -368,6 +376,7 @@ afterBurn:
 			} else if !resp.GetSuccess() {
 				fail(name, start, fmt.Errorf("server error: %s", resp.GetErrorMessage()))
 			} else {
+				acc1Nonce++
 				pass(name, start)
 			}
 		}

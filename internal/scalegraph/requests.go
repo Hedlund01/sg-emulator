@@ -165,6 +165,7 @@ type TransferTokenRequest struct {
 	From           ScalegraphId
 	To             ScalegraphId
 	TokenId        string
+	Nonce          uint64
 	SignedEnvelope *crypto.SignedEnvelope[*crypto.TransferTokenPayload]
 }
 
@@ -182,6 +183,9 @@ func (r *TransferTokenRequest) Verify(verifier crypto.SignatureVerifier, caPubli
 			if signed.To != r.To.String() {
 				return fmt.Errorf("To mismatch")
 			}
+			if signed.Nonce != r.Nonce {
+				return fmt.Errorf("Nonce mismatch")
+			}
 			return nil
 		})
 }
@@ -192,6 +196,7 @@ type AuthorizeTokenTransferRequest struct {
 	AccountID      ScalegraphId
 	TokenOwnerID   ScalegraphId
 	TokenId        string
+	Nonce          uint64
 	SignedEnvelope *crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload]
 }
 
@@ -209,6 +214,9 @@ func (r *AuthorizeTokenTransferRequest) Verify(verifier crypto.SignatureVerifier
 			if signed.TokenOwnerID != r.TokenOwnerID.String() {
 				return fmt.Errorf("TokenOwnerID mismatch")
 			}
+			if signed.Nonce != r.Nonce {
+				return fmt.Errorf("Nonce mismatch")
+			}
 			return nil
 		})
 }
@@ -219,6 +227,7 @@ type UnauthorizeTokenTransferRequest struct {
 	AccountID      ScalegraphId
 	TokenOwnerID   ScalegraphId
 	TokenId        string
+	Nonce          uint64
 	SignedEnvelope *crypto.SignedEnvelope[*crypto.UnauthorizeTokenTransferPayload]
 }
 
@@ -235,6 +244,9 @@ func (r *UnauthorizeTokenTransferRequest) Verify(verifier crypto.SignatureVerifi
 			}
 			if signed.TokenOwnerID != r.TokenOwnerID.String() {
 				return fmt.Errorf("TokenOwnerID mismatch")
+			}
+			if signed.Nonce != r.Nonce {
+				return fmt.Errorf("Nonce mismatch")
 			}
 			return nil
 		})
@@ -254,6 +266,7 @@ type AccountCountResponse struct {
 type BurnTokenRequest struct {
 	AccountID      ScalegraphId
 	TokenId        string
+	Nonce          uint64
 	SignedEnvelope *crypto.SignedEnvelope[*crypto.BurnTokenPayload]
 }
 
@@ -268,6 +281,9 @@ func (r *BurnTokenRequest) Verify(verifier crypto.SignatureVerifier, caPublicKey
 			if signed.AccountID != r.AccountID.String() {
 				return fmt.Errorf("From mismatch")
 			}
+			if signed.Nonce != r.Nonce {
+				return fmt.Errorf("Nonce mismatch")
+			}
 			return nil
 		})
 }
@@ -278,6 +294,7 @@ type ClawbackTokenRequest struct {
 	From           ScalegraphId
 	To             ScalegraphId
 	TokenId        string
+	Nonce          uint64
 	SignedEnvelope *crypto.SignedEnvelope[*crypto.ClawbackTokenPayload]
 }
 
@@ -294,6 +311,9 @@ func (r *ClawbackTokenRequest) Verify(verifier crypto.SignatureVerifier, caPubli
 			}
 			if signed.To != r.To.String() {
 				return fmt.Errorf("To mismatch")
+			}
+			if signed.Nonce != r.Nonce {
+				return fmt.Errorf("Nonce mismatch")
 			}
 			return nil
 		})
@@ -340,6 +360,7 @@ type FreezeTokenRequest struct {
 	FreezeAuthority ScalegraphId
 	TokenHolder     ScalegraphId
 	TokenId         string
+	Nonce           uint64
 	SignedEnvelope  *crypto.SignedEnvelope[*crypto.FreezeTokenPayload]
 }
 
@@ -357,6 +378,9 @@ func (r *FreezeTokenRequest) Verify(verifier crypto.SignatureVerifier, caPublicK
 			if signed.TokenID != r.TokenId {
 				return fmt.Errorf("TokenID mismatch")
 			}
+			if signed.Nonce != r.Nonce {
+				return fmt.Errorf("Nonce mismatch")
+			}
 			return nil
 		})
 }
@@ -367,6 +391,7 @@ type UnfreezeTokenRequest struct {
 	FreezeAuthority ScalegraphId
 	TokenHolder     ScalegraphId
 	TokenId         string
+	Nonce           uint64
 	SignedEnvelope  *crypto.SignedEnvelope[*crypto.UnfreezeTokenPayload]
 }
 
@@ -383,6 +408,9 @@ func (r *UnfreezeTokenRequest) Verify(verifier crypto.SignatureVerifier, caPubli
 			}
 			if signed.TokenID != r.TokenId {
 				return fmt.Errorf("TokenID mismatch")
+			}
+			if signed.Nonce != r.Nonce {
+				return fmt.Errorf("Nonce mismatch")
 			}
 			return nil
 		})

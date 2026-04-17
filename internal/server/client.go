@@ -293,6 +293,7 @@ func (c *Client) AuthorizeTokenTransferSigned(ctx context.Context, signedReq *cr
 		AccountID:      acc,
 		TokenOwnerID:   tokenOwnerID,
 		TokenId:        signedReq.Payload.TokenID,
+		Nonce:          signedReq.Payload.Nonce,
 		SignedEnvelope: signedReq,
 	})
 }
@@ -321,6 +322,7 @@ func (c *Client) UnauthorizeTokenTransferSigned(ctx context.Context, signedReq *
 		AccountID:      acc,
 		TokenOwnerID:   tokenOwnerID,
 		TokenId:        signedReq.Payload.TokenID,
+		Nonce:          signedReq.Payload.Nonce,
 		SignedEnvelope: signedReq,
 	})
 }
@@ -348,6 +350,7 @@ func (c *Client) TransferTokenSigned(ctx context.Context, signedReq *crypto.Sign
 		From:           fromAcc,
 		To:             toAcc,
 		TokenId:        signedReq.Payload.TokenID,
+		Nonce:          signedReq.Payload.Nonce,
 		SignedEnvelope: signedReq,
 	})
 }
@@ -369,6 +372,7 @@ func (c *Client) BurnTokenSigned(ctx context.Context, signedReq *crypto.SignedEn
 	return Send[scalegraph.BurnTokenRequest, scalegraph.BurnTokenResponse](c, ctx, &scalegraph.BurnTokenRequest{
 		AccountID:      acc,
 		TokenId:        signedReq.Payload.TokenID,
+		Nonce:          signedReq.Payload.Nonce,
 		SignedEnvelope: signedReq,
 	})
 }
@@ -423,6 +427,7 @@ func (c *Client) ClawbackTokenSigned(ctx context.Context, signedReq *crypto.Sign
 		From:           fromAcc,
 		To:             toAcc,
 		TokenId:        signedReq.Payload.TokenID,
+		Nonce:          signedReq.Payload.Nonce,
 		SignedEnvelope: signedReq,
 	})
 }
@@ -450,6 +455,7 @@ func (c *Client) FreezeTokenSigned(ctx context.Context, signedReq *crypto.Signed
 		FreezeAuthority: freezeAuthority,
 		TokenHolder:     tokenHolder,
 		TokenId:         signedReq.Payload.TokenID,
+		Nonce:           signedReq.Payload.Nonce,
 		SignedEnvelope:  signedReq,
 	})
 }
@@ -477,6 +483,7 @@ func (c *Client) UnfreezeTokenSigned(ctx context.Context, signedReq *crypto.Sign
 		FreezeAuthority: freezeAuthority,
 		TokenHolder:     tokenHolder,
 		TokenId:         signedReq.Payload.TokenID,
+		Nonce:           signedReq.Payload.Nonce,
 		SignedEnvelope:  signedReq,
 	})
 }

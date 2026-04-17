@@ -35,7 +35,7 @@ func testApp() *App {
 
 // testKeyPairAndCert generates a fresh Ed25519 key pair and a self-signed test certificate.
 // This avoids needing a real CA for unit tests.
-func testKeyPairAndCert(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey, *x509.Certificate) {
+func testKeyPairAndCert(t testing.TB) (ed25519.PublicKey, ed25519.PrivateKey, *x509.Certificate) {
 	t.Helper()
 
 	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
@@ -62,7 +62,7 @@ func testKeyPairAndCert(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey, *x
 
 // testCreateAccount creates a test account with a generated key pair and certificate.
 // Returns the account and the key pair for further use.
-func testCreateAccount(t *testing.T) (*Account, *sgcrypto.KeyPair) {
+func testCreateAccount(t testing.TB) (*Account, *sgcrypto.KeyPair) {
 	t.Helper()
 
 	pubKey, privKey, cert := testKeyPairAndCert(t)
@@ -79,7 +79,7 @@ func testCreateAccount(t *testing.T) (*Account, *sgcrypto.KeyPair) {
 }
 
 // testCreateTwoAccounts creates two test accounts for transfer testing.
-func testCreateTwoAccounts(t *testing.T) (*Account, *Account) {
+func testCreateTwoAccounts(t testing.TB) (*Account, *Account) {
 	t.Helper()
 
 	acc1, _ := testCreateAccount(t)
@@ -90,7 +90,7 @@ func testCreateTwoAccounts(t *testing.T) (*Account, *Account) {
 
 // createTestAccountInApp creates an account in the app with generated credentials and initial balance.
 // This replaces the old app.CreateAccount(ctx, balance) pattern.
-func createTestAccountInApp(t *testing.T, app *App, balance float64) *Account {
+func createTestAccountInApp(t testing.TB, app *App, balance float64) *Account {
 	t.Helper()
 
 	pubKey, _, cert := testKeyPairAndCert(t)
@@ -120,7 +120,7 @@ func getTransactionAmount(tx ITransaction) float64 {
 // The token has value "test-value" and no clawback address.
 // The account must have enough balance to cover MBR_TOKEN_COST before calling
 // appendTransaction with the resulting MintTokenTransaction.
-func testCreateToken(t *testing.T, acc *Account, privKey ed25519.PrivateKey) *Token {
+func testCreateToken(t testing.TB, acc *Account, privKey ed25519.PrivateKey) *Token {
 	t.Helper()
 
 	nonce := int64(acc.GetNonce())
@@ -134,7 +134,7 @@ func testCreateToken(t *testing.T, acc *Account, privKey ed25519.PrivateKey) *To
 // testMintTokenIntoAccount mints a token directly into acc by appending a
 // MintTokenTransaction. It first credits MBR_TOKEN_COST balance so the MBR
 // check passes. Returns the minted token.
-func testMintTokenIntoAccount(t *testing.T, acc *Account, privKey ed25519.PrivateKey) *Token {
+func testMintTokenIntoAccount(t testing.TB, acc *Account, privKey ed25519.PrivateKey) *Token {
 	t.Helper()
 
 	// Ensure the account has enough balance for the MBR
@@ -153,14 +153,14 @@ func testMintTokenIntoAccount(t *testing.T, acc *Account, privKey ed25519.Privat
 // testAuthorizeTokenTransfer authorizes a token-transfer slot on authorizer for the
 // given tokenId, directed at tokenOwner. It first credits MBR_SLOT_COST balance so
 // the MBR check passes. The token must already exist on tokenOwner.
-func testAuthorizeTokenTransfer(t *testing.T, authorizer *Account, tokenOwner *Account, tokenId string) {
+func testAuthorizeTokenTransfer(t testing.TB, authorizer *Account, tokenOwner *Account, tokenId string) {
 	t.Helper()
 
 	mintTx := newMintTransaction(authorizer, MBR_SLOT_COST)
 	err := authorizer.appendTransaction(mintTx)
 	require.NoError(t, err, "failed to mint MBR_SLOT_COST balance before authorize")
 
-	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId, authorizer.GetNonce())
 	err = authorizer.appendTransaction(tx)
 	require.NoError(t, err, "failed to append authorize token transfer transaction (authorizer side)")
 
@@ -170,7 +170,7 @@ func testAuthorizeTokenTransfer(t *testing.T, authorizer *Account, tokenOwner *A
 
 // testCreateTokenWithAddresses creates a Token signed by acc using privKey,
 // with optional clawback and freeze addresses.
-func testCreateTokenWithAddresses(t *testing.T, acc *Account, privKey ed25519.PrivateKey, clawback, freeze *ScalegraphId) *Token {
+func testCreateTokenWithAddresses(t testing.TB, acc *Account, privKey ed25519.PrivateKey, clawback, freeze *ScalegraphId) *Token {
 	t.Helper()
 
 	nonce := int64(acc.GetNonce())
@@ -189,7 +189,7 @@ func testCreateTokenWithAddresses(t *testing.T, acc *Account, privKey ed25519.Pr
 // testMintTokenWithAddressesInApp mints a token via app.MintToken with optional addresses.
 // It first ensures the account has enough balance for MBR_TOKEN_COST.
 // Returns the minted token ID.
-func testMintTokenWithAddressesInApp(t *testing.T, app *App,
+func testMintTokenWithAddressesInApp(t testing.TB, app *App,
 	privKey ed25519.PrivateKey, cert *x509.Certificate,
 	acc *Account, tokenValue string, clawback, freeze *ScalegraphId,
 ) string {
@@ -221,7 +221,7 @@ func testMintTokenWithAddressesInApp(t *testing.T, app *App,
 }
 
 // runConcurrent runs fn concurrently n times and waits for all goroutines to finish.
-func runConcurrent(t *testing.T, n int, fn func(i int)) {
+func runConcurrent(t testing.TB, n int, fn func(i int)) {
 	t.Helper()
 
 	var wg sync.WaitGroup

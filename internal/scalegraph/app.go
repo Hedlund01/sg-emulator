@@ -235,7 +235,12 @@ func (a *App) MintToken(ctx context.Context, req *MintTokenRequest) (*MintTokenR
 		logger.Warn("Account not found for mint token", "account_id", signerID)
 		return nil, fmt.Errorf("destination account not found: %s", signerID)
 	}
-	toAcc.GetNonce()
+
+	expectedNonce := int64(toAcc.GetNonce())
+	if req.Nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "account_id", signerID, "expected", expectedNonce, "got", req.Nonce)
+		return nil, fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, req.Nonce)
+	}
 
 	token := newToken(req.TokenValue, req.SignedEnvelope.Signature, req.ClawbackAddress, req.FreezeAddress, req.Nonce)
 	mintTokenTx := newMintTokenTransaction(toAcc, token)
@@ -270,7 +275,13 @@ func (a *App) AuthorizeTokenTransfer(ctx context.Context, req *AuthorizeTokenTra
 		return fmt.Errorf("token owner account not found: %s", req.TokenOwnerID)
 	}
 
-	authorizeTx := newAuthorizeTokenTransferTransaction(authorizerAcc, tokenOwnerAcc, &req.TokenId)
+	expectedNonce := authorizerAcc.GetNonce()
+	if req.Nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "account_id", req.AccountID, "expected", expectedNonce, "got", req.Nonce)
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, req.Nonce)
+	}
+
+	authorizeTx := newAuthorizeTokenTransferTransaction(authorizerAcc, tokenOwnerAcc, &req.TokenId, req.Nonce)
 	if err := authorizerAcc.appendTransaction(authorizeTx); err != nil {
 		logger.Error("Failed to append authorize token transfer transaction (authorizer)", "error", err)
 		return err
@@ -307,7 +318,13 @@ func (a *App) UnauthorizeTokenTransfer(ctx context.Context, req *UnauthorizeToke
 		return fmt.Errorf("token owner account not found: %s", req.TokenOwnerID)
 	}
 
-	unauthorizeTx := newUnauthorizeTokenTransferTransaction(authorizerAcc, tokenOwnerAcc, &req.TokenId)
+	expectedNonce := authorizerAcc.GetNonce()
+	if req.Nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "account_id", req.AccountID, "expected", expectedNonce, "got", req.Nonce)
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, req.Nonce)
+	}
+
+	unauthorizeTx := newUnauthorizeTokenTransferTransaction(authorizerAcc, tokenOwnerAcc, &req.TokenId, req.Nonce)
 	if err := authorizerAcc.appendTransaction(unauthorizeTx); err != nil {
 		logger.Error("Failed to append unauthorize token transfer transaction (authorizer)", "error", err)
 		return err
@@ -351,7 +368,13 @@ func (a *App) TransferToken(ctx context.Context, req *TransferTokenRequest) erro
 		return fmt.Errorf("token not found in source account: %s", req.TokenId)
 	}
 
-	transferTokenTx := newTransferTokenTransaction(fromAcc, toAcc, token)
+	expectedNonce := fromAcc.GetNonce()
+	if req.Nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "from", req.From, "expected", expectedNonce, "got", req.Nonce)
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, req.Nonce)
+	}
+
+	transferTokenTx := newTransferTokenTransaction(fromAcc, toAcc, token, req.Nonce)
 
 	if err := fromAcc.appendTransaction(transferTokenTx); err != nil {
 		logger.Error("Failed to append transfer token transaction", "error", err)
@@ -391,7 +414,13 @@ func (a *App) BurnToken(ctx context.Context, req *BurnTokenRequest) error {
 		return fmt.Errorf("account not found: %s", req.AccountID)
 	}
 
-	burnTx := newBurnTokenTransaction(acc, req.TokenId)
+	expectedNonce := acc.GetNonce()
+	if req.Nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "account_id", req.AccountID, "expected", expectedNonce, "got", req.Nonce)
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, req.Nonce)
+	}
+
+	burnTx := newBurnTokenTransaction(acc, req.TokenId, req.Nonce)
 	if err := acc.appendTransaction(burnTx); err != nil {
 		logger.Error("Failed to append burn token transaction", "error", err)
 		return err
@@ -433,7 +462,14 @@ func (a *App) ClawbackToken(ctx context.Context, req *ClawbackTokenRequest) erro
 		return fmt.Errorf("clawback address mismatch: token expects %s, but destination account is %s", token.ClawbackAddress(), req.To)
 	}
 
-	clawbackTx := newClawbackTokenTransaction(fromAcc, toAcc, *token)
+	// Clawback is initiated by the clawback authority (req.To), so validate against their nonce.
+	expectedNonce := toAcc.GetNonce()
+	if req.Nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "to", req.To, "expected", expectedNonce, "got", req.Nonce)
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, req.Nonce)
+	}
+
+	clawbackTx := newClawbackTokenTransaction(fromAcc, toAcc, *token, req.Nonce)
 
 	if err := fromAcc.appendTransaction(clawbackTx); err != nil {
 		logger.Error("Failed to append clawback token transaction", "error", err)
@@ -479,7 +515,13 @@ func (a *App) FreezeToken(ctx context.Context, req *FreezeTokenRequest) error {
 		return fmt.Errorf("account %s is not the freeze authority for token %s", req.FreezeAuthority, req.TokenId)
 	}
 
-	freezeTx := newFreezeTokenTransaction(authorityAcc, holderAcc, req.TokenId)
+	expectedNonce := authorityAcc.GetNonce()
+	if req.Nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "freeze_authority", req.FreezeAuthority, "expected", expectedNonce, "got", req.Nonce)
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, req.Nonce)
+	}
+
+	freezeTx := newFreezeTokenTransaction(authorityAcc, holderAcc, req.TokenId, req.Nonce)
 
 	if err := authorityAcc.appendTransaction(freezeTx); err != nil {
 		logger.Error("Failed to append freeze token transaction to authority", "error", err)
@@ -524,7 +566,13 @@ func (a *App) UnfreezeToken(ctx context.Context, req *UnfreezeTokenRequest) erro
 		return fmt.Errorf("account %s is not the freeze authority for token %s", req.FreezeAuthority, req.TokenId)
 	}
 
-	unfreezeTx := newUnfreezeTokenTransaction(authorityAcc, holderAcc, req.TokenId)
+	expectedNonce := authorityAcc.GetNonce()
+	if req.Nonce != expectedNonce {
+		logger.Warn("Nonce mismatch", "freeze_authority", req.FreezeAuthority, "expected", expectedNonce, "got", req.Nonce)
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", expectedNonce, req.Nonce)
+	}
+
+	unfreezeTx := newUnfreezeTokenTransaction(authorityAcc, holderAcc, req.TokenId, req.Nonce)
 
 	if err := authorityAcc.appendTransaction(unfreezeTx); err != nil {
 		logger.Error("Failed to append unfreeze token transaction to authority", "error", err)

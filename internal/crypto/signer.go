@@ -149,12 +149,15 @@ func (r *MintTokenPayload) Bytes() []byte {
 type BurnTokenPayload struct {
 	AccountID string `json:"account_id"`
 	TokenID   string `json:"token_id"`
+	Nonce     uint64 `json:"nonce"`
 }
 
 // Bytes returns the canonical byte representation for signing
 func (r *BurnTokenPayload) Bytes() []byte {
 	data, _ := json.Marshal(BurnTokenPayload{
-		TokenID: r.TokenID,
+		AccountID: r.AccountID,
+		TokenID:   r.TokenID,
+		Nonce:     r.Nonce,
 	})
 	return data
 }
@@ -164,6 +167,7 @@ type TransferTokenPayload struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	TokenID string `json:"token_id"`
+	Nonce   uint64 `json:"nonce"`
 }
 
 // Bytes returns the canonical byte representation for signing
@@ -172,6 +176,7 @@ func (r *TransferTokenPayload) Bytes() []byte {
 		From:    r.From,
 		To:      r.To,
 		TokenID: r.TokenID,
+		Nonce:   r.Nonce,
 	})
 	return data
 }
@@ -181,6 +186,7 @@ type AuthorizeTokenTransferPayload struct {
 	AccountID    string `json:"account_id"`
 	TokenID      string `json:"token_id"`
 	TokenOwnerID string `json:"token_owner_id"`
+	Nonce        uint64 `json:"nonce"`
 }
 
 // Bytes returns the canonical byte representation for signing
@@ -189,6 +195,7 @@ func (r *AuthorizeTokenTransferPayload) Bytes() []byte {
 		AccountID:    r.AccountID,
 		TokenID:      r.TokenID,
 		TokenOwnerID: r.TokenOwnerID,
+		Nonce:        r.Nonce,
 	})
 	return data
 }
@@ -197,6 +204,7 @@ type UnauthorizeTokenTransferPayload struct {
 	AccountID    string `json:"account_id"`
 	TokenID      string `json:"token_id"`
 	TokenOwnerID string `json:"token_owner_id"`
+	Nonce        uint64 `json:"nonce"`
 }
 
 // Bytes returns the canonical byte representation for signing
@@ -205,6 +213,7 @@ func (r *UnauthorizeTokenTransferPayload) Bytes() []byte {
 		AccountID:    r.AccountID,
 		TokenID:      r.TokenID,
 		TokenOwnerID: r.TokenOwnerID,
+		Nonce:        r.Nonce,
 	})
 	return data
 }
@@ -213,6 +222,7 @@ type ClawbackTokenPayload struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	TokenID string `json:"token_id"`
+	Nonce   uint64 `json:"nonce"`
 }
 
 // Bytes returns the canonical byte representation for signing
@@ -221,6 +231,7 @@ func (r *ClawbackTokenPayload) Bytes() []byte {
 		From:    r.From,
 		To:      r.To,
 		TokenID: r.TokenID,
+		Nonce:   r.Nonce,
 	})
 	return data
 }
@@ -245,6 +256,7 @@ type FreezeTokenPayload struct {
 	FreezeAuthority string `json:"freeze_authority"`
 	TokenHolder     string `json:"token_holder"`
 	TokenID         string `json:"token_id"`
+	Nonce           uint64 `json:"nonce"`
 }
 
 // Bytes returns the canonical byte representation for signing
@@ -253,6 +265,7 @@ func (r *FreezeTokenPayload) Bytes() []byte {
 		FreezeAuthority: r.FreezeAuthority,
 		TokenHolder:     r.TokenHolder,
 		TokenID:         r.TokenID,
+		Nonce:           r.Nonce,
 	})
 	return data
 }
@@ -262,6 +275,7 @@ type UnfreezeTokenPayload struct {
 	FreezeAuthority string `json:"freeze_authority"`
 	TokenHolder     string `json:"token_holder"`
 	TokenID         string `json:"token_id"`
+	Nonce           uint64 `json:"nonce"`
 }
 
 // Bytes returns the canonical byte representation for signing
@@ -270,6 +284,7 @@ func (r *UnfreezeTokenPayload) Bytes() []byte {
 		FreezeAuthority: r.FreezeAuthority,
 		TokenHolder:     r.TokenHolder,
 		TokenID:         r.TokenID,
+		Nonce:           r.Nonce,
 	})
 	return data
 }

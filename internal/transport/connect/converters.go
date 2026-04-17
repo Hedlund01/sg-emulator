@@ -102,6 +102,7 @@ func convertTransferTokenEnvelope(req *tokenv1.TransferTokenRequest) (*crypto.Si
 			From:    env.GetPayload().GetFrom(),
 			To:      env.GetPayload().GetTo(),
 			TokenID: env.GetPayload().GetTokenId(),
+			Nonce:   uint64(env.GetPayload().GetNonce()),
 		},
 		Signature: sig,
 	}, nil
@@ -119,6 +120,7 @@ func convertAuthorizeTokenTransferEnvelope(req *tokenv1.AuthorizeTokenTransferRe
 			AccountID:    env.GetPayload().GetAccountId(),
 			TokenID:      env.GetPayload().GetTokenId(),
 			TokenOwnerID: env.GetPayload().GetTokenOwnerId(),
+			Nonce:        uint64(env.GetPayload().GetNonce()),
 		},
 		Signature: sig,
 	}, nil
@@ -136,6 +138,7 @@ func convertUnauthorizeTokenTransferEnvelope(req *tokenv1.UnauthorizeTokenTransf
 			AccountID:    env.GetPayload().GetAccountId(),
 			TokenID:      env.GetPayload().GetTokenId(),
 			TokenOwnerID: env.GetPayload().GetTokenOwnerId(),
+			Nonce:        uint64(env.GetPayload().GetNonce()),
 		},
 		Signature: sig,
 	}, nil
@@ -152,6 +155,7 @@ func convertBurnTokenEnvelope(req *tokenv1.BurnTokenRequest) (*crypto.SignedEnve
 		Payload: &crypto.BurnTokenPayload{
 			AccountID: env.GetPayload().GetAccountId(),
 			TokenID:   env.GetPayload().GetTokenId(),
+			Nonce:     uint64(env.GetPayload().GetNonce()),
 		},
 		Signature: sig,
 	}, nil
@@ -169,6 +173,7 @@ func convertClawbackTokenEnvelope(req *tokenv1.ClawbackTokenRequest) (*crypto.Si
 			From:    env.GetPayload().GetFrom(),
 			To:      env.GetPayload().GetTo(),
 			TokenID: env.GetPayload().GetTokenId(),
+			Nonce:   uint64(env.GetPayload().GetNonce()),
 		},
 		Signature: sig,
 	}, nil
@@ -186,6 +191,7 @@ func convertFreezeTokenEnvelope(req *tokenv1.FreezeTokenRequest) (*crypto.Signed
 			FreezeAuthority: env.GetPayload().GetFreezeAuthority(),
 			TokenHolder:     env.GetPayload().GetTokenHolder(),
 			TokenID:         env.GetPayload().GetTokenId(),
+			Nonce:           uint64(env.GetPayload().GetNonce()),
 		},
 		Signature: sig,
 	}, nil
@@ -203,6 +209,7 @@ func convertUnfreezeTokenEnvelope(req *tokenv1.UnfreezeTokenRequest) (*crypto.Si
 			FreezeAuthority: env.GetPayload().GetFreezeAuthority(),
 			TokenHolder:     env.GetPayload().GetTokenHolder(),
 			TokenID:         env.GetPayload().GetTokenId(),
+			Nonce:           uint64(env.GetPayload().GetNonce()),
 		},
 		Signature: sig,
 	}, nil

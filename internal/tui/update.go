@@ -839,6 +839,7 @@ func (m Model) updateAuthorizeTokenTransfer(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		case "enter":
 			selectedToken := tokens[m.tokenTokenIndex]
 			receiverID := accounts[m.tokenAccountIndex].ID()
+			nonce := accounts[m.tokenAccountIndex].GetNonce()
 
 			creds, err := m.getCredentials(receiverID)
 			if err != nil {
@@ -855,6 +856,7 @@ func (m Model) updateAuthorizeTokenTransfer(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 				AccountID:    receiverID.String(),
 				TokenID:      selectedToken.ID(),
 				TokenOwnerID: tokenOwnerID.String(),
+				Nonce:        nonce,
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, receiverID.String(), creds.CertificatePEM)
 			if err != nil {
@@ -964,6 +966,7 @@ func (m Model) updateUnauthorizeTokenTransfer(msg tea.KeyMsg) (tea.Model, tea.Cm
 		case "enter":
 			selectedToken := tokens[m.tokenTokenIndex]
 			receiverID := accounts[m.tokenAccountIndex].ID()
+			nonce := accounts[m.tokenAccountIndex].GetNonce()
 
 			creds, err := m.getCredentials(receiverID)
 			if err != nil {
@@ -980,6 +983,7 @@ func (m Model) updateUnauthorizeTokenTransfer(msg tea.KeyMsg) (tea.Model, tea.Cm
 				AccountID:    receiverID.String(),
 				TokenID:      selectedToken.ID(),
 				TokenOwnerID: tokenOwnerID.String(),
+				Nonce:        nonce,
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, receiverID.String(), creds.CertificatePEM)
 			if err != nil {
@@ -1086,6 +1090,7 @@ func (m Model) updateTransferToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			selectedToken := m.cachedTokens[m.tokenTokenIndex]
 			fromID := fromAcc.ID()
 			toID := toAcc.ID()
+			nonce := fromAcc.GetNonce()
 			creds, err := m.getCredentials(fromID)
 			if err != nil {
 				m.statusMsg = "Failed to load credentials: " + err.Error()
@@ -1100,6 +1105,7 @@ func (m Model) updateTransferToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				From:    fromID.String(),
 				To:      toID.String(),
 				TokenID: selectedToken.ID(),
+				Nonce:   nonce,
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, fromID.String(), creds.CertificatePEM)
 			if err != nil {
@@ -1173,6 +1179,7 @@ func (m Model) updateBurnToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ownerAcc := accounts[m.tokenAccountIndex]
 			selectedToken := tokens[m.tokenTokenIndex]
 			ownerID := ownerAcc.ID()
+			nonce := ownerAcc.GetNonce()
 
 			creds, err := m.getCredentials(ownerID)
 			if err != nil {
@@ -1187,6 +1194,7 @@ func (m Model) updateBurnToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			payload := &crypto.BurnTokenPayload{
 				AccountID: ownerID.String(),
 				TokenID:   selectedToken.ID(),
+				Nonce:     nonce,
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, ownerID.String(), creds.CertificatePEM)
 			if err != nil {
@@ -1308,6 +1316,7 @@ func (m Model) updateClawbackToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			selectedToken := tokens[m.tokenTokenIndex]
 			authorityID := authorityAcc.ID()
 			holderID := holderAcc.ID()
+			nonce := authorityAcc.GetNonce()
 
 			creds, err := m.getCredentials(authorityID)
 			if err != nil {
@@ -1323,6 +1332,7 @@ func (m Model) updateClawbackToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				From:    holderID.String(),
 				To:      authorityID.String(),
 				TokenID: selectedToken.ID(),
+				Nonce:   nonce,
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, authorityID.String(), creds.CertificatePEM)
 			if err != nil {
@@ -1443,6 +1453,7 @@ func (m Model) updateFreezeToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			selectedToken := tokens[m.tokenTokenIndex]
 			authorityID := authorityAcc.ID()
 			holderID := holderAcc.ID()
+			nonce := authorityAcc.GetNonce()
 
 			creds, err := m.getCredentials(authorityID)
 			if err != nil {
@@ -1458,6 +1469,7 @@ func (m Model) updateFreezeToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				FreezeAuthority: authorityID.String(),
 				TokenHolder:     holderID.String(),
 				TokenID:         selectedToken.ID(),
+				Nonce:           nonce,
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, authorityID.String(), creds.CertificatePEM)
 			if err != nil {
@@ -1578,6 +1590,7 @@ func (m Model) updateUnfreezeToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			selectedToken := tokens[m.tokenTokenIndex]
 			authorityID := authorityAcc.ID()
 			holderID := holderAcc.ID()
+			nonce := authorityAcc.GetNonce()
 
 			creds, err := m.getCredentials(authorityID)
 			if err != nil {
@@ -1593,6 +1606,7 @@ func (m Model) updateUnfreezeToken(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				FreezeAuthority: authorityID.String(),
 				TokenHolder:     holderID.String(),
 				TokenID:         selectedToken.ID(),
+				Nonce:           nonce,
 			}
 			signedEnvelope, err := crypto.CreateSignedEnvelope(payload, privKey, authorityID.String(), creds.CertificatePEM)
 			if err != nil {

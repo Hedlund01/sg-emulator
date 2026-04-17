@@ -180,6 +180,7 @@ func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string, 
 	payload := &crypto.MintTokenPayload{
 		TokenValue:      tokenValue,
 		ClawbackAddress: cbPtr,
+		FreezeAddress: cbPtr,
 		Nonce:           nonce,
 	}
 	sig, err := crypto.Sign(payload, owner.privKey, owner.id)
@@ -189,10 +190,11 @@ func signMintToken(owner *accountCreds, tokenValue string, clawbackAddr string, 
 	protoPayload := &tokenv1.MintTokenPayload{
 		TokenValue: tokenValue,
 		Nonce:      nonce,
+		ClawbackAddress: clawbackAddr,
+		FreezeAddress: clawbackAddr,
+
 	}
-	if clawbackAddr != "" {
-		protoPayload.ClawbackAddress = clawbackAddr
-	}
+
 	return &tokenv1.MintTokenRequest{
 		SignedEnvelope: &tokenv1.SignedMintTokenEnvelope{
 			Payload:     protoPayload,
@@ -234,11 +236,13 @@ func signLookupToken(account *accountCreds, tokenID string) (*tokenv1.LookupToke
 
 // signAuthorizeTokenTransfer builds a signed AuthorizeTokenTransferRequest.
 // authorizer is the future token receiver; tokenOwnerID is the current token holder.
-func signAuthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string, tokenID string) (*tokenv1.AuthorizeTokenTransferRequest, error) {
+// nonce must equal the authorizer's current outgoingTxCount (GetNonce()).
+func signAuthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string, tokenID string, nonce uint64) (*tokenv1.AuthorizeTokenTransferRequest, error) {
 	payload := &crypto.AuthorizeTokenTransferPayload{
 		AccountID:    authorizer.id,
 		TokenID:      tokenID,
 		TokenOwnerID: tokenOwnerID,
+		Nonce:        nonce,
 	}
 	sig, err := crypto.Sign(payload, authorizer.privKey, authorizer.id)
 	if err != nil {
@@ -247,9 +251,10 @@ func signAuthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string, t
 	return &tokenv1.AuthorizeTokenTransferRequest{
 		SignedEnvelope: &tokenv1.SignedAuthorizeTokenTransferEnvelope{
 			Payload: &tokenv1.AuthorizeTokenTransferPayload{
-				AccountId:     authorizer.id,
-				TokenId:       tokenID,
-				TokenOwnerId:  tokenOwnerID,
+				AccountId:    authorizer.id,
+				TokenId:      tokenID,
+				TokenOwnerId: tokenOwnerID,
+				Nonce:        int64(nonce),
 			},
 			Signature: toProtoSig(sig),
 		},
@@ -258,11 +263,13 @@ func signAuthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string, t
 
 // signUnauthorizeTokenTransfer builds a signed UnauthorizeTokenTransferRequest.
 // authorizer is the account revoking authorization; tokenOwnerID is the current token holder.
-func signUnauthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string, tokenID string) (*tokenv1.UnauthorizeTokenTransferRequest, error) {
+// nonce must equal the authorizer's current outgoingTxCount (GetNonce()).
+func signUnauthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string, tokenID string, nonce uint64) (*tokenv1.UnauthorizeTokenTransferRequest, error) {
 	payload := &crypto.UnauthorizeTokenTransferPayload{
 		AccountID:    authorizer.id,
 		TokenID:      tokenID,
 		TokenOwnerID: tokenOwnerID,
+		Nonce:        nonce,
 	}
 	sig, err := crypto.Sign(payload, authorizer.privKey, authorizer.id)
 	if err != nil {
@@ -274,6 +281,7 @@ func signUnauthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string,
 				AccountId:    authorizer.id,
 				TokenId:      tokenID,
 				TokenOwnerId: tokenOwnerID,
+				Nonce:        int64(nonce),
 			},
 			Signature: toProtoSig(sig),
 		},
@@ -281,11 +289,13 @@ func signUnauthorizeTokenTransfer(authorizer *accountCreds, tokenOwnerID string,
 }
 
 // signTransferToken builds a signed TransferTokenRequest.
-func signTransferToken(from *accountCreds, toID, tokenID string) (*tokenv1.TransferTokenRequest, error) {
+// nonce must equal the sender's current outgoingTxCount (GetNonce()).
+func signTransferToken(from *accountCreds, toID, tokenID string, nonce uint64) (*tokenv1.TransferTokenRequest, error) {
 	payload := &crypto.TransferTokenPayload{
 		From:    from.id,
 		To:      toID,
 		TokenID: tokenID,
+		Nonce:   nonce,
 	}
 	sig, err := crypto.Sign(payload, from.privKey, from.id)
 	if err != nil {
@@ -297,6 +307,7 @@ func signTransferToken(from *accountCreds, toID, tokenID string) (*tokenv1.Trans
 				From:    from.id,
 				To:      toID,
 				TokenId: tokenID,
+				Nonce:   int64(nonce),
 			},
 			Signature: toProtoSig(sig),
 		},
@@ -304,10 +315,12 @@ func signTransferToken(from *accountCreds, toID, tokenID string) (*tokenv1.Trans
 }
 
 // signBurnToken builds a signed BurnTokenRequest.
-func signBurnToken(owner *accountCreds, tokenID string) (*tokenv1.BurnTokenRequest, error) {
+// nonce must equal the owner's current outgoingTxCount (GetNonce()).
+func signBurnToken(owner *accountCreds, tokenID string, nonce uint64) (*tokenv1.BurnTokenRequest, error) {
 	payload := &crypto.BurnTokenPayload{
 		AccountID: owner.id,
 		TokenID:   tokenID,
+		Nonce:     nonce,
 	}
 	sig, err := crypto.Sign(payload, owner.privKey, owner.id)
 	if err != nil {
@@ -318,6 +331,7 @@ func signBurnToken(owner *accountCreds, tokenID string) (*tokenv1.BurnTokenReque
 			Payload: &tokenv1.BurnTokenPayload{
 				AccountId: owner.id,
 				TokenId:   tokenID,
+				Nonce:     int64(nonce),
 			},
 			Signature: toProtoSig(sig),
 		},
@@ -326,11 +340,13 @@ func signBurnToken(owner *accountCreds, tokenID string) (*tokenv1.BurnTokenReque
 
 // signClawbackToken builds a signed ClawbackTokenRequest.
 // The clawback authority account signs and is the "to" field.
-func signClawbackToken(authority *accountCreds, fromID, tokenID string) (*tokenv1.ClawbackTokenRequest, error) {
+// nonce must equal the authority's current outgoingTxCount (GetNonce()).
+func signClawbackToken(authority *accountCreds, fromID, tokenID string, nonce uint64) (*tokenv1.ClawbackTokenRequest, error) {
 	payload := &crypto.ClawbackTokenPayload{
 		From:    fromID,
 		To:      authority.id,
 		TokenID: tokenID,
+		Nonce:   nonce,
 	}
 	sig, err := crypto.Sign(payload, authority.privKey, authority.id)
 	if err != nil {
@@ -342,6 +358,59 @@ func signClawbackToken(authority *accountCreds, fromID, tokenID string) (*tokenv
 				From:    fromID,
 				To:      authority.id,
 				TokenId: tokenID,
+				Nonce:   int64(nonce),
+			},
+			Signature: toProtoSig(sig),
+		},
+	}, nil
+}
+
+// signFreezeToken builds a signed FreezeTokenRequest.
+// The freeze authority signs; nonce must equal its current outgoingTxCount (GetNonce()).
+func signFreezeToken(authority *accountCreds, holderID, tokenID string, nonce uint64) (*tokenv1.FreezeTokenRequest, error) {
+	payload := &crypto.FreezeTokenPayload{
+		FreezeAuthority: authority.id,
+		TokenHolder:     holderID,
+		TokenID:         tokenID,
+		Nonce:           nonce,
+	}
+	sig, err := crypto.Sign(payload, authority.privKey, authority.id)
+	if err != nil {
+		return nil, err
+	}
+	return &tokenv1.FreezeTokenRequest{
+		SignedEnvelope: &tokenv1.SignedFreezeTokenEnvelope{
+			Payload: &tokenv1.FreezeTokenPayload{
+				FreezeAuthority: authority.id,
+				TokenHolder:     holderID,
+				TokenId:         tokenID,
+				Nonce:           int64(nonce),
+			},
+			Signature: toProtoSig(sig),
+		},
+	}, nil
+}
+
+// signUnfreezeToken builds a signed UnfreezeTokenRequest.
+// The freeze authority signs; nonce must equal its current outgoingTxCount (GetNonce()).
+func signUnfreezeToken(authority *accountCreds, holderID, tokenID string, nonce uint64) (*tokenv1.UnfreezeTokenRequest, error) {
+	payload := &crypto.UnfreezeTokenPayload{
+		FreezeAuthority: authority.id,
+		TokenHolder:     holderID,
+		TokenID:         tokenID,
+		Nonce:           nonce,
+	}
+	sig, err := crypto.Sign(payload, authority.privKey, authority.id)
+	if err != nil {
+		return nil, err
+	}
+	return &tokenv1.UnfreezeTokenRequest{
+		SignedEnvelope: &tokenv1.SignedUnfreezeTokenEnvelope{
+			Payload: &tokenv1.UnfreezeTokenPayload{
+				FreezeAuthority: authority.id,
+				TokenHolder:     holderID,
+				TokenId:         tokenID,
+				Nonce:           int64(nonce),
 			},
 			Signature: toProtoSig(sig),
 		},

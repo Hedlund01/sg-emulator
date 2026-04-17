@@ -69,81 +69,147 @@ func createSignedMintToken(ctx context.Context, srv *Server, client *Client,
 }
 
 // createSignedFreezeToken builds a signed FreezeTokenRequest (signed by the freeze authority).
-func createSignedFreezeToken(ctx context.Context, srv *Server,
+func createSignedFreezeToken(ctx context.Context, srv *Server, client *Client,
 	authorityID, holderID scalegraph.ScalegraphId, tokenID string,
 ) (*crypto.SignedEnvelope[*crypto.FreezeTokenPayload], error) {
 	privKey, certPEM, err := getAccountCreds(srv, authorityID)
 	if err != nil {
 		return nil, err
 	}
+	acc, err := getTestAccount(ctx, srv, client, authorityID)
+	if err != nil {
+		return nil, fmt.Errorf("get account nonce: %w", err)
+	}
 	payload := &crypto.FreezeTokenPayload{
 		FreezeAuthority: authorityID.String(),
 		TokenHolder:     holderID.String(),
 		TokenID:         tokenID,
+		Nonce:           acc.GetNonce(),
 	}
 	return crypto.CreateSignedEnvelope(payload, privKey, authorityID.String(), certPEM)
 }
 
 // createSignedUnfreezeToken builds a signed UnfreezeTokenRequest (signed by the freeze authority).
-func createSignedUnfreezeToken(ctx context.Context, srv *Server,
+func createSignedUnfreezeToken(ctx context.Context, srv *Server, client *Client,
 	authorityID, holderID scalegraph.ScalegraphId, tokenID string,
 ) (*crypto.SignedEnvelope[*crypto.UnfreezeTokenPayload], error) {
 	privKey, certPEM, err := getAccountCreds(srv, authorityID)
 	if err != nil {
 		return nil, err
 	}
+	acc, err := getTestAccount(ctx, srv, client, authorityID)
+	if err != nil {
+		return nil, fmt.Errorf("get account nonce: %w", err)
+	}
 	payload := &crypto.UnfreezeTokenPayload{
 		FreezeAuthority: authorityID.String(),
 		TokenHolder:     holderID.String(),
 		TokenID:         tokenID,
+		Nonce:           acc.GetNonce(),
 	}
 	return crypto.CreateSignedEnvelope(payload, privKey, authorityID.String(), certPEM)
 }
 
 // createSignedClawbackToken builds a signed ClawbackTokenRequest (signed by the clawback authority = "to").
-func createSignedClawbackToken(ctx context.Context, srv *Server,
+func createSignedClawbackToken(ctx context.Context, srv *Server, client *Client,
 	authorityID, holderID scalegraph.ScalegraphId, tokenID string,
 ) (*crypto.SignedEnvelope[*crypto.ClawbackTokenPayload], error) {
 	privKey, certPEM, err := getAccountCreds(srv, authorityID)
 	if err != nil {
 		return nil, err
 	}
+	acc, err := getTestAccount(ctx, srv, client, authorityID)
+	if err != nil {
+		return nil, fmt.Errorf("get account nonce: %w", err)
+	}
 	payload := &crypto.ClawbackTokenPayload{
 		From:    holderID.String(),
 		To:      authorityID.String(),
 		TokenID: tokenID,
+		Nonce:   acc.GetNonce(),
 	}
 	return crypto.CreateSignedEnvelope(payload, privKey, authorityID.String(), certPEM)
 }
 
 // createSignedAuthorizeTokenTransfer builds a signed AuthorizeTokenTransferRequest.
-func createSignedAuthorizeTokenTransfer(ctx context.Context, srv *Server,
+func createSignedAuthorizeTokenTransfer(ctx context.Context, srv *Server, client *Client,
 	authorizerID, ownerID scalegraph.ScalegraphId, tokenID string,
 ) (*crypto.SignedEnvelope[*crypto.AuthorizeTokenTransferPayload], error) {
 	privKey, certPEM, err := getAccountCreds(srv, authorizerID)
 	if err != nil {
 		return nil, err
 	}
+	acc, err := getTestAccount(ctx, srv, client, authorizerID)
+	if err != nil {
+		return nil, fmt.Errorf("get account nonce: %w", err)
+	}
 	payload := &crypto.AuthorizeTokenTransferPayload{
 		AccountID:    authorizerID.String(),
 		TokenID:      tokenID,
 		TokenOwnerID: ownerID.String(),
+		Nonce:        acc.GetNonce(),
 	}
 	return crypto.CreateSignedEnvelope(payload, privKey, authorizerID.String(), certPEM)
 }
 
+// createSignedUnauthorizeTokenTransfer builds a signed UnauthorizeTokenTransferRequest.
+func createSignedUnauthorizeTokenTransfer(ctx context.Context, srv *Server, client *Client,
+	authorizerID, ownerID scalegraph.ScalegraphId, tokenID string,
+) (*crypto.SignedEnvelope[*crypto.UnauthorizeTokenTransferPayload], error) {
+	privKey, certPEM, err := getAccountCreds(srv, authorizerID)
+	if err != nil {
+		return nil, err
+	}
+	acc, err := getTestAccount(ctx, srv, client, authorizerID)
+	if err != nil {
+		return nil, fmt.Errorf("get account nonce: %w", err)
+	}
+	payload := &crypto.UnauthorizeTokenTransferPayload{
+		AccountID:    authorizerID.String(),
+		TokenID:      tokenID,
+		TokenOwnerID: ownerID.String(),
+		Nonce:        acc.GetNonce(),
+	}
+	return crypto.CreateSignedEnvelope(payload, privKey, authorizerID.String(), certPEM)
+}
+
+// createSignedBurnToken builds a signed BurnTokenRequest.
+func createSignedBurnToken(ctx context.Context, srv *Server, client *Client,
+	accountID scalegraph.ScalegraphId, tokenID string,
+) (*crypto.SignedEnvelope[*crypto.BurnTokenPayload], error) {
+	privKey, certPEM, err := getAccountCreds(srv, accountID)
+	if err != nil {
+		return nil, err
+	}
+	acc, err := getTestAccount(ctx, srv, client, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("get account nonce: %w", err)
+	}
+	payload := &crypto.BurnTokenPayload{
+		AccountID: accountID.String(),
+		TokenID:   tokenID,
+		Nonce:     acc.GetNonce(),
+	}
+	return crypto.CreateSignedEnvelope(payload, privKey, accountID.String(), certPEM)
+}
+
 // createSignedTransferToken builds a signed TransferTokenRequest (signed by the sender).
-func createSignedTransferToken(ctx context.Context, srv *Server,
+func createSignedTransferToken(ctx context.Context, srv *Server, client *Client,
 	fromID, toID scalegraph.ScalegraphId, tokenID string,
 ) (*crypto.SignedEnvelope[*crypto.TransferTokenPayload], error) {
 	privKey, certPEM, err := getAccountCreds(srv, fromID)
 	if err != nil {
 		return nil, err
 	}
+	acc, err := getTestAccount(ctx, srv, client, fromID)
+	if err != nil {
+		return nil, fmt.Errorf("get account nonce: %w", err)
+	}
 	payload := &crypto.TransferTokenPayload{
 		From:    fromID.String(),
 		To:      toID.String(),
 		TokenID: tokenID,
+		Nonce:   acc.GetNonce(),
 	}
 	return crypto.CreateSignedEnvelope(payload, privKey, fromID.String(), certPEM)
 }

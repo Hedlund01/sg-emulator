@@ -112,24 +112,172 @@ func TestAccountString(t *testing.T) {
 }
 
 func TestAccountGetNonce(t *testing.T) {
-	app := testApp()
-	acc1 := createTestAccountInApp(t, app, 100)
-	acc2 := createTestAccountInApp(t, app, 0)
+	t.Run("currency transfer increments sender only", func(t *testing.T) {
+		app := testApp()
+		sender := createTestAccountInApp(t, app, 100)
+		receiver := createTestAccountInApp(t, app, 0)
 
-	assert.Equal(t, uint64(0), acc1.GetNonce(), "fresh account nonce should be 0")
+		assert.Equal(t, uint64(0), sender.GetNonce(), "fresh account nonce should be 0")
 
-	// Mint must NOT change nonce
-	err := app.Mint(testCtx(), &MintRequest{To: acc1.ID(), Amount: 50.0})
-	require.NoError(t, err)
-	assert.Equal(t, uint64(0), acc1.GetNonce(), "nonce must not change after incoming mint")
+		err := app.Mint(testCtx(), &MintRequest{To: sender.ID(), Amount: 50.0})
+		require.NoError(t, err)
+		assert.Equal(t, uint64(0), sender.GetNonce(), "nonce must not change after incoming mint")
 
-	// Outgoing transfer must increment nonce
-	_, err = app.Transfer(testCtx(), &TransferRequest{
-		From: acc1.ID(), To: acc2.ID(), Amount: 1.0, Nonce: 0,
+		_, err = app.Transfer(testCtx(), &TransferRequest{
+			From: sender.ID(), To: receiver.ID(), Amount: 1.0, Nonce: 0,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, uint64(1), sender.GetNonce(), "nonce should increment for outgoing transfer")
+		assert.Equal(t, uint64(0), receiver.GetNonce(), "incoming transfer must not increment receiver nonce")
 	})
-	require.NoError(t, err)
-	assert.Equal(t, uint64(1), acc1.GetNonce(), "nonce should be 1 after first outgoing transfer")
-	assert.Equal(t, uint64(0), acc2.GetNonce(), "receiver nonce must not change")
+
+	t.Run("authorize transfer increments authorizer only", func(t *testing.T) {
+		app := testApp()
+		pubKey, privKey, cert := testKeyPairAndCert(t)
+		owner, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+		require.NoError(t, err)
+		authorizer := createTestAccountInApp(t, app, MBR_SLOT_COST)
+
+		tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, owner, "authorize-nonce", nil, nil)
+		ownerNonceBefore := owner.GetNonce()
+		authorizerNonceBefore := authorizer.GetNonce()
+		err = app.AuthorizeTokenTransfer(testCtx(), &AuthorizeTokenTransferRequest{
+			AccountID:    authorizer.ID(),
+			TokenOwnerID: owner.ID(),
+			TokenId:      tokenID,
+			Nonce:        authorizer.GetNonce(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, authorizerNonceBefore+1, authorizer.GetNonce(), "authorizer nonce should increment")
+		assert.Equal(t, ownerNonceBefore, owner.GetNonce(), "token owner nonce should not increment on incoming side")
+	})
+
+	t.Run("unauthorize transfer increments authorizer only", func(t *testing.T) {
+		app := testApp()
+		pubKey, privKey, cert := testKeyPairAndCert(t)
+		owner, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+		require.NoError(t, err)
+		authorizer := createTestAccountInApp(t, app, MBR_SLOT_COST)
+
+		tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, owner, "unauthorize-nonce", nil, nil)
+		ownerNonceBefore := owner.GetNonce()
+		err = app.AuthorizeTokenTransfer(testCtx(), &AuthorizeTokenTransferRequest{
+			AccountID:    authorizer.ID(),
+			TokenOwnerID: owner.ID(),
+			TokenId:      tokenID,
+			Nonce:        authorizer.GetNonce(),
+		})
+		require.NoError(t, err)
+		authorizerNonceAfterAuthorize := authorizer.GetNonce()
+
+		err = app.UnauthorizeTokenTransfer(testCtx(), &UnauthorizeTokenTransferRequest{
+			AccountID:    authorizer.ID(),
+			TokenOwnerID: owner.ID(),
+			TokenId:      tokenID,
+			Nonce:        authorizer.GetNonce(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, authorizerNonceAfterAuthorize+1, authorizer.GetNonce(), "authorizer nonce should increment again")
+		assert.Equal(t, ownerNonceBefore, owner.GetNonce(), "token owner nonce should remain unchanged")
+	})
+
+	t.Run("transfer token increments sender only", func(t *testing.T) {
+		app := testApp()
+		pubKey, privKey, cert := testKeyPairAndCert(t)
+		sender, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+		require.NoError(t, err)
+		receiver := createTestAccountInApp(t, app, MBR_SLOT_COST)
+
+		tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, sender, "transfer-token-nonce", nil, nil)
+		senderNonceBefore := sender.GetNonce()
+		err = app.AuthorizeTokenTransfer(testCtx(), &AuthorizeTokenTransferRequest{
+			AccountID:    receiver.ID(),
+			TokenOwnerID: sender.ID(),
+			TokenId:      tokenID,
+			Nonce:        receiver.GetNonce(),
+		})
+		require.NoError(t, err)
+		receiverNonceBeforeIncoming := receiver.GetNonce()
+
+		err = app.TransferToken(testCtx(), &TransferTokenRequest{
+			From:    sender.ID(),
+			To:      receiver.ID(),
+			TokenId: tokenID,
+			Nonce:   sender.GetNonce(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, senderNonceBefore+1, sender.GetNonce(), "sender nonce should increment after transfer token")
+		assert.Equal(t, receiverNonceBeforeIncoming, receiver.GetNonce(), "receiver nonce should not increment on incoming transfer")
+	})
+
+	t.Run("burn token increments owner", func(t *testing.T) {
+		app := testApp()
+		pubKey, privKey, cert := testKeyPairAndCert(t)
+		owner, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+		require.NoError(t, err)
+
+		tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, owner, "burn-token-nonce", nil, nil)
+		ownerNonceBefore := owner.GetNonce()
+		err = app.BurnToken(testCtx(), &BurnTokenRequest{AccountID: owner.ID(), TokenId: tokenID, Nonce: owner.GetNonce()})
+		require.NoError(t, err)
+		assert.Equal(t, ownerNonceBefore+1, owner.GetNonce(), "owner nonce should increment after burn token")
+	})
+
+	t.Run("clawback increments authority only", func(t *testing.T) {
+		app := testApp()
+		pubKey, privKey, cert := testKeyPairAndCert(t)
+		authority := createTestAccountInApp(t, app, 0)
+		holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+		require.NoError(t, err)
+
+		authorityID := authority.ID()
+		tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "clawback-token-nonce", &authorityID, nil)
+		holderNonceBefore := holder.GetNonce()
+		authorityNonceBefore := authority.GetNonce()
+		err = app.ClawbackToken(testCtx(), &ClawbackTokenRequest{
+			From:    holder.ID(),
+			To:      authority.ID(),
+			TokenId: tokenID,
+			Nonce:   authority.GetNonce(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, authorityNonceBefore+1, authority.GetNonce(), "authority nonce should increment after clawback")
+		assert.Equal(t, holderNonceBefore, holder.GetNonce(), "holder nonce should not increment on incoming clawback")
+	})
+
+	t.Run("freeze and unfreeze increment authority only", func(t *testing.T) {
+		app := testApp()
+		pubKey, privKey, cert := testKeyPairAndCert(t)
+		authority := createTestAccountInApp(t, app, MBR_FREEZE_COST)
+		holder, err := app.CreateAccountWithKeys(testCtx(), pubKey, cert, MBR_TOKEN_COST)
+		require.NoError(t, err)
+
+		authorityID := authority.ID()
+		tokenID := testMintTokenWithAddressesInApp(t, app, privKey, cert, holder, "freeze-unfreeze-nonce", nil, &authorityID)
+		holderNonceBefore := holder.GetNonce()
+		authorityNonceBefore := authority.GetNonce()
+
+		err = app.FreezeToken(testCtx(), &FreezeTokenRequest{
+			FreezeAuthority: authority.ID(),
+			TokenHolder:     holder.ID(),
+			TokenId:         tokenID,
+			Nonce:           authority.GetNonce(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, authorityNonceBefore+1, authority.GetNonce(), "authority nonce should increment after freeze")
+		assert.Equal(t, holderNonceBefore, holder.GetNonce(), "holder nonce should not increment on freeze receiver side")
+		authorityNonceBeforeUnfreeze := authority.GetNonce()
+
+		err = app.UnfreezeToken(testCtx(), &UnfreezeTokenRequest{
+			FreezeAuthority: authority.ID(),
+			TokenHolder:     holder.ID(),
+			TokenId:         tokenID,
+			Nonce:           authority.GetNonce(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, authorityNonceBeforeUnfreeze+1, authority.GetNonce(), "authority nonce should increment after unfreeze")
+		assert.Equal(t, holderNonceBefore, holder.GetNonce(), "holder nonce should remain unchanged on unfreeze receiver side")
+	})
 }
 
 func TestAccountConcurrentMint(t *testing.T) {
@@ -264,7 +412,7 @@ func TestAuthorizeTokenTransferRequiresSufficientBalance(t *testing.T) {
 	minted := testMintTokenIntoAccount(t, tokenOwner, kp.PrivateKey)
 
 	mintedID := minted.ID()
-	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &mintedID)
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &mintedID, authorizer.GetNonce())
 	err := authorizer.appendTransaction(tx)
 	assert.Error(t, err, "authorizing a token slot with 0 balance should fail")
 	assert.Equal(t, 0.0, authorizer.Balance(), "balance should be unchanged after failed authorization")
@@ -327,7 +475,7 @@ func TestRollbackAuthorizeTokenTransferRestoresState(t *testing.T) {
 	// Give enough balance to cover MBR_SLOT_COST.
 	require.NoError(t, authorizer.appendTransaction(newMintTransaction(authorizer, 10.0)))
 
-	authTx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	authTx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId, authorizer.GetNonce())
 	require.NoError(t, authorizer.appendTransaction(authTx))
 
 	assert.Equal(t, MBR_SLOT_COST, authorizer.mbr, "mbr should equal MBR_SLOT_COST after authorization")
@@ -361,7 +509,7 @@ func TestAuthorizeTokenTransferFailsIfTokenNotOnOwner(t *testing.T) {
 	require.NoError(t, authorizer.appendTransaction(newMintTransaction(authorizer, MBR_SLOT_COST)))
 
 	nonExistentID := "nonexistent-token-id"
-	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &nonExistentID)
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &nonExistentID, authorizer.GetNonce())
 
 	// Authorizer side succeeds (balance is fine)
 	require.NoError(t, authorizer.appendTransaction(tx))
@@ -381,7 +529,7 @@ func TestAuthorizeTokenTransferRollbackOnOwnerFailure(t *testing.T) {
 	authorizerMBRBefore := authorizer.mbr
 
 	nonExistentID := "nonexistent-token-id"
-	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &nonExistentID)
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &nonExistentID, authorizer.GetNonce())
 
 	// Authorizer side succeeds
 	require.NoError(t, authorizer.appendTransaction(tx))
@@ -406,7 +554,7 @@ func TestBurnTokenRemovesTokenAndUnfreezesMBR(t *testing.T) {
 
 	mbrBefore := acc.mbr
 
-	burnTx := newBurnTokenTransaction(acc, tok.ID())
+	burnTx := newBurnTokenTransaction(acc, tok.ID(), acc.GetNonce())
 	err := acc.appendTransaction(burnTx)
 	require.NoError(t, err)
 
@@ -418,7 +566,7 @@ func TestBurnTokenRemovesTokenAndUnfreezesMBR(t *testing.T) {
 func TestBurnTokenFailsForNonExistentToken(t *testing.T) {
 	acc, _ := testCreateAccount(t)
 
-	burnTx := newBurnTokenTransaction(acc, "nonexistent-token-id")
+	burnTx := newBurnTokenTransaction(acc, "nonexistent-token-id", acc.GetNonce())
 	err := acc.appendTransaction(burnTx)
 	assert.Error(t, err, "burn should fail for non-existent token")
 }
@@ -434,7 +582,7 @@ func TestUnauthorizeTokenTransferRemovesSlotAndUnfreezesMBR(t *testing.T) {
 	mbrAfterAuth := authorizer.mbr
 
 	tokenId := minted.ID()
-	tx := newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	tx := newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId, authorizer.GetNonce())
 	require.NoError(t, authorizer.appendTransaction(tx))
 	require.NoError(t, tokenOwner.appendTransaction(tx))
 
@@ -451,7 +599,7 @@ func TestRollbackUnauthorizeTokenTransferRestoresState(t *testing.T) {
 	mbrAfterAuth := authorizer.mbr
 
 	tokenId := minted.ID()
-	tx := newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	tx := newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId, authorizer.GetNonce())
 	require.NoError(t, authorizer.appendTransaction(tx))
 	require.NoError(t, tokenOwner.appendTransaction(tx))
 
@@ -470,7 +618,7 @@ func TestClawbackTokenMovesTokenToAuthority(t *testing.T) {
 	tok := testMintTokenIntoAccount(t, holder, kp.PrivateKey)
 
 	// from=holder (sender, loses token), to=authority (receiver, gains token)
-	clawbackTx := newClawbackTokenTransaction(holder, authority, *tok)
+	clawbackTx := newClawbackTokenTransaction(holder, authority, *tok, authority.GetNonce())
 	require.NoError(t, holder.appendTransaction(clawbackTx))
 	require.NoError(t, authority.appendTransaction(clawbackTx))
 
@@ -486,7 +634,7 @@ func TestClawbackTokenRollback(t *testing.T) {
 	holder, kp := testCreateAccount(t)
 	tok := testMintTokenIntoAccount(t, holder, kp.PrivateKey)
 
-	clawbackTx := newClawbackTokenTransaction(holder, authority, *tok)
+	clawbackTx := newClawbackTokenTransaction(holder, authority, *tok, authority.GetNonce())
 	require.NoError(t, holder.appendTransaction(clawbackTx))
 	require.NoError(t, authority.appendTransaction(clawbackTx))
 
@@ -516,7 +664,7 @@ func TestFreezeTokenSetsFrozenFlag(t *testing.T) {
 	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
 	mbrBefore := authority.mbr
 
-	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	require.NoError(t, authority.appendTransaction(freezeTx))
 	require.NoError(t, holder.appendTransaction(freezeTx))
 
@@ -532,7 +680,7 @@ func TestFreezeTokenFailsWithoutFreezeAddress(t *testing.T) {
 	tok := testMintTokenIntoAccount(t, holder, kp.PrivateKey)
 	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
 
-	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	require.NoError(t, authority.appendTransaction(freezeTx), "authority side succeeds (just locks MBR)")
 	err := holder.appendTransaction(freezeTx)
 	assert.Error(t, err, "holder should reject freeze when token has no freeze address")
@@ -550,7 +698,7 @@ func TestFreezeTokenFailsForWrongAuthority(t *testing.T) {
 
 	require.NoError(t, wrongAuthority.appendTransaction(newMintTransaction(wrongAuthority, MBR_FREEZE_COST)))
 
-	freezeTx := newFreezeTokenTransaction(wrongAuthority, holder, tok.ID())
+	freezeTx := newFreezeTokenTransaction(wrongAuthority, holder, tok.ID(), wrongAuthority.GetNonce())
 	require.NoError(t, wrongAuthority.appendTransaction(freezeTx))
 	err := holder.appendTransaction(freezeTx)
 	assert.Error(t, err, "holder should reject freeze when wrong authority signs")
@@ -565,7 +713,7 @@ func TestFreezeTokenFailsInsufficientMBRBalance(t *testing.T) {
 	require.NoError(t, holder.appendTransaction(newMintTransaction(holder, MBR_TOKEN_COST)))
 	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
 
-	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	err := authority.appendTransaction(freezeTx)
 	assert.Error(t, err, "freeze should fail when authority has insufficient balance for MBR_FREEZE_COST")
 }
@@ -582,7 +730,7 @@ func TestRollbackFreezeTokenRestoresState(t *testing.T) {
 
 	mbrBefore := authority.mbr
 
-	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	require.NoError(t, authority.appendTransaction(freezeTx))
 	require.NoError(t, holder.appendTransaction(freezeTx))
 
@@ -606,7 +754,7 @@ func TestUnfreezeTokenClearsFrozenFlag(t *testing.T) {
 	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
 
 	// Freeze first
-	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	require.NoError(t, authority.appendTransaction(freezeTx))
 	require.NoError(t, holder.appendTransaction(freezeTx))
 	require.True(t, holder.tokenStore[tok.ID()].frozen)
@@ -614,7 +762,7 @@ func TestUnfreezeTokenClearsFrozenFlag(t *testing.T) {
 	mbrAfterFreeze := authority.mbr
 
 	// Now unfreeze
-	unfreezeTx := newUnfreezeTokenTransaction(authority, holder, tok.ID())
+	unfreezeTx := newUnfreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	require.NoError(t, authority.appendTransaction(unfreezeTx))
 	require.NoError(t, holder.appendTransaction(unfreezeTx))
 
@@ -632,13 +780,13 @@ func TestRollbackUnfreezeTokenRestoresState(t *testing.T) {
 	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
 	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
 
-	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	require.NoError(t, authority.appendTransaction(freezeTx))
 	require.NoError(t, holder.appendTransaction(freezeTx))
 
 	mbrAfterFreeze := authority.mbr
 
-	unfreezeTx := newUnfreezeTokenTransaction(authority, holder, tok.ID())
+	unfreezeTx := newUnfreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	require.NoError(t, authority.appendTransaction(unfreezeTx))
 	require.NoError(t, holder.appendTransaction(unfreezeTx))
 
@@ -663,12 +811,12 @@ func TestTransferFrozenTokenFails(t *testing.T) {
 	require.NoError(t, holder.appendTransaction(newMintTokenTransaction(holder, tok)))
 	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
 
-	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	require.NoError(t, authority.appendTransaction(freezeTx))
 	require.NoError(t, holder.appendTransaction(freezeTx))
 
 	// Attempt transfer of frozen token
-	transferTx := newTransferTokenTransaction(holder, receiver, tok)
+	transferTx := newTransferTokenTransaction(holder, receiver, tok, holder.GetNonce())
 	err := holder.appendTransaction(transferTx)
 	assert.Error(t, err, "transfer of frozen token should fail")
 	assert.Contains(t, err.Error(), "frozen", "error should mention frozen")
@@ -688,12 +836,12 @@ func TestClawbackFrozenTokenSucceeds(t *testing.T) {
 	require.NoError(t, authority.appendTransaction(newMintTransaction(authority, MBR_FREEZE_COST)))
 
 	// Freeze the token
-	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID())
+	freezeTx := newFreezeTokenTransaction(authority, holder, tok.ID(), authority.GetNonce())
 	require.NoError(t, authority.appendTransaction(freezeTx))
 	require.NoError(t, holder.appendTransaction(freezeTx))
 
 	// Clawback should succeed even when frozen (no frozen check in handleClawbackTokenTx)
-	clawbackTx := newClawbackTokenTransaction(holder, authority, *tok)
+	clawbackTx := newClawbackTokenTransaction(holder, authority, *tok, authority.GetNonce())
 	require.NoError(t, holder.appendTransaction(clawbackTx))
 	require.NoError(t, authority.appendTransaction(clawbackTx))
 
@@ -714,7 +862,7 @@ func TestRollbackTransferTokenRestoresSenderToken(t *testing.T) {
 	require.NoError(t, sender.appendTransaction(mintTx))
 
 	// Attempt a transfer without the receiver having an authorization slot.
-	transferTx := newTransferTokenTransaction(sender, receiver, tok)
+	transferTx := newTransferTokenTransaction(sender, receiver, tok, sender.GetNonce())
 
 	// Sender side succeeds (removes token from tokenStore).
 	require.NoError(t, sender.appendTransaction(transferTx))

@@ -246,21 +246,22 @@ func TestTransferTokenTransactionFields(t *testing.T) {
 	sender, receiver := testCreateTwoAccounts(t)
 	token := &Token{}
 
-	tx := newTransferTokenTransaction(sender, receiver, token)
+	tx := newTransferTokenTransaction(sender, receiver, token, 0)
 
 	require.NotNil(t, tx)
 	assert.Equal(t, TransferToken, tx.Type())
 	assert.Equal(t, sender, tx.Sender())
 	assert.Equal(t, receiver, tx.Receiver())
 	assert.Equal(t, token, tx.Token())
+	assert.Equal(t, uint64(0), tx.Nonce())
 	assert.NotEqual(t, ScalegraphId{}, tx.ID(), "transaction ID should not be zero value")
 }
 
 func TestTransferTokenTransactionUniqueIDs(t *testing.T) {
 	sender, receiver := testCreateTwoAccounts(t)
 
-	tx1 := newTransferTokenTransaction(sender, receiver, &Token{})
-	tx2 := newTransferTokenTransaction(sender, receiver, &Token{})
+	tx1 := newTransferTokenTransaction(sender, receiver, &Token{}, 0)
+	tx2 := newTransferTokenTransaction(sender, receiver, &Token{}, 1)
 
 	assert.NotEqual(t, tx1.ID(), tx2.ID(), "two transfer token transactions should have unique IDs")
 }
@@ -272,7 +273,7 @@ func TestAuthorizeTokenTransferTransactionFields(t *testing.T) {
 	tokenOwner, _ := testCreateAccount(t)
 	tokenId := "some-token-id"
 
-	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	tx := newAuthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId, 0)
 
 	require.NotNil(t, tx)
 	assert.Equal(t, AuthorizeTokenTransfer, tx.Type())
@@ -288,7 +289,7 @@ func TestBurnTokenTransactionProperties(t *testing.T) {
 	owner, _ := testCreateAccount(t)
 	tokenID := "some-token-id"
 
-	tx := newBurnTokenTransaction(owner, tokenID)
+	tx := newBurnTokenTransaction(owner, tokenID, 0)
 
 	require.NotNil(t, tx)
 	assert.Equal(t, BurnToken, tx.Type())
@@ -305,7 +306,7 @@ func TestUnauthorizeTokenTransferTransactionProperties(t *testing.T) {
 	tokenOwner, _ := testCreateAccount(t)
 	tokenId := "some-token-id"
 
-	tx := newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId)
+	tx := newUnauthorizeTokenTransferTransaction(authorizer, tokenOwner, &tokenId, 0)
 
 	require.NotNil(t, tx)
 	assert.Equal(t, UnauthorizeTokenTransfer, tx.Type())
@@ -322,7 +323,7 @@ func TestClawbackTokenTransactionProperties(t *testing.T) {
 	to, _ := testCreateAccount(t)   // clawback authority (receiver)
 	token := Token{}
 
-	tx := newClawbackTokenTransaction(from, to, token)
+	tx := newClawbackTokenTransaction(from, to, token, 0)
 
 	require.NotNil(t, tx)
 	assert.Equal(t, ClawbackTokenTransfer, tx.Type())
@@ -339,7 +340,7 @@ func TestFreezeTokenTransactionProperties(t *testing.T) {
 	holder, _ := testCreateAccount(t)
 	tokenID := "some-token-id"
 
-	tx := newFreezeTokenTransaction(authority, holder, tokenID)
+	tx := newFreezeTokenTransaction(authority, holder, tokenID, 0)
 
 	require.NotNil(t, tx)
 	assert.Equal(t, FreezeToken, tx.Type())
@@ -356,7 +357,7 @@ func TestUnfreezeTokenTransactionProperties(t *testing.T) {
 	holder, _ := testCreateAccount(t)
 	tokenID := "some-token-id"
 
-	tx := newUnfreezeTokenTransaction(authority, holder, tokenID)
+	tx := newUnfreezeTokenTransaction(authority, holder, tokenID, 0)
 
 	require.NotNil(t, tx)
 	assert.Equal(t, UnfreezeToken, tx.Type())

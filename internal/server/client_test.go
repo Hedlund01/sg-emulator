@@ -968,7 +968,7 @@ func TestClient_FreezeToken_Success(t *testing.T) {
 	tokenID := mintResp.TokenID
 
 	// Freeze
-	freezeEnv, err := createSignedFreezeToken(ctx, srv, authority.ID(), holder.ID(), tokenID)
+	freezeEnv, err := createSignedFreezeToken(ctx, srv, client, authority.ID(), holder.ID(), tokenID)
 	if err != nil {
 		t.Fatalf("Failed to create signed freeze: %v", err)
 	}
@@ -978,7 +978,7 @@ func TestClient_FreezeToken_Success(t *testing.T) {
 	}
 
 	// Transfer should fail (token is frozen, no auth slot either)
-	transferEnv, err := createSignedTransferToken(ctx, srv, holder.ID(), authority.ID(), tokenID)
+	transferEnv, err := createSignedTransferToken(ctx, srv, client, holder.ID(), authority.ID(), tokenID)
 	if err != nil {
 		t.Fatalf("Failed to create signed transfer: %v", err)
 	}
@@ -1021,7 +1021,7 @@ func TestClient_UnfreezeToken_AfterFreeze(t *testing.T) {
 	}
 	tokenID := mintResp.TokenID
 
-	freezeEnv, err := createSignedFreezeToken(ctx, srv, authority.ID(), holder.ID(), tokenID)
+	freezeEnv, err := createSignedFreezeToken(ctx, srv, client, authority.ID(), holder.ID(), tokenID)
 	if err != nil {
 		t.Fatalf("Failed to sign freeze: %v", err)
 	}
@@ -1029,7 +1029,7 @@ func TestClient_UnfreezeToken_AfterFreeze(t *testing.T) {
 		t.Fatalf("FreezeTokenSigned failed: %v", err)
 	}
 
-	unfreezeEnv, err := createSignedUnfreezeToken(ctx, srv, authority.ID(), holder.ID(), tokenID)
+	unfreezeEnv, err := createSignedUnfreezeToken(ctx, srv, client, authority.ID(), holder.ID(), tokenID)
 	if err != nil {
 		t.Fatalf("Failed to sign unfreeze: %v", err)
 	}
@@ -1072,7 +1072,7 @@ func TestClient_ClawbackToken_Success(t *testing.T) {
 	}
 	tokenID := mintResp.TokenID
 
-	clawbackEnv, err := createSignedClawbackToken(ctx, srv, authority.ID(), holder.ID(), tokenID)
+	clawbackEnv, err := createSignedClawbackToken(ctx, srv, client, authority.ID(), holder.ID(), tokenID)
 	if err != nil {
 		t.Fatalf("Failed to sign clawback: %v", err)
 	}
@@ -1119,7 +1119,7 @@ func TestClient_FreezeToken_WrongAuthority(t *testing.T) {
 	tokenID := mintResp.TokenID
 
 	// Wrong authority tries to freeze — should fail
-	freezeEnv, err := createSignedFreezeToken(ctx, srv, wrongAuthority.ID(), holder.ID(), tokenID)
+	freezeEnv, err := createSignedFreezeToken(ctx, srv, client, wrongAuthority.ID(), holder.ID(), tokenID)
 	if err != nil {
 		t.Fatalf("Failed to sign freeze: %v", err)
 	}

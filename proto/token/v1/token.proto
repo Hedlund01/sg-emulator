@@ -18,7 +18,7 @@ message MintTokenPayload {
   string token_value       = 1 [(buf.validate.field).string = {min_len: 1}];
   string clawback_address  = 2; // optional; empty means no clawback authority
   string freeze_address    = 3; // optional; empty means no freeze authority
-  int64 nonce             = 4 [(buf.validate.field).int64 = {gt: 0}];
+  int64 nonce             = 4 [(buf.validate.field).int64 = {gte: 0}];
 }
 
 message SignedMintTokenEnvelope {
@@ -43,6 +43,7 @@ message TransferTokenPayload {
   string from     = 1 [(buf.validate.field).string = {min_len: 1}];
   string to       = 2 [(buf.validate.field).string = {min_len: 1}];
   string token_id = 3 [(buf.validate.field).string = {min_len: 1}];
+  int64  nonce    = 4 [(buf.validate.field).int64 = {gte: 0}];
 }
 
 message SignedTransferTokenEnvelope {
@@ -67,6 +68,7 @@ message AuthorizeTokenTransferPayload {
   string account_id    = 1 [(buf.validate.field).string = {min_len: 1}];
   string token_id      = 2 [(buf.validate.field).string = {min_len: 1}];
   string token_owner_id = 3 [(buf.validate.field).string = {min_len: 1}];
+  int64  nonce         = 4 [(buf.validate.field).int64 = {gte: 0}];
 }
 
 message SignedAuthorizeTokenTransferEnvelope {
@@ -91,6 +93,7 @@ message UnauthorizeTokenTransferPayload {
   string account_id    = 1 [(buf.validate.field).string = {min_len: 1}];
   string token_id      = 2 [(buf.validate.field).string = {min_len: 1}];
   string token_owner_id = 3 [(buf.validate.field).string = {min_len: 1}];
+  int64  nonce         = 4 [(buf.validate.field).int64 = {gte: 0}];
 }
 
 message SignedUnauthorizeTokenTransferEnvelope {
@@ -114,6 +117,7 @@ message UnauthorizeTokenTransferResponse {
 message BurnTokenPayload {
   string account_id = 1 [(buf.validate.field).string = {min_len: 1}];
   string token_id   = 2 [(buf.validate.field).string = {min_len: 1}];
+  int64  nonce      = 3 [(buf.validate.field).int64 = {gte: 0}];
 }
 
 message SignedBurnTokenEnvelope {
@@ -138,6 +142,7 @@ message ClawbackTokenPayload {
   string from     = 1 [(buf.validate.field).string = {min_len: 1}];
   string to       = 2 [(buf.validate.field).string = {min_len: 1}];
   string token_id = 3 [(buf.validate.field).string = {min_len: 1}];
+  int64  nonce    = 4 [(buf.validate.field).int64 = {gte: 0}];
 }
 
 message SignedClawbackTokenEnvelope {
@@ -162,6 +167,7 @@ message FreezeTokenPayload {
   string freeze_authority = 1 [(buf.validate.field).string = {min_len: 1}];
   string token_holder     = 2 [(buf.validate.field).string = {min_len: 1}];
   string token_id         = 3 [(buf.validate.field).string = {min_len: 1}];
+  int64  nonce            = 4 [(buf.validate.field).int64 = {gte: 0}];
 }
 
 message SignedFreezeTokenEnvelope {
@@ -186,6 +192,7 @@ message UnfreezeTokenPayload {
   string freeze_authority = 1 [(buf.validate.field).string = {min_len: 1}];
   string token_holder     = 2 [(buf.validate.field).string = {min_len: 1}];
   string token_id         = 3 [(buf.validate.field).string = {min_len: 1}];
+  int64  nonce            = 4 [(buf.validate.field).int64 = {gte: 0}];
 }
 
 message SignedUnfreezeTokenEnvelope {
